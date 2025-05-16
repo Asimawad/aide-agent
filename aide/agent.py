@@ -462,16 +462,12 @@ class Agent:
 
         parent_node = self.search_policy()
 
-        parent_type = "None" if parent_node is None else parent_node.stage_name
-
         draft_flag = False
-        critique_flag=False
         if parent_node is None:
             draft_flag = True
             node_stage = "draft"
             result_node = self._draft(parent_node)
         elif parent_node.is_buggy:
-            critique_flag=True
             node_stage = "debug"
             result_node = self._debug(parent_node)
 
@@ -481,9 +477,8 @@ class Agent:
 
 
 
+        logger.info(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}")
         exec_start_time = time.time()
-
-        logger.info(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}",extra={"verbose": True})
 
         exec_result = exec_callback(
             result_node.code,
@@ -491,7 +486,6 @@ class Agent:
         )
         # Flag if execution threw any exception
         exec_duration = time.time() - exec_start_time
-        print(f"[Timing] exec_callback: {exec_duration:.3f}s")
 
         # Parse execution result
         logger.info(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
@@ -529,6 +523,24 @@ class Agent:
                     f"Error during self-reflection for node {result_node.id}: {e}",
                     exc_info=True,
                 )
+        if reflection_applied:
+            logger.info(f"Agent is executing the reflect code for node {result_node.id}")
+            exec_start_time = time.time()
+
+            exec_result = exec_callback(
+                result_node.code,
+                reset_session=True
+            )
+            # Flag if execution threw any exception
+            exec_duration = time.time() - exec_start_time
+
+            # Parse execution result
+            logger.info(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
+
+            result_node = self.parse_exec_result(
+                node=result_node, exec_result=exec_result,
+                )
+
         if self._prev_buggy and not result_node.is_buggy:
             result_node.effective_debug_step = True
             if reflection_applied:

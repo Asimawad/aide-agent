@@ -45,12 +45,12 @@ class Node(DataClassJsonMixin):
     # post-execution result analysis (findings/feedback)
     analysis: str = field(default=None, kw_only=True)  # type: ignore
     metric: MetricValue = field(default=None, kw_only=True)  # type: ignore
-    code_quality: float = field(default=None, kw_only=True)  # type: ignore
-    gold_medal: bool = field(default=None, kw_only=True)  # type: ignore
-    silver_medal: bool = field(default=None, kw_only=True)  # type: ignore
-    bronze_medal: bool = field(default=None, kw_only=True)  # type: ignore
-    above_median: bool = field(default=None, kw_only=True)  # type: ignore
-    effective_debug_step: bool = field(default=None, kw_only=True)  # type: ignore
+    code_quality: float = field(default=0, kw_only=True)  # type: ignore
+    gold_medal: bool = field(default=0, kw_only=True)  # type: ignore
+    silver_medal: bool = field(default=0, kw_only=True)  # type: ignore
+    bronze_medal: bool = field(default=0, kw_only=True)  # type: ignore
+    above_median: bool = field(default=0, kw_only=True)  # type: ignore
+    effective_debug_step: bool = field(default=0, kw_only=True)  # type: ignore
     # whether the agent decided that the code is buggy
     # -> always True if exc_type is not None or no valid metric
     is_buggy: bool = field(default=None, kw_only=True)  # type: ignore

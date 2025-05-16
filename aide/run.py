@@ -99,26 +99,6 @@ def journal_to_string_tree(journal: Journal) -> str:
 
     return tree_str
 
-# # Use the global logger
-# logger.setLevel(logging.INFO)
-# logger.propagate = False
-
-# class WandbMirrorHandler(logging.Handler):
-#     def __init__(self, target_handler):
-#         # pick up the same level & formatter
-#         super().__init__(target_handler.level)
-#         self.target = target_handler
-#         self.setFormatter(target_handler.formatter)
-
-#     def emit(self, record):
-#         # 1) let your original handler do its thing
-#         self.target.emit(record)
-#         # 2) then send the *same* formatted message to wandb
-#         if wandb.run:  # make sure init() has happened
-#             msg = self.format(record)
-#             wandb.log({"log": msg}, step=wandb.run.step)
-
-
 
 def run():    
     cfg = load_cfg()
@@ -267,15 +247,17 @@ def run():
                 pbar.update(1)
 
             # on the last step, print the tree
-            # if i == cfg.agent.steps -1:
-            logger.debug(journal_to_string_tree(journal))
-            save_run(cfg, journal)
+
+        logger.info(journal_to_string_tree(journal))
+        save_run(cfg, journal)
 
     finally:  # Add finally block - This block runs no matter what.
         interpreter.cleanup_session() 
 
         # # Check if a W&B run was successfully started
         if wandb_run:
+            save_logs_to_wandb()
+
             logger.info("Finishing W&B Run...")
             try:
                 wo_step = None
@@ -292,13 +274,13 @@ def run():
                         wo_step = node.step if wo_step is None else wo_step
                         no_of_csvs+=1
                         avg_code_quality+=node.code_quality
-                        if node.metric.value>=competition_benchmarks[cfg.competition_name]["gold_threshold"]:
+                        if node.metric.value>=competition_benchmarks["gold_threshold"]:
                             gold_medals+=1
-                        elif node.metric.value>=competition_benchmarks[cfg.competition_name]["silver_threshold"]:
+                        elif node.metric.value>=competition_benchmarks["silver_threshold"]:
                             silver_medals+=1
-                        elif node.metric.value>=competition_benchmarks[cfg.competition_name]["bronze_threshold"]:
+                        elif node.metric.value>=competition_benchmarks["bronze_threshold"]:
                             bronze_medals+=1
-                        if node.metric.value>=competition_benchmarks[cfg.competition_name]["median_threshold"]:
+                        if node.metric.value>=competition_benchmarks["median_threshold"]:
                             above_amedian+=1
                         if node.effective_debug_step:
                             effective_debug_steps+=1
@@ -327,7 +309,6 @@ def run():
                     shutil.rmtree(cfg.workspace_dir/"input")
                 except:
                     pass
-                save_logs_to_wandb()
                 wandb_run.finish()
             
                 logger.info("W&B Run finished.")
