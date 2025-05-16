@@ -61,8 +61,7 @@ class AgentConfig:
     data_preview: bool
     convert_system_to_user: bool
     obfuscate: bool
-    ITS_Strategy: str  # Can be "self-reflection" or "mcts"
-
+    ITS_Strategy: str   
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
@@ -92,7 +91,7 @@ class Config(Hashable):
     log_dir: Path
     log_level: str
     workspace_dir: Path
-
+    competition_name: str
     preprocess_data: bool
     copy_data: bool
 
@@ -140,6 +139,10 @@ def prep_cfg(cfg: Config):
             "You must provide either a description of the task goal (`goal=...`) or a path to a plaintext file containing the description (`desc_file=...`)."
         )
 
+    # Default competition_name to the name of the data_dir if not provided
+    if cfg.competition_name is None:
+        cfg.competition_name = Path(cfg.data_dir).parent.name
+
     if cfg.data_dir.startswith("example_tasks/"):
         cfg.data_dir = Path(__file__).parent.parent / cfg.data_dir
     cfg.data_dir = Path(cfg.data_dir).resolve()
@@ -156,9 +159,9 @@ def prep_cfg(cfg: Config):
     # generate experiment name and prefix with consecutive index
     if "/" in cfg.agent.code.model:
         org, model = parse_model_id(cfg.agent.code.model)
-        experiement_id = org+"_"+ model+"_"+ str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
+        experiement_id = org+"_"+ model+"_"+ str(cfg.competition_name or str(cfg.data_dir.name))+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
     else:
-        experiement_id = cfg.agent.code.model+"_"+ str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
+        experiement_id = cfg.agent.code.model+"_"+cfg.competition_name or str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
     cfg.exp_name = cfg.exp_name or experiement_id # coolname.generate_slug(3)
 
     cfg.log_dir = (top_log_dir / cfg.exp_name).resolve()

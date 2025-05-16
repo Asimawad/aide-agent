@@ -17,7 +17,7 @@ except Exception as e:
 
 
 WANDB_ENTITY = "asim_awad" 
-WANDB_PROJECT = "MLE_BENCH" 
+WANDB_PROJECT = "MLE_BENCH_AIDE" 
 logger = logging.getLogger("aide")
 # This is CRITICAL. Adjust these filters to select the specific set of runs
 

@@ -1,5 +1,5 @@
 """Backend for OpenAI API."""
-
+import time
 import json
 import logging
 import time
@@ -29,13 +29,13 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
 
 from rich.console import Console
 console = Console()
+
 @once
 def _setup_openai_client():
     if not os.getenv("OPENAI_API_KEY"):
         os.environ["OPENAI_API_KEY"] = input("Please enter your OpenAI API key: ")
     global _client
     _client = openai.OpenAI(max_retries=0)
-
 def filter_model_kwargs(model: str, kwargs: dict) -> dict:
     """
     Filter and adapt kwargs based on the model being used to prevent invalid parameters.
@@ -109,7 +109,6 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
     removed_params = set(filtered_kwargs.keys()) - set(result.keys())
     if removed_params:
         logger.debug(f"Removed invalid parameters for model {model}: {removed_params}", extra={"verbose": True})
-
     return result
 def query(
     system_message: str | None,
@@ -120,12 +119,15 @@ def query(
     convert_system_to_user: bool = False,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:
+
+    t0 = time.time()
     _setup_openai_client()
-    
-    # Filter kwargs based on the model being used
+    logger.debug(f"[Timing] _setup_openai_client end: {time.time() - t0:.3f}s")
+    # Filter kwargs bas ed on the model being used
+    t0 = time.time()
     model = model_kwargs.get("model", "")
     filtered_kwargs = filter_model_kwargs(model, model_kwargs)
-    
+
     messages = opt_messages_to_list(
         system_message, user_message, convert_system_to_user=convert_system_to_user
     )
@@ -152,7 +154,7 @@ def query(
     req_time = time.time() - t0
 
     choice = completion.choices[0]
-
+    logger.debug(f"[Timing] backoff_create end: {time.time() - t0:.3f}s")
     if func_spec is None:
         output = choice.message.content
     else:

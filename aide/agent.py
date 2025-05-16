@@ -22,8 +22,11 @@ try:
 except ImportError:
     wandb = None
 
-# logger = logging.getLogger("aide.agent")  # A separate logger for agent.py
-# logger.setLevel(logging.DEBUG)
+
+logger = logging.getLogger("aide")  # A separate logger for agent.py
+
+
+
 console = Console()
 def format_time(time_in_sec: int):
     return f"{time_in_sec // 3600}hrs {(time_in_sec % 3600) // 60}mins {time_in_sec % 60}secs"
@@ -87,7 +90,8 @@ class Agent:
         task_desc: str,
         cfg: Config,
         journal: Journal,
-        wandb_run=None
+        wandb_run=None,
+        competition_benchmarks=None
     ):
         super().__init__()
         self.task_desc = task_desc
@@ -96,19 +100,19 @@ class Agent:
         self.journal = journal
         self.data_preview: str | None = None
         self.start_time = time.time()
+        self.current_step = 0
         self._prev_buggy: bool = False
         self.wandb_run = wandb_run
-        try:
-            self.competition_name=str(self.cfg.data_dir).split("/")[-1]
-        except:
-            pass
+        self.competition_benchmarks = competition_benchmarks
+        self.competition_name = self.cfg.competition_name
+
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
         search_cfg = self.acfg.search
 
         # initial drafting
         if len(self.journal.draft_nodes) < search_cfg.num_drafts:
-            logger.debug("[search policy] drafting new node (not enough drafts)")
+            logger.info("[search policy] drafting new node (not enough drafts)")
             return None
 
         # debugging
@@ -121,18 +125,18 @@ class Agent:
             ]
             if debuggable_nodes:
                 node_to_debug = random.choice(debuggable_nodes)
-                logger.debug(f"[search policy] debugging node {node_to_debug.id}")
+                logger.info(f"[search policy] debugging node {node_to_debug.id}")
                 return node_to_debug
 
         # back to drafting if no nodes to improve
         good_nodes = self.journal.good_nodes
         if not good_nodes:
-            logger.debug("[search policy] drafting new node (no good nodes)")
+            logger.info("[search policy] drafting new node (no good nodes)")
             return None
 
         # greedy
         greedy_node = self.journal.get_best_node()
-        logger.debug(f"[search policy] greedy node selected: node {greedy_node.id}")
+        logger.info(f"[search policy] greedy node selected: node {greedy_node.id}")
         return greedy_node
 
     @property
@@ -193,11 +197,11 @@ class Agent:
         system_prompt = {
             "SYSTEM":"You are a Kaggle Grandmaster. you can plan , implement, debug and improve and machine learning engineering code,",
             "user_instructions": {
-               "Possible Questions you will face": "1. you will be asked to either come up with a plan and a code to solve the kaggle competetion, or debug a code or improve a working code to get better results",
+               "Possible Questions you will face": "You will be asked to either come up with a plan and a code to solve the kaggle competetion, or debug a code or improve a working code to get better results",
                "How to answer the user": "Whenever you answer, always: 1. Write a \"PLAN:\" section in plain text—3–5 concise bullet points. 2. Then write a \"CODE:\" section containing exactly one fenced Python block: ```python"
             }
         }
-   # Your code here
+
         completion_text = None
         execution_summary= None
         for _ in range(retries):
@@ -225,7 +229,7 @@ class Agent:
                 current_step=self.current_step,
                 convert_system_to_user=self.acfg.convert_system_to_user,
             )
-            # for debugging -> delete later
+
 
             code = extract_code(completion_text)
             nl_text = extract_text_up_to_code(completion_text)
@@ -234,13 +238,12 @@ class Agent:
                 # merge all code blocks into a single string
                 return nl_text, code , "execution_summary"
 
-            logger.debug("Plan + code extraction failed, retrying...")
-        logger.debug("Final plan + code extraction attempt failed, giving up...")
+            logger.info("Plan + code extraction failed, retrying...")
+        logger.info("Final plan + code extraction attempt failed, giving up...")
         return "", completion_text, "None"  # type: ignore
-
     def _draft(self, parent_node = None) -> Node:
-        # console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
-        logger.debug(f"Agent step {self.current_step}: Generating code (parent type: {parent_node})", extra={"verbose": True})
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
+        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node})", extra={"verbose": True})
         introduction = (
             "You are a Kaggle grandmaster attending a competition. "
             "In order to win this competition, you need to come up with an excellent and creative plan "
@@ -280,17 +283,18 @@ class Agent:
         formatted_extracted_code = format_code(code)
         
         if formatted_extracted_code:
-            # console.print(f"[bold green]Extracted a valid Code ✓ [/bold green]")
-            logger.debug(f"[bold green]Extracted a valid Code ✓ [/bold green]")
-            logger.debug(f"{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}",  extra={"verbose": True})
-            # console.print("-" * 20)
+            console.print(f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]")
+            console.print(Syntax(formatted_extracted_code, "python", theme="default", line_numbers=True))
+            logger.info(f"{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}",  extra={"verbose": True})
+            console.print("-" * 60)
         new_node = Node(plan=plan, code=code , summary=execution_summary)
-        logger.debug(f"Drafted new node {new_node.id}",extra={"verbose": True})
+        logger.info(f"Drafted new node {new_node.id}",extra={"verbose": True})
         return new_node 
 
+
     def _improve(self, parent_node: Node) -> Node:
-        # console.rule(f"[cyan]Stage : Improving")
-        logger.debug(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})",extra={"verbose": True})
+        console.rule(f"[cyan]Stage : Improving")
+        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})",extra={"verbose": True})
         introduction = (
             "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
             "solution below and should improve it in order to further increase the (test time) performance. "
@@ -329,12 +333,12 @@ class Agent:
 
         plan, code , _ = self.plan_and_code_query(prompt,excute=False)
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        logger.debug(f"Improved node {parent_node.id} to create new node {new_node.id}")
+        logger.info(f"Improved node {parent_node.id} to create new node {new_node.id}")
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
         console.rule(f"[cyan]Stage : Debugging")
-        logger.debug(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})", extra={"verbose": True})
+        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})", extra={"verbose": True})
         introduction = (
             "You are a Kaggle grandmaster attending a competition. "
             "Your previous solution had a bug and/or did not produce a submission.csv, "
@@ -371,32 +375,34 @@ class Agent:
 
         plan, code, _ = self.plan_and_code_query(prompt,excute=False)
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        logger.debug(f"Debugged node {parent_node.id} to create new node {new_node.id}")
+        logger.info(f"Debugged node {parent_node.id} to create new node {new_node.id}")
         return new_node
 
-    def reflect(self, code: str) -> tuple[str, str]:
+    def reflect(self, node: Node) -> tuple[str, str]:
         """
         Performs a two-step self-reflection using the external utility function.
 
         Returns:
             Tuple: (reflection_plan, revised_code)
         """
-        logger.debug("Initiating two-step self-reflection...")
+        logger.info("Initiating two-step self-reflection...")
         reflection_plan, revised_code = perform_two_step_reflection(
-            code=code,
+            code=node.code,
+            analysis=node.analysis,
+            term_out=node.term_out,
             task_desc=self.task_desc,
             model_name=self.acfg.code.model,
             temperature=self.acfg.code.temp,
             convert_system_to_user=self.acfg.convert_system_to_user,
-            query_func=query,  # Pass the imported query function
-            wrap_code_func=wrap_code,  # Pass the imported wrap_code function
-            extract_code_func=extract_code,  # Pass the imported extract_code function
+            query_func=query,  # 
+            wrap_code_func=wrap_code,  # 
+            extract_code_func=extract_code,  # 
         )
 
-        if revised_code != code and revised_code:  # Check if code actually changed
-            logger.debug("Self-reflection resulted in code changes.")
+        if revised_code != node.code and revised_code:  # Check if code actually changed
+            logger.info("Self-reflection resulted in code changes.")
         elif reflection_plan == "No specific errors found requiring changes.":
-            logger.debug("Self-reflection found no errors requiring changes.")
+            logger.info("Self-reflection found no errors requiring changes.")
         else:
             logger.warning(
                 "Self-reflection finished, but revised code is same as original or empty."
@@ -411,22 +417,22 @@ class Agent:
         Returns:
             Tuple: (reflection_plan, revised_code)
         """
-        logger.debug("Initiating two-step self-reflection...")
+        logger.info("Initiating two-step self-reflection...")
         reflection_plan, revised_code = perform_two_step_reflection(
             code=code,
             task_desc=self.task_desc,
             model_name=self.acfg.code.model,
             temperature=self.acfg.code.temp,
             convert_system_to_user=self.acfg.convert_system_to_user,
-            query_func=query,  # Pass the imported query function
-            wrap_code_func=wrap_code,  # Pass the imported wrap_code function
-            extract_code_func=extract_code,  # Pass the imported extract_code function
+            query_func=query,  # 
+            wrap_code_func=wrap_code,  # 
+            extract_code_func=extract_code,  #
         )
 
         if revised_code != code and revised_code:  # Check if code actually changed
-            logger.debug("Self-reflection resulted in code changes.")
+            logger.info("Self-reflection resulted in code changes.")
         elif reflection_plan == "No specific errors found requiring changes.":
-            logger.debug("Self-reflection found no errors requiring changes.")
+            logger.info("Self-reflection found no errors requiring changes.")
         else:
             logger.warning(
                 "Self-reflection finished, but revised code is same as original or empty."
@@ -437,17 +443,25 @@ class Agent:
         self,
     ):
         self.data_preview = data_preview.generate(self.cfg.workspace_dir)
+        logger.info(f"Data preview updated to {self.data_preview}")
 
-    def step(self, exec_callback: ExecCallbackType, current_step_number: int): # Add current_step_number
+    def step(self, exec_callback: ExecCallbackType, current_step_number: int): 
+
+        t0 = time.time()
+
         # clear the submission dir from previous steps
         submission_dir = self.cfg.workspace_dir / "submission" # Define once
         shutil.rmtree(submission_dir, ignore_errors=True)
         submission_dir.mkdir(exist_ok=True)
+
+        last = time.time()
         self.current_step = current_step_number
+
         if not self.journal.nodes or self.data_preview is None:
             self.update_data_preview()
 
         parent_node = self.search_policy()
+
         parent_type = "None" if parent_node is None else parent_node.stage_name
 
         draft_flag = False
@@ -460,123 +474,16 @@ class Agent:
             critique_flag=True
             node_stage = "debug"
             result_node = self._debug(parent_node)
-            
+
         else:
             node_stage = "improve"
             result_node = self._improve(parent_node)
-  
-        # Log plan and initial code *before* reflection
-        plan ="\n".join(textwrap.wrap(result_node.plan, width=120))
-        step_log_data = {
-            f"{node_stage}/plan": wandb.Html(f"<pre>{plan}</pre>"),}
-        
-
-        # Apply reflection if applicable
-        reflection_applied = False
-        if draft_flag and self.acfg.ITS_Strategy=="self-reflection":  # Or based on your reflection strategy
-            try:
-                # console.rule(f"[cyan]Stage : Self Reflection")
-                reflection_plan, reflection_code = self.reflect(code=result_node.code)
-                if (
-                    reflection_code
-                    and reflection_code.strip()
-                    and reflection_code != result_node.code
-                ):
-                    result_node.code = reflection_code
-                    logger.debug(
-                        f"Node {result_node.id} self-reflected and updated code"
-                    )
-                    reflection_applied = True
-                    # Log reflection results
-                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>") 
-                    if self.wandb_run and self.cfg.wandb.log_code:
-                         reflected_code_to_log = reflection_code[:10000] + ("\n..." if len(reflection_code) > 10000 else "")
-                        #  step_log_data[f"{node_stage}/reflected_code"] = wandb.Html(f"<pre>{reflected_code_to_log}</pre>") 
-
-                elif reflection_plan != "No specific errors found requiring changes.":
-                    logger.debug(
-                        f"Node {result_node.id} self-reflection completed, but no changes applied."
-                    )
-                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>")  # Log even if no code change
-                else:
-                    message = "No errors found by reflection."
-                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{message}</pre>")  
 
 
-            except Exception as e:
-                logger.error(
-                    f"Error during self-reflection for node {result_node.id}: {e}",
-                    exc_info=True,
-                )
-        # if critique_flag and self.acfg.ITS_Strategy=="self-reflecon":  # Or based on your reflection strategy
-        #     try:
-        #             # console.rule(f"[cyan]Stage : Self Reflection")
-        #             reflection_plan, reflection_code = self.double_reflect(code=result_node.code)
-        #             if (
-        #                 reflection_code
-        #                 and reflection_code.strip()
-        #                 and reflection_code != result_node.code
-        #             ):
-        #                 result_node.code = reflection_code
-        #                 logger.debug(
-        #                     f"Node {result_node.id} self-reflected and updated code"
-        #                 )
-        #                 reflection_applied = True
 
-        #                 # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>") 
-        #                 if self.wandb_run and self.cfg.wandb.log_code:
-        #                     reflected_code_to_log = reflection_code[:10000] + ("\n..." if len(reflection_code) > 10000 else "")
-        #                     #  step_log_data[f"{node_stage}/reflected_code"] = wandb.Html(f"<pre>{reflected_code_to_log}</pre>") 
-
-        #             elif reflection_plan != "No specific errors found requiring changes.":
-        #                 logger.debug(
-        #                     f"Node {result_node.id} self-reflection completed, but no changes applied."
-        #                 )
-        #                 # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>")  # Log even if no code change
-        #             else:
-        #                 message = "No errors found by reflection."
-        #                 # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{message}</pre>")  
-
-
-        #     except Exception as e:
-        #         logger.error(
-        #             f"Error during self-reflection for node {result_node.id}: {e}",
-        #             exc_info=True,
-        #         )
-        # reflection_applied = False
-        # if exec_result.exc_type is not None:
-        #     logger.warning(f"Node {result_node.id} execution error: {exec_result.exc_type}")
-        #     if draft_flag and self.acfg.ITS_Strategy=="self-reflection":  # reflection strategy
-        #         try:
-        #             # console.rule(f"[cyan]Stage : Self Reflection")
-        #             _, reflection_code = self.reflect(code=result_node.code)
-        #             if (
-        #                 reflection_code
-        #                 and reflection_code.strip()
-        #                 and reflection_code != result_node.code
-        #             ):
-        #                 logger.debug(
-        #                     f"Node {result_node.id} self-reflected and updated code"
-        #                 )
-        #                 exec_result = exec_callback(
-        #                     reflection_code,
-        #                     reset_session=True
-        #                 )
-        #                 if exec_result.exc_type is not None:
-        #                     logger.warning(f"Node {result_node.id} execution error: {exec_result.exc_type}")
-        #                     reflection_applied = False
-        #                 else:
-        #                     result_node.code = reflection_code
-
-        #         except Exception as e:
-        #             logger.error(
-        #                 f"Error during self-reflection for node {result_node.id}: {e}",
-        #                 exc_info=True,
-        #             )
-     
         exec_start_time = time.time()
 
-        logger.debug(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}",extra={"verbose": True})
+        logger.info(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}",extra={"verbose": True})
 
         exec_result = exec_callback(
             result_node.code,
@@ -584,40 +491,125 @@ class Agent:
         )
         # Flag if execution threw any exception
         exec_duration = time.time() - exec_start_time
-        logger.debug(f"Code execution finished in {exec_duration:.2f}s")
+        print(f"[Timing] exec_callback: {exec_duration:.3f}s")
 
         # Parse execution result
-        logger.debug(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
+        logger.info(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
+
         result_node = self.parse_exec_result(
             node=result_node, exec_result=exec_result,
             )
         self._prev_buggy = result_node.is_buggy
-        loc = len(result_node.code.splitlines())
-        analysis ="\n".join(textwrap.wrap(result_node.analysis, width=120))
-        # Log execution and evaluation results
-        step_log_data.update({
+
+        # Apply reflection if applicable
+        reflection_applied = False
+        if draft_flag and self.acfg.ITS_Strategy=="self-reflection" and result_node.is_buggy:  
+            try:
+                console.rule(f"[cyan]Stage : Self Reflection")
+                reflection_plan, reflection_code = self.reflect(node=result_node)
+                if (
+                    reflection_code
+                    and reflection_code.strip()
+                    and reflection_code != result_node.code
+                ):
+                    result_node.code = reflection_code
+                    logger.info(
+                        f"Node {result_node.id} self-reflected and updated code"
+                    )
+                    reflection_applied = True
+
+                elif reflection_plan != "No specific errors found requiring changes.":
+                    logger.info(
+                        f"Node {result_node.id} self-reflection completed, but no changes applied."
+                    )
+                else:
+                    logger.info("No errors found by reflection.")
+            except Exception as e:
+                logger.error(
+                    f"Error during self-reflection for node {result_node.id}: {e}",
+                    exc_info=True,
+                )
+        if self._prev_buggy and not result_node.is_buggy:
+            result_node.effective_debug_step = True
+            if reflection_applied:
+                result_node.effective_reflection_step = True
+            else:
+                result_node.effective_reflection_step = False
+        else:
+            result_node.effective_debug_step = False
+            result_node.effective_reflection_step = False
+        self._prev_buggy = result_node.is_buggy
+
+        step_log_data=({
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
-            # Explicitly track current step for easy monitoring
             f"progress/current_step": current_step_number,
-            f"progress/total_steps": self.acfg.steps,
-            f"progress/completion_percentage": (current_step_number / self.acfg.steps) * 100,
             f"progress/competition_name":self.competition_name,
-
-            # This makes the 'exec/exception_type' column exist for *every* step.
-            "exec/exception_type": result_node.exc_type if  result_node.exc_type is not None else 0,
-
-            f"code/loc": loc,
+            "exec/exception_type": result_node.exc_type if  result_node.exc_type  else 0,
             f"code/estimated_quality":int(self._code_quality),
-            # f"exec/term_out": wandb.Html(f"<pre>{trim_long_string(result_node.term_out, threshold=2000, k=1000)}</pre>"),
-            f"eval/analysis": wandb.Html(f"<pre>{ analysis}</pre>") 
-            
+            f"eval/reflection_usage": 1 if reflection_applied and not result_node.is_buggy else 0,
+            f"eval/effective_debug_step": 1 if result_node.effective_debug_step else 0,
+            f"eval/effective_reflection_step": 1 if result_node.effective_reflection_step else 0,
         })
         if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             step_log_data[f"eval/validation_metric"] = result_node.metric.value
-
+            agent_validation_metrics = {'value': result_node.metric.value, 'step': current_step_number ,
+                                         'competition_name': self.competition_name,
+                                         "above_median": 1 if result_node.metric.value > self.competition_benchmarks["median_threshold"] else 0,
+                                         "gold_medal": 1 if result_node.metric.value > self.competition_benchmarks["gold_threshold"] else 0,
+                                         "silver_medal": 1 if result_node.metric.value > self.competition_benchmarks["silver_threshold"] else 0,
+                                         "bronze_medal": 1 if result_node.metric.value > self.competition_benchmarks["bronze_threshold"] else 0,
+                                         }
+            # --- Bar charts for threshold flags ---
+            # Above Median
+            self._above_median_flags = getattr(self, "_above_median_flags", [])
+            self._above_median_flags.append(agent_validation_metrics["above_median"])
+            above_true = sum(self._above_median_flags)
+            above_false = len(self._above_median_flags) - above_true
+            above_table = wandb.Table(
+                data=[["Above Median", above_true], ["Below Median", above_false]],
+                columns=["label","count"]
+            )
+            step_log_data["plots/above_median_bar"] = wandb.plot.bar(
+                above_table, "label", "count", title="Above Median Steps"
+            )
+            # Gold Medal
+            self._gold_medal_flags = getattr(self, "_gold_medal_flags", [])
+            self._gold_medal_flags.append(agent_validation_metrics["gold_medal"])
+            gold_true = sum(self._gold_medal_flags)
+            gold_false = len(self._gold_medal_flags) - gold_true
+            gold_table = wandb.Table(
+                data=[["Gold Medal", gold_true], ["No Gold Medal", gold_false]],
+                columns=["label","count"]
+            )
+            step_log_data["plots/gold_medal_bar"] = wandb.plot.bar(
+                gold_table, "label", "count", title="Gold Medal Steps"
+            )
+            # Silver Medal
+            self._silver_medal_flags = getattr(self, "_silver_medal_flags", [])
+            self._silver_medal_flags.append(agent_validation_metrics["silver_medal"])
+            silver_true = sum(self._silver_medal_flags)
+            silver_false = len(self._silver_medal_flags) - silver_true
+            silver_table = wandb.Table(
+                data=[["Silver Medal", silver_true], ["No Silver Medal", silver_false]],
+                columns=["label","count"]
+            )
+            step_log_data["plots/silver_medal_bar"] = wandb.plot.bar(
+                silver_table, "label", "count", title="Silver Medal Steps"
+            )
+            # Bronze Medal
+            self._bronze_medal_flags = getattr(self, "_bronze_medal_flags", [])
+            self._bronze_medal_flags.append(agent_validation_metrics["bronze_medal"])
+            bronze_true = sum(self._bronze_medal_flags)
+            bronze_false = len(self._bronze_medal_flags) - bronze_true
+            bronze_table = wandb.Table(
+                data=[["Bronze Medal", bronze_true], ["No Bronze Medal", bronze_false]],
+                columns=["label","count"]
+            )
+            step_log_data["plots/bronze_medal_bar"] = wandb.plot.bar(
+                bronze_table, "label", "count", title="Bronze Medal Steps"
+            )
         else:
-            # Log a placeholder if metric is invalid/buggy
             step_log_data[f"eval/validation_metric"] = float('nan') # W&B handles NaN well
 
         # Final check for submission file existence
@@ -626,7 +618,7 @@ class Agent:
         if not result_node.is_buggy and not submission_exists:
             result_node.is_buggy = True
             result_node.metric = WorstMetricValue()
-            logger.debug(
+            logger.info(
                 f"Actually, node {result_node.id} did not produce a submission.csv"
             )
 # 
@@ -647,18 +639,8 @@ class Agent:
                 tbl, "val", title="Validation-metric distribution"
             )
 
-        # --- Scatter: LOC vs Validation metric 
-        self._loc_vs_val = getattr(
-            self, "_loc_vs_val", wandb.Table(columns=["loc", "val"])
-        )
-        if result_node.metric and result_node.metric.value is not None:
-            self._loc_vs_val.add_data(loc, result_node.metric.value)
 
-        step_log_data["plots/loc_vs_val"] = wandb.plot.scatter(
-            self._loc_vs_val, "loc", "val",
-            title="Lines-of-code vs validation metric"
-        )
-        # --- Bar chart: Buggy (1) vs Clean (0) 
+
         # Keep a rolling list of 0/1 flags for every step
         self._bug_flags = getattr(self, "_bug_flags", [])
         self._bug_flags.append(1 if result_node.is_buggy else 0)
@@ -691,12 +673,12 @@ class Agent:
  
         # --- Send log data to W&B ---
         if self.wandb_run:
+            t_wandb_start = time.time()
             self.wandb_run.log(step_log_data, step=current_step_number)
+
+            last = time.time()
         # --- End Send log data ---
-
-
         self.journal.append(result_node)
-         
 
         # Log best solution artifacts *immediately* when a new best is found
         best_node = self.journal.get_best_node()
@@ -740,7 +722,6 @@ class Agent:
 
 
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
-        logger.debug(f"Agent is parsing execution results for node {node.id}")
 
         node.absorb_exec_result(exec_result)
 
@@ -817,7 +798,7 @@ class Agent:
 
         node.analysis = review_response.get("summary", "Feedback LLM failed.") # Default value
         # Determine buggy status based on multiple factors
-        logger.debug(f"summary: {node.analysis}")
+        logger.info(f"summary: {node.analysis}")
         node.is_buggy = (
             review_response.get("is_bug", True) # Default to True if key missing
             or node.exc_type is not None
@@ -827,24 +808,20 @@ class Agent:
         )
 
         if node.is_buggy:
-            logger.debug(
+            logger.info(
                 f"Feedback results: Current Node is buggy."
             )
             # Log reasons for being buggy
             bug_reasons = []
-            if review_response.get("is_bug", True): bug_reasons.append("LLM judged buggy")
+            if review_response.get("is_bug", True): bug_reasons.append("LLM judged buggy") ; bug_reasons.append(review_response.get("summary", "Feedback LLM failed."))
             if node.exc_type is not None: bug_reasons.append(f"Exception ({node.exc_type})")
             if metric_value is None: bug_reasons.append("Metric missing/invalid")
-            if not has_csv_submission_reported: bug_reasons.append("LLM reported no submission")
-            if not has_csv_submission_actual: bug_reasons.append("Submission file not found")
-            logger.debug(f"Buggy reasons: {'; '.join(bug_reasons)}")
+            logger.info(f"Buggy reasons: {'; '.join(bug_reasons)}")
 
             node.metric = WorstMetricValue()
 
-
-     
         else:
-            logger.debug(f"Feedback results: Current Node is not buggy")
+            logger.info(f"Feedback results: Current Node is not buggy")
             node.metric = MetricValue(
                 metric_value, maximize=not review_response.get("lower_is_better", True) # Default lower is better
             )

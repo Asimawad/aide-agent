@@ -10,7 +10,7 @@ eval: null
 log_dir: logs
 log_level: INFO
 workspace_dir: workspaces
-
+competition_name: "null"
 # whether to unzip any archives in the data directory
 preprocess_data: True
 # whether to copy the data to the workspace directory (otherwise it will be symlinked)
@@ -71,7 +71,7 @@ agent:
 # W&B Logging Configuration
 wandb:
   enabled: true             # Set to false to disable W&B logging
-  project: "MLE_BENCH_SR"      # Your W&B project name
+  project: "MLE_BENCH_AIDE"      # Your W&B project name
   entity: null              # Your W&B entity (username or team), null uses default
   run_name:           # Optional: Set a specific run name, null generates one
   log_code: true            # Log the generated code for each step

@@ -10,6 +10,15 @@ import shutil
 import wandb
 from pathlib import Path
 
+WANDB_ENTITY = "asim_awad"
+
+WANDB_PROJECT = "MLE_BENCH_AIDE" 
+
+WANDB_RUN_NAME = cfg.wandb.run_name
+
+DOWNLOAD_DIR = "./logs"
+
+FILE_FILTER_PATTERN = cfg.wandb.run_name #solve me
 def copy_best_solution_and_submission():
     # Define the source and target directories
     workspaces_dir = os.path.join("workspaces", cfg.exp_name)
@@ -38,19 +47,10 @@ def save_logs_to_wandb():
 
     # Save the entire logs directory to WandB
     print("Saving logs directory to WandB")
-    wandb.save(f"logs/{cfg.exp_name}/*", base_path="./")  # Save log files
+    wandb.save(f"logs/{cfg.exp_name}/*", base_path="logs")  # Save log files
 
-WANDB_ENTITY = "asim_awad"
 
-WANDB_PROJECT = "MLE_BENCH" 
-
-WANDB_RUN_NAME = cfg.wandb.run_name
-
-DOWNLOAD_DIR = "./logs"
-
-FILE_FILTER_PATTERN = cfg.wandb.run_name #solve me
-
-def get_wb_data(project_name = "MLE_BENCH", wandb_run_name=WANDB_RUN_NAME , filter_pattern =FILE_FILTER_PATTERN, download_dir = "./" ):
+def get_wb_data(project_name = "MLE_BENCH_AIDE", wandb_run_name=WANDB_RUN_NAME , filter_pattern =FILE_FILTER_PATTERN, download_dir = "./logs" ):
         
     # --- Download Logic ---
     try:

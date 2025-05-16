@@ -1,0 +1,63 @@
+{
+  "nomad2018-predict-transparent-conductors": 
+    {
+      "gold_threshold": 0.05589,
+      "silver_threshold": 0.06229,
+      "bronze_threshold": 0.06582,
+      "median_threshold": 0.06988
+    },
+    "denoising-dirty-documents": {
+      "gold_threshold": 0.01794,
+      "silver_threshold": 0.02609,
+      "bronze_threshold": 0.04517,
+      "median_threshold": 0.07325
+    },
+    "random-acts-of-pizza": {
+      "gold_threshold": 0.97908,
+      "silver_threshold": 0.76482,
+      "bronze_threshold": 0.6921,
+      "median_threshold": 0.5995950000000001
+    },
+    "aerial-cactus-identification": {
+      "gold_threshold": 1.0,
+      "silver_threshold": 1.0,
+      "bronze_threshold": 1.0,
+      "median_threshold": 0.9991
+    },
+    "tabular-playground-series-may-2022": {
+      "gold_threshold": 0.99823,
+      "silver_threshold": 0.99822,
+      "bronze_threshold": 0.99818,
+      "median_threshold": 0.972675
+    },
+    "text-normalization-challenge-english-language": {
+      "gold_threshold": 0.99724,
+      "silver_threshold": 0.99135,
+      "bronze_threshold": 0.99038,
+      "median_threshold": 0.99037
+    },
+    "mlsp-2013-birds": {
+      "gold_threshold": 0.93527,
+      "silver_threshold": 0.90038,
+      "bronze_threshold": 0.87372,
+      "median_threshold": 0.86572
+    },
+    "text-normalization-challenge-russian-language": {
+      "gold_threshold": 0.99012,
+      "silver_threshold": 0.98232,
+      "bronze_threshold": 0.97592,
+      "median_threshold": 0.97591
+    },
+    "spooky-author-identification" :{
+      "gold_threshold": 0.16506,
+      "silver_threshold": 0.26996,
+      "bronze_threshold": 0.29381,
+      "median_threshold": 0.418785
+    },
+    "leaf-classification":{
+      "gold_threshold": 0.0,
+      "silver_threshold": 0.00791,
+      "bronze_threshold": 0.01526,
+      "median_threshold": 0.108345
+    }
+}

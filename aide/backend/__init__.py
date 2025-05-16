@@ -1,4 +1,5 @@
 import logging
+import time
 from . import (
     backend_local,
     backend_openai,
@@ -9,7 +10,7 @@ from .utils import FunctionSpec, OutputType, PromptType, compile_prompt_to_md
 from aide.utils.config import load_cfg
 cfg = load_cfg()
 logger = logging.getLogger("aide.backend")
-logger.setLevel(logging.DEBUG)
+
 
 def determine_provider(model: str) -> str:
     
@@ -84,7 +85,7 @@ def query(
     logger.debug(f"Querying model with arguments: {model_kwargs}, Model: {model}, Provider: {provider}", extra={"verbose": True})
     system_message = compile_prompt_to_md(system_message) if system_message else None
     if system_message:
-        logger.debug(f"System message: {system_message}", extra={"verbose": True})
+        logger.info(f"System message: {system_message}", extra={"verbose": True})
     user_message = compile_prompt_to_md(user_message) if user_message else None
     if user_message:
         logger.debug(f"User message: {user_message}", extra={"verbose": True})
@@ -94,6 +95,8 @@ def query(
     query_func = provider_to_query_func[provider]
     logger.debug(f"Using model {model} with backend {provider}", extra={"verbose": True})
     step_id = f"Draft_{current_step}" # Example
+    logger.debug(f"[Timing] query_func start")
+    t0 = time.time()
     raw_responses, latency, input_token_count, output_token_count, info = query_func(
         system_message=system_message,
         user_message=user_message,
@@ -102,6 +105,7 @@ def query(
         step_identifier=step_id,
         **model_kwargs,
     )
+    logger.debug(f"[Timing] query_func end: {time.time() - t0:.3f}s")
     if func_spec:
         logger.debug(f"Response: {raw_responses}")
     else:

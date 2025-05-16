@@ -21,7 +21,7 @@ import humanize
 from dataclasses_json import DataClassJsonMixin
 
 logger = logging.getLogger("aide.interpreter")          # LOG+ narrower name
-logger.setLevel(logging.DEBUG)                           # LOG+ raise to DEBUG for full trace
+
 
 
 @dataclass
@@ -161,10 +161,6 @@ class Interpreter:
 
     def create_process(self) -> None:
         # we use three queues to communicate with the child process:
-        # - code_inq: send code to child to execute
-        # - result_outq: receive stdout/stderr from child
-        # - event_outq: receive events from child (e.g. state:ready, state:finished)
-        # trunk-ignore(mypy/var-annotated)
 
         self.code_inq, self.result_outq, self.event_outq = Queue(), Queue(), Queue()
         self.process = Process(
@@ -375,5 +371,5 @@ class Interpreter:
             output.append(
                 f"Execution time: {humanize.naturaldelta(exec_time)} seconds (time limit is {humanize.naturaldelta(self.timeout)})."
             )
-        # logger.info(f"[return] exec_time={exec_time:.2f}s  exc={e_cls_name}")   # LOG+
+        logger.debug(f"[return] exec_time={exec_time:.2f}s  exc={e_cls_name}")   # LOG+
         return ExecutionResult(output, exec_time, e_cls_name, exc_info, exc_stack)
