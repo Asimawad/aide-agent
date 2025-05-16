@@ -2,6 +2,7 @@ import atexit
 import logging
 import shutil
 import sys
+import pandas as pd
 import os
 from pathlib import Path
 from .utils import copytree, empirical_eval, advanced_metrics,load_benchmarks
@@ -256,7 +257,6 @@ def run():
 
         # # Check if a W&B run was successfully started
         if wandb_run:
-            save_logs_to_wandb()
 
             logger.info("Finishing W&B Run...")
             try:
@@ -298,19 +298,31 @@ def run():
                 wandb.summary["bronze_medals"] = bronze_medals
                 wandb.summary["above_amedian"] = above_amedian
                 wandb.summary["effective_debug_steps"] = effective_debug_steps
-
-                best_node = journal.get_best_node()
-                if best_node:
-                    wandb.summary["best_validation_metric"] = best_node.metric.value
-                    wandb.summary["best_node_id"] = best_node.id
-                    wandb.summary["best_node_step"] = best_node.step
-               
-                try:
-                    shutil.rmtree(cfg.workspace_dir/"input")
-                except:
-                    pass
-                wandb_run.finish()
+            except Exception as e:
+                print(f"Error during collecting data summary: {e}")
+            best_node = journal.get_best_node()
+            if best_node:
+                wandb.summary["best_validation_metric"] = best_node.metric.value
+                wandb.summary["best_node_id"] = best_node.id
+                wandb.summary["best_node_step"] = best_node.step
             
+            try:
+                shutil.rmtree(cfg.workspace_dir/"input",ignore_errors=True)
+                df = pd.DataFrame(wandb.summary._as_dict())
+                df.to_csv("logs/summary.csv", index=False)
+            except:
+                pass
+            try:
+                empirical_eval.calculate_empirical_metrics(id = wandb_run.id)
+            except Exception as e:
+                print(f"calculating empirical metrics gone wrong with this error : {e}")
+            try:
+                advanced_metrics.calculate_advanced_metrics(cfg.exp_name, journal)
+            except Exception as e:
+                print(f"calculating advanced metrics gone wrong with this error : {e}")
+            try:
+                save_logs_to_wandb()
+                wandb_run.finish()
                 logger.info("W&B Run finished.")
             except Exception as e_finalization:
                 logger.error(f"Error during W&B finalization: {e_finalization}")
@@ -320,15 +332,6 @@ def run():
                          logger.info("W&B Run finished after encountering an error.")
                     except Exception as e_finish_retry:
                          logger.error(f"Error during W&B finish retry: {e_finish_retry}")
-            try:
-                empirical_eval.calculate_empirical_metrics()
-            except Exception as e:
-                print(f"calculating empirical metrics gone wrong with this error : {e}")
-            try:
-                advanced_metrics.calculate_advanced_metrics(cfg.exp_name, journal)
-            except Exception as e:
-                print(f"calculating advanced metrics gone wrong with this error : {e}")
-
 
         # Clean up workspace if this was the first step
         if global_step == 0 or global_step == cfg.agent.steps:

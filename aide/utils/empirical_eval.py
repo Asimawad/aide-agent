@@ -38,7 +38,7 @@ MAX_STEPS_PER_ATTEMPT = 25
 
 INF_STEPS_REPLACEMENT = MAX_STEPS_PER_ATTEMPT + 10 # penalty
 
-def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filters=RUN_FILTERS, max_steps=MAX_STEPS_PER_ATTEMPT, inf_steps_replacement=INF_STEPS_REPLACEMENT,run_name=exp_name):
+def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filters=RUN_FILTERS, max_steps=MAX_STEPS_PER_ATTEMPT, inf_steps_replacement=INF_STEPS_REPLACEMENT,run_name=exp_name,id=None):
     """
     Calculates empirical and other informative metrics for a set of runs.
 
@@ -57,15 +57,18 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
         project_path = f"{entity}/{project}"
 
         print(f"Searching for runs in '{project_path}' with filters: {filters}")
-
-        # Get runs matching the filters
-        runs = api.runs(project_path, filters=filters)
+        if id:
+            runs = api.run(f"{entity}/{project}/{id}")
+            print(f"Found run(s) matching the filters. Proceeding to calculate metrics.")
+        else:
+            # Get runs matching the filters
+            runs = api.runs(project_path, filters=filters)
+            print(f"Found {len(runs)} run(s) matching the filters. Proceeding to calculate metrics.")
 
         if not runs:
             print("No runs found matching the specified filters.")
             return None
 
-        print(f"Found {len(runs)} run(s) matching the filters. Proceeding to calculate metrics.")
 
         # Lists to store metrics for each individual run before averaging
         run_vcgrs = []

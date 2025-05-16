@@ -647,11 +647,9 @@ class Agent:
             tbl = wandb.Table(
                 data=[[v] for v in self._metric_hist], columns=["val"]
             )
-            step_log_data["plots/val_metric_hist"] = wandb.plot.histogram(
-                tbl, "val", title="Validation-metric distribution"
+            step_log_data["plots/val_metric_hist"] = wandb.plot.scatter(
+                tbl, "val", "step", title="Validation-metric distribution"
             )
-
-
 
         # Keep a rolling list of 0/1 flags for every step
         self._bug_flags = getattr(self, "_bug_flags", [])
