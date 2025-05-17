@@ -18,6 +18,7 @@ develop-eggs/
 dist/
 reflection_draafts.py
 downloads/
+test_api.py
 eggs/
 .eggs/
 finetuning/

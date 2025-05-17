@@ -94,7 +94,7 @@ class Config(Hashable):
     competition_name: str
     preprocess_data: bool
     copy_data: bool
-
+    use_template: bool
     exp_name: str
     
     inference_engine:str

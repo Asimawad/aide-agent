@@ -16,7 +16,7 @@ preprocess_data: True
 # whether to copy the data to the workspace directory (otherwise it will be symlinked)
 # copying is recommended to prevent the agent from accidentally modifying the original data
 copy_data: True
-
+use_template: False
 exp_name: null # a random experiment name will be generated if not provided
 
 inference_engine: HF
