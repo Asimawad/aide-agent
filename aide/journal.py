@@ -51,6 +51,7 @@ class Node(DataClassJsonMixin):
     bronze_medal: bool = field(default=0, kw_only=True)  # type: ignore
     above_median: bool = field(default=0, kw_only=True)  # type: ignore
     effective_debug_step: bool = field(default=0, kw_only=True)  # type: ignore
+    effective_reflections: bool = field(default=0, kw_only=True)  # type: ignore
     # whether the agent decided that the code is buggy
     # -> always True if exc_type is not None or no valid metric
     is_buggy: bool = field(default=None, kw_only=True)  # type: ignore

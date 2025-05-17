@@ -268,22 +268,23 @@ def run():
                 silver_medals=0
                 bronze_medals=0
                 above_amedian=0
-                effective_debug_steps=0
+                effective_debugs=0
+
                 for node in journal.nodes:
                     if not node.is_buggy:
                         wo_step = node.step if wo_step is None else wo_step
                         no_of_csvs+=1
                         avg_code_quality+=node.code_quality
+                        if node.metric.value>=competition_benchmarks["median_threshold"]:
+                            above_amedian+=1
+                        if node.effective_debug_step:
+                            effective_debugs+=1
                         if node.metric.value>=competition_benchmarks["gold_threshold"]:
                             gold_medals+=1
                         elif node.metric.value>=competition_benchmarks["silver_threshold"]:
                             silver_medals+=1
                         elif node.metric.value>=competition_benchmarks["bronze_threshold"]:
                             bronze_medals+=1
-                        if node.metric.value>=competition_benchmarks["median_threshold"]:
-                            above_amedian+=1
-                        if node.effective_debug_step:
-                            effective_debug_steps+=1
                     else:
                         buggy_nodes+=1
                         avg_code_quality+=node.code_quality
@@ -297,7 +298,7 @@ def run():
                 wandb.summary["silver_medals"] = silver_medals
                 wandb.summary["bronze_medals"] = bronze_medals
                 wandb.summary["above_amedian"] = above_amedian
-                wandb.summary["effective_debug_steps"] = effective_debug_steps
+                wandb.summary["effective_debug_step"] = effective_debugs
             except Exception as e:
                 print(f"Error during collecting data summary: {e}")
             best_node = journal.get_best_node()

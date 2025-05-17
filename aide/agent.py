@@ -544,12 +544,12 @@ class Agent:
         if self._prev_buggy and not result_node.is_buggy:
             result_node.effective_debug_step = True
             if reflection_applied:
-                result_node.effective_reflection_step = True
+                result_node.effective_reflections = True
             else:
-                result_node.effective_reflection_step = False
+                result_node.effective_reflections = False
         else:
             result_node.effective_debug_step = False
-            result_node.effective_reflection_step = False
+            result_node.effective_reflections = False
         self._prev_buggy = result_node.is_buggy
 
         step_log_data=({
@@ -561,7 +561,7 @@ class Agent:
             f"code/estimated_quality":int(self._code_quality),
             f"eval/reflection_usage": 1 if reflection_applied and not result_node.is_buggy else 0,
             f"eval/effective_debug_step": 1 if result_node.effective_debug_step else 0,
-            f"eval/effective_reflection_step": 1 if result_node.effective_reflection_step else 0,
+            f"eval/effective_reflection_steps": 1 if result_node.effective_reflection_steps else 0,
         })
         if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             step_log_data[f"eval/validation_metric"] = result_node.metric.value
