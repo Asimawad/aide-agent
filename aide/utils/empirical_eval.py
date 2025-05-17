@@ -82,7 +82,7 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
         runs_without_working_code = 0
         calc_only_one = True #False
         if calc_only_one:
-            runs = [runs]
+            runs = [run]
         for i, run in enumerate(runs):
             print(f"\nProcessing run {i+1}/{len(runs)}: '{run.name}' ({run.id})")
 
