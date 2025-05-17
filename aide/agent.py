@@ -248,10 +248,11 @@ class Agent:
         logger.info(f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})")
 
         # --- Try to get the competition-specific template ---
+        comp_data = self.competition_benchmarks
+
         code_template = None
         if self.competition_benchmarks and self.competition_name:
-            comp_data = self.competition_benchmarks.get(self.competition_name)
-            if comp_data and "template" in comp_data:
+            if comp_data and comp_data["template"]:
                 code_template = comp_data["template"]
                 logger.info(f"Found code template for competition: {self.competition_name}")
             else:
