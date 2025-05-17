@@ -251,7 +251,7 @@ class Agent:
         comp_data = self.competition_benchmarks
 
         code_template = None
-        if self.competition_benchmarks and self.competition_name and cfg.use_template:
+        if self.competition_benchmarks and self.competition_name and self.cfg.use_template:
             if comp_data and comp_data["template"]:
                 code_template = comp_data["template"]
                 logger.info(f"Found code template for competition: {self.competition_name}")
