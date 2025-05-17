@@ -115,6 +115,6 @@ def parse_model_id(model_name: str) -> tuple:
     else:
         return None, model_name
 def load_benchmarks(competition_name: str):
-    with open('benchmarks.json', 'r') as f:
+    with open('competition_template.json', 'r') as f:
         benchmarks = json.load(f)
     return benchmarks[competition_name]
