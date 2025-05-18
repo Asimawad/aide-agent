@@ -19,12 +19,6 @@ from .utils.metric import MetricValue
 from .utils.response import trim_long_string
 from .backend import query
 
-
-
-
-
-
-
 @dataclass(eq=False)
 class Node(DataClassJsonMixin):
     """A single node in the solution tree. Contains code, execution results, and evaluation information."""

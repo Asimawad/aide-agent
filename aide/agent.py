@@ -1,7 +1,6 @@
 import shutil
 import logging
 import random
-import textwrap
 import time
 from rich.syntax import Syntax
 from rich.console import Console
@@ -15,8 +14,7 @@ from .utils.pretty_logging import log_step, logger
 from .utils.metric import MetricValue, WorstMetricValue
 from .utils.response import extract_code, extract_text_up_to_code, wrap_code,trim_long_string, format_code
 from .utils.self_reflection import perform_two_step_reflection  , perform_two_step_reflection_with_fewshot
-from pathlib import Path 
-import os
+
 try:
     import wandb
 except ImportError:

@@ -20,7 +20,7 @@ from pathlib import Path
 import humanize
 from dataclasses_json import DataClassJsonMixin
 
-logger = logging.getLogger("aide.interpreter")          # LOG+ narrower name
+logger = logging.getLogger("aide.interpreter")          
 
 
 
@@ -115,12 +115,10 @@ class Interpreter:
         shutup.mute_warnings()
         os.chdir(str(self.working_dir))
 
-        # this seems to only  benecessary because we're exec'ing code from a string,
         # a .py file should be able to import modules from the cwd anyway
         sys.path.append(str(self.working_dir))
 
         # capture stdout and stderr
-        # trunk-ignore(mypy/assignment)
         sys.stdout = sys.stderr = RedirectQueue(result_outq)
 
     def _run_session(

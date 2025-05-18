@@ -4,9 +4,7 @@ import shutil
 import sys
 import pandas as pd
 import os
-from pathlib import Path
 from .utils import copytree, empirical_eval, advanced_metrics,load_benchmarks
-from rich.logging import RichHandler
 from tqdm import tqdm  # Import tqdm for progress bar
 import time
 os.environ['WANDB_API_KEY'] = "8ca0d241dd66f5a643d64a770d61ad066f937c48"
@@ -33,11 +31,10 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from rich.text import Text
-from rich.markdown import Markdown
 from rich.status import Status
 from rich.tree import Tree
 from .utils.config import load_task_desc, prep_agent_workspace, save_run, load_cfg
-from .utils.wandb_retreival import get_wb_data, save_logs_to_wandb
+from .utils.wandb_retreival import  save_logs_to_wandb
 
 class VerboseFilter(logging.Filter):
     """

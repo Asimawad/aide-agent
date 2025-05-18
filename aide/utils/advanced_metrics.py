@@ -4,7 +4,7 @@ import pathlib
 from collections import Counter, defaultdict
 import sys
 import numpy as np
-from ..journal2report import journal2report
+from ..journal import journal2report
 from . import config
 from pathlib import Path
 import time
