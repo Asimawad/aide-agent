@@ -307,7 +307,7 @@ def run():
             try:
                 shutil.rmtree(cfg.workspace_dir/"input",ignore_errors=True)
                 df = pd.DataFrame(wandb.summary._as_dict())
-                df.to_csv("logs/summary.csv", index=False)
+                df.to_csv(f"{cfg.log_dir}/summary.csv", index=False)
             except:
                 pass
             try:

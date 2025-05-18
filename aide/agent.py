@@ -231,8 +231,8 @@ class Agent:
             "SYSTEM":"You are a Kaggle Grandmaster and a team leader. you can plan high detailed and quality machine learning engineering solutions,",
             "user_instructions": {
                "Possible Questions you will face": "You will be asked to come up with a step by step plan to solve the kaggle competetion",
-               "How to answer the user": "Whenever you answer, always: 1. Write a \"## Task Summary:\" section in plain text consisting of 1-3 sentences distilling the task for you team members that are responsible for implementing the solution. 2. Write a \"## Plan:\" section in plain text consisting of detailed and high quality bullet points that will be used by the team members to implement the solution. ",
-                "things to avoid" : "do not give code solutions, just plan"
+               "How to answer the user": "Whenever you answer, always: 1. Write a \"## Task Summary:\" section in plain text consisting of 5-7 sentences distilling the task for you team members that are responsible for implementing the solution. 2. Write a \"## Plan:\" section in plain text consisting of detailed and high quality bullet points that will be used by the team members to implement the solution (7-10 bullet points). ",
+                "Critical Instructions":"Do not give/write code solutions, coding is not your job, just consice summary and detailed plan"
                 }
         }
 
@@ -346,12 +346,6 @@ class Agent:
 
         agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(prompt_user_message)
 
-
-        print(agent_summary_for_step)
-        print("--------------------------------")
-        print(agent_plan_for_step)
-        print("########################################")
-        
         
         code_prompt_user_message: Any = {
             "Introduction": code_introduction,
@@ -369,9 +363,6 @@ class Agent:
 
 
         _, generated_code , _ = self.code_query(code_prompt_user_message)
-        print("--------------------------------")
-        print(generated_code)
-        print("--------------------------------")
         
         formatted_extracted_code = format_code(generated_code)
         if formatted_extracted_code:
@@ -399,79 +390,154 @@ class Agent:
     def _improve(self, parent_node: Node) -> Node:
         console.rule(f"[cyan]Stage : Improving")
         logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})",extra={"verbose": True})
-        introduction = (
+        planner_introduction = (
             "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
             "solution below and should improve it in order to further increase the (test time) performance. "
-            "For this you should first outline a brief plan in natural language for how the solution can be improved and "
-            "then implement this improvement in Python based on the provided previous solution. "
+            "For this you should first summarize the task, and outline your proposed improvement in natural language based on the provided previous solution. "
+            "then you should outline a high quality and detailed step by step plan in natural language for how the solution can be improved "
         )
-        if self.acfg.obfuscate:
-            introduction = (
+        
+        code_introduction = (
                 "You are an expert machine learning engineer attempting a task. You are provided with a previously developed "
-                "solution below and should improve it in order to further increase the (test time) performance. "
-                "For this you should first outline a brief plan in natural language for how the solution can be improved and "
-                "then implement this improvement in Python based on the provided previous solution. "
-            )
+                "solution and a high quality plan for improvement below and should implement the improvement in order to further increase the (test time) performance. "
+                "for this you should write the code that implement this improvement plan in Python based on the provided previous solution and following the given plan. "
+        )
+
+        plan_prompt_user_message: Any = {
+            "Introduction": planner_introduction,
+            "Overall Task Description": self.task_desc, # This is the markdown/text from the competition
+            "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
+        }
+        plan_prompt_user_message["Previous solution"] = {
+            "Code": wrap_code(parent_node.code),
+        }
+        plan_prompt_user_message["Instructions"] |= self.plan_prompt_resp_fmt
+        plan_prompt_user_message["Instructions"] |= {
+            "Solution improvement sketch guideline": [
+                "you should provide a summary of the task description and the previous solution and then outline a high quality and detailed step by step plan in natural language for how the solution can be improved ",
+                "You should be very specific and should only propose a single actionable improvement.",
+                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
+                "Take the Memory section into consideration when proposing the improvement.",
+            ],
+        }
+
+
+        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(plan_prompt_user_message)
+
         prompt: Any = {
-            "Introduction": introduction,
-            "Task description": self.task_desc,
+            "Introduction": code_introduction,
+            "Task description summary and previous solution": agent_summary_for_step,
             "Memory": self.journal.generate_summary(),
             "Instructions": {},
         }
         prompt["Previous solution"] = {
             "Code": wrap_code(parent_node.code),
         }
-
-        prompt["Instructions"] |= self._prompt_resp_fmt
-        prompt["Instructions"] |= {
-            "Solution improvement sketch guideline": [
-                "The solution sketch should be a brief natural language description of how the previous solution can be improved.",
-                "You should be very specific and should only propose a single actionable improvement.",
-                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
-                "Take the Memory section into consideration when proposing the improvement.",
-                "The solution sketch should be 3-5 sentences.",
-                "Don't suggest to do EDA.",
-            ],
+        prompt["Improvement plan"] = {
+            "Plan": agent_plan_for_step,
         }
-        prompt["Instructions"] |= self._prompt_impl_guideline
+        prompt["Instructions"] |= self.code_prompt_resp_fmt
+        prompt["Instructions"] |= {
+            "code improvement guideline": [
+                "You should precisely follow the plan for improvement and implement the code that implements the improvement.",
+                "the final code should be a single code block and should be formatted using the code block format. and it should be complete and self contained.",
+                "the code should be well documented and should be easy to understand.",
+                "you should strictly follow the plan for improvement and implement the code that implements the improvement.",
+                "Take the Memory section into consideration during the implementation to avoid bugs.",
+                "The code should be optimized for performance and should be efficient.",
+                "The code should be well formatted and should be easy to read.",  
+                "code should be between ```python fences"  
+                "only write code, do not write any other text"        
+                  ],
+        }
+        prompt["Instructions"] |=    {
+            "1. Write a complete, single-file Python script. ",
+            "2. starting with imports, and load necessary data from the './input/' directory, the same way the previous solution did.",
+            "3. Implement the improvement proposed in the plan.",
+            "4. remember to calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
+            "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. the same way the previous solution did.",
+            "6. The code should be clean and easy to understand. It should be well-documented and well-structured.",
+        }
 
-        plan, code , _ = self.plan_and_code_query(prompt,excute=False)
-        new_node = Node(plan=plan, code=code, parent=parent_node)
+
+
+        _, generated_code , _ = self.code_query(prompt)
+        new_node = Node(plan=agent_plan_for_step, code=generated_code, parent=parent_node)
         logger.info(f"Improved node {parent_node.id} to create new node {new_node.id}")
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
         console.rule(f"[cyan]Stage : Debugging")
         logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})", extra={"verbose": True})
-        introduction = (
-            "You are a Kaggle grandmaster attending a competition. "
+        plan_introduction = (
+            "You are a Kaggle grandmaster AND A TEAM LEADER. "
             "Your previous solution had a bug and/or did not produce a submission.csv, "
             "so based on the information below, you should revise it in order to fix this. "
-            "Your response should be an implementation outline in natural language,"
-            " followed by a single markdown code block which implements the bugfix/solution."
+            "Your response should be a summary of the problems/bugs in the previous solution in natural language bullet points."
+            "followed by a detailed plan for fixing the bugs in natural language bullet points.(7-10 bullet points)"
         )
 
-        prompt: Any = {
-            "Introduction": introduction,
+        plan_prompt: Any = {
+            "Introduction": plan_introduction,
             "Task description": self.task_desc,
             "Previous (buggy) implementation": wrap_code(parent_node.code),
             "Execution output": wrap_code(parent_node.term_out, lang=""),
             "Instructions": {},
         }
-        prompt["Instructions"] |= self._prompt_resp_fmt
-        prompt["Instructions"] |= {
-            "Bugfix improvement sketch guideline": [
-                "You should write a brief natural language description (3-5 sentences) of how the issue in the previous implementation can be fixed.",
-                "Don't suggest to do EDA.",
-            ],
-        }
-        prompt["Instructions"] |= self._prompt_impl_guideline
+        plan_prompt["Instructions"] |= self._prompt_resp_fmt
+  
+        plan_prompt["Instructions"] |= self._prompt_impl_guideline
 
         if self.acfg.data_preview:
-            prompt["Data Overview"] = self.data_preview
+            plan_prompt["Data Overview"] = self.data_preview
 
-        plan, code, _ = self.plan_and_code_query(prompt,excute=False)
-        new_node = Node(plan=plan, code=code, parent=parent_node)
+
+
+        fmt = (
+            "\n\n---\n"
+            "## Bugs Summary/Analysis: (plain text, no fences):\n"
+            "<your step‑by‑step reasoning abd summary of the bugs in the previous solution here>\n\n"
+            "## Plan: (plain text, no fences):\n"
+            "<your step‑by‑step reasoning and plan steps for fixing the bugs here>\n\n"
+                )
+        response_format= {
+          
+                "Your response for the summary should be a detailed and high quality bullet points of the bugs in the previous solution, summarizing all the information and problems(5-7 sentences), "
+                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
+                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Bugs Summary/Analysis: and natural language text (plan) under ## Plan: "
+                "explicitly,structure your answer exactly like this: " + fmt
+        }
+        plan_prompt["Instructions"] |= response_format
+
+        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(plan_prompt)
+
+
+        code_introduction = (
+            "You are a Kaggle grandmaster AND A TEAM MEMBER. "
+            "Your team's previous solution had a bug and/or did not produce a submission.csv, "
+            "you will be given the previous solution and the plan for fixing the bugs. "
+            "you should implement the bugfix/solution in Python based on the provided previous solution and following the given plan. "
+        )
+
+        code_prompt: Any = {
+            "Introduction": code_introduction,
+            "Task description": agent_summary_for_step,
+            "Previous (buggy) implementation": wrap_code(parent_node.code),
+            "Execution output": wrap_code(parent_node.term_out, lang=""),
+            "Instructions": {},
+        }
+
+
+        code_prompt["Instructions"] |= {
+            "Bugfix improvement sketch guideline": [
+                "precisely follow the plan for fixing the bugs and implement the code that implements the improvement.",
+                "the final code should be a single code block and should be formatted using the code block format. and it should be complete and self contained.",
+            ],
+        }
+        code_prompt["Instructions"] |= self.code_prompt_resp_fmt
+
+        _, generated_code , _ = self.code_query(code_prompt)
+        new_node = Node(plan=agent_plan_for_step, code=generated_code, parent=parent_node)
         logger.info(f"Debugged node {parent_node.id} to create new node {new_node.id}")
         return new_node
 

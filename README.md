@@ -37,6 +37,8 @@ aide data_dir="example_tasks/house_prices" goal="Predict the sales price for eac
 ```bash
 aide data_dir="data/spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=o3-mini agent.ITS_Strategy="none" agent.steps=3
 
+
+aide data_dir="data/spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=o3-mini agent.ITS_Strategy="none" agent.steps=10 competition_name="spooky-author-identification"
 ### To use vllm for inference
 .aide-ds/bin/python -m vllm.entrypoints.openai.api_server \
     --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B \
