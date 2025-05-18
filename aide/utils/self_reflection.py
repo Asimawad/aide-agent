@@ -3,7 +3,6 @@ from typing import Callable
 import re
 
 # Assuming query, wrap_code, extract_code are accessible or passed in.
-# Define necessary type hints for the functions being passed
 QueryFuncType = Callable[..., str]  # Simplified type hint for query
 WrapCodeFuncType = Callable[[str], str]  # Simplified type hint for wrap_code
 ExtractCodeFuncType = Callable[[str], str]  # Simplified type hint for extract_code

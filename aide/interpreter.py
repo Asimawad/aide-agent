@@ -20,8 +20,7 @@ from pathlib import Path
 import humanize
 from dataclasses_json import DataClassJsonMixin
 
-logger = logging.getLogger("aide.interpreter")          # LOG+ narrower name
-
+logger = logging.getLogger("aide.interpreter")         
 
 
 @dataclass

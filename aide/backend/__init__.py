@@ -97,7 +97,7 @@ def query(
     step_id = f"Draft_{current_step}" # Example
     logger.info(f"[Timing] query_func start")
     t0 = time.time()
-    raw_responses, latency, input_token_count, output_token_count, info = query_func(
+    raw_responses, _, _, _, _ = query_func(
         system_message=system_message,
         user_message=user_message,
         func_spec=func_spec,

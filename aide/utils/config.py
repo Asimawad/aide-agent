@@ -66,12 +66,6 @@ class AgentConfig:
     feedback: StageConfig
     search: SearchConfig
 
-    # # MCTS specific parameters
-    # mcts_iterations: int = 10  # Number of MCTS iterations per step
-    # mcts_exploration_weight: float = 1.414  # UCB exploration parameter
-    # mcts_max_depth: int = 5  # Maximum tree depth
-    # mcts_parallel_simulations: int = 1  # Number of parallel simulations
-
 
 @dataclass
 class ExecConfig:
@@ -167,7 +161,7 @@ def prep_cfg(cfg: Config):
     cfg.log_dir = (top_log_dir / cfg.exp_name).resolve()
     cfg.workspace_dir = (top_workspace_dir / cfg.exp_name).resolve()
     
-    # <<< ADD WANDB RUN NAME GENERATION (optional but good practice) >>>
+
     if cfg.wandb.enabled and cfg.wandb.run_name is None:
          cfg.wandb.run_name = cfg.exp_name # Use the coolname generated name
     
@@ -275,17 +269,3 @@ def output_file_or_placeholder(file: Path):
             return json.dumps(json.loads(file.read_text()), indent=4)
     else:
         return f"File not found."
-
-
-# # Using regular expression to extract the competition name
-# var = "/home/asim/Desktop/aide-ds/aide/example_tasks/house_prices"
-# competition_name_regex = re.search(r'[^/]+$', var).group()
-# print(competition_name_regex)  # Output: house_prices
-
-# # Using pathlib to extract the competition name from a PosixPath
-# var_path = Path(var)
-# competition_name_pathlib = var_path.name
-# print(competition_name_pathlib)  # Output: house_prices
-
-# i  want to parse this var variable using regular expression in such a way that I only get the competetinon name. the last string after the last /
-# also, assuming that this is not a string but rather a posix path, how can I achoev the same objective

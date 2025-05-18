@@ -4,9 +4,7 @@ import shutil
 import sys
 import pandas as pd
 import os
-from pathlib import Path
 from .utils import copytree, empirical_eval, advanced_metrics,load_benchmarks
-from rich.logging import RichHandler
 from tqdm import tqdm  # Import tqdm for progress bar
 import time
 os.environ['WANDB_API_KEY'] = "8ca0d241dd66f5a643d64a770d61ad066f937c48"

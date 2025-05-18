@@ -6,7 +6,6 @@ The journal is the core datastructure in AIDE that contains:
 - evaluation information such as metrics
 ...
 """
-
 import copy
 import time
 import uuid
@@ -18,11 +17,6 @@ from .interpreter import ExecutionResult
 from .utils.metric import MetricValue
 from .utils.response import trim_long_string
 from .backend import query
-
-
-
-
-
 
 
 @dataclass(eq=False)

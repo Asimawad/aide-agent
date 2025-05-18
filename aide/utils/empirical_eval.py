@@ -22,9 +22,7 @@ logger = logging.getLogger("aide")
 # This is CRITICAL. Adjust these filters to select the specific set of runs
 
 RUN_FILTERS = {
-    # # You need to know the exact value of cfg.task.name used in your runs
-    # "config.goal": cfg.goal,
-    # # "config.goal": cfg.goal,
+
     "display_name": cfg.exp_name,
     # You need to know the exact value of cfg.agent.code.model used in your runs
     "config.agent.code.model": cfg.agent.code.model,
