@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Hashable, cast
 
-import coolname
 import rich
 from omegaconf import OmegaConf
 from rich.syntax import Syntax
@@ -17,7 +16,6 @@ from aide.journal import Journal, filter_journal
 
 from . import tree_export
 from . import copytree, preproc_data, serialize,parse_model_id  
-import re
 
 shutup.mute_warnings()
 logger = logging.getLogger("aide")

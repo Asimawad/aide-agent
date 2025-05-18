@@ -4,11 +4,11 @@ from .backend import compile_prompt_to_md
 
 from .agent import Agent
 from .interpreter import Interpreter
-from .journal import Journal, Node
+from .journal import Journal
 from omegaconf import OmegaConf
 from rich.status import Status
 from .utils.config import load_task_desc, prep_agent_workspace, save_run, _load_cfg, prep_cfg
-from pathlib import Path
+
 
 @dataclass
 class Solution:
