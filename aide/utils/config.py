@@ -36,6 +36,7 @@ class WandbConfig:
 @dataclass
 class StageConfig:
     model: str
+    planner_model: str
     temp: float
     max_new_tokens: int
     top_p: float = 1.0
