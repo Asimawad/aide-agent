@@ -24,6 +24,7 @@ eggs/
 finetuning/
 lib/
 lib64/
+aide-ds/
 parts/
 sdist/
 var/

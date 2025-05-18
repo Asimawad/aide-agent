@@ -17,6 +17,12 @@ from dataclasses_json import DataClassJsonMixin
 from .interpreter import ExecutionResult
 from .utils.metric import MetricValue
 from .utils.response import trim_long_string
+from .backend import query
+
+
+
+
+
 
 
 @dataclass(eq=False)
@@ -252,3 +258,30 @@ def filter_journal(journal: Journal) -> Journal:
         filtered_journal = filter_for_longest_path(journal)
 
     return filtered_journal
+
+
+def journal2report(journal: Journal, task_desc: dict):
+    """
+    Generate a report from a journal, the report will be in markdown format.
+    """
+    report_input = journal.generate_summary(include_code=True)
+    system_prompt_dict = {
+        "Role": "You are a research assistant that always uses concise language.",
+        "Goal": "The goal is to write a technical report summarising the empirical findings and technical decisions.",
+        "Input": "You are given a raw research journal with list of design attempts and their outcomes, and a task description.",
+        "Output": [
+            "Your output should be a single markdown document.",
+            "Your report should have the following sections: Introduction, Preprocessing, Modellind Methods, Results Discussion, Future Work",
+            "You can include subsections if needed.",
+        ],
+    }
+    context_prompt = (
+        f"Here is the research journal of the agent: <journal>{report_input}<\\journal>, "
+        f"and the task description is: <task>{task_desc}<\\task>."
+    )
+    return query(
+        system_message=system_prompt_dict,
+        user_message=context_prompt,
+        model="o3-mini", 
+        max_tokens=4096,
+    )
