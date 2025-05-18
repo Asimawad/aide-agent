@@ -373,7 +373,21 @@ class Agent:
 
 
         code_prompt_user_message["Instructions"] |= self._prompt_environment # Common environment prompt
-
+        code_prompt_user_message["Instructions"] |= {
+            "Solution code guideline": [
+                "Strictly implement the code that implements the plan.",
+                "Provide a single, complete Python script wrapped in a ```python code block.",
+                "Include all necessary imports and load data from './input/' correctly.",
+                "Write clear, concise comments explaining each part of the code.",
+                "Ensure the code adheres to PEP8 style and is easy to read.",
+                "Optimize performance without sacrificing clarity.",
+                "Calculate and print the validation metric in the format: `Validation Metric: {metric_value}`.",
+                "Save test predictions to './submission/submission.csv' exactly as required.",
+                "The code should be between ```python fences",
+                "only write code, do not write any other text"
+            ],
+        }
+        code_prompt_user_message["Instructions"] |= self.code_prompt_resp_fmt
         if self.acfg.data_preview:
             code_prompt_user_message["Data Overview"] = self.data_preview
 
