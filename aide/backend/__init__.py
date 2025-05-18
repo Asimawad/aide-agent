@@ -95,7 +95,7 @@ def query(
     query_func = provider_to_query_func[provider]
     logger.info(f"Using model {model} with backend {provider}", extra={"verbose": True})
     step_id = f"Draft_{current_step}" # Example
-    logger.info(f"[Timing] query_func start")
+
     t0 = time.time()
     raw_responses, _, _, _, _ = query_func(
         system_message=system_message,
@@ -105,7 +105,7 @@ def query(
         step_identifier=step_id,
         **model_kwargs,
     )
-    logger.info(f"[Timing] query_func end: {time.time() - t0:.3f}s")
+    logger.info(f"[Timing] query took: {time.time() - t0:.3f}s")
     if func_spec:
         logger.info(f"Response: {raw_responses}")
     else:

@@ -1,6 +1,5 @@
 # python/backend_vllm.py
 import logging
-import re
 import time
 import os
 from typing import Optional, Dict, Any, Tuple
