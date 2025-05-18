@@ -17,7 +17,6 @@ from dataclasses_json import DataClassJsonMixin
 from .interpreter import ExecutionResult
 from .utils.metric import MetricValue
 from .utils.response import trim_long_string
-from .backend import query
 
 @dataclass(eq=False)
 class Node(DataClassJsonMixin):
@@ -255,6 +254,8 @@ def filter_journal(journal: Journal) -> Journal:
 
 
 def journal2report(journal: Journal, task_desc: dict):
+    from .backend import query
+
     """
     Generate a report from a journal, the report will be in markdown format.
     """

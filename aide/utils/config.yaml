@@ -47,8 +47,8 @@ agent:
   ITS_Strategy: "self-reflection" 
   # LLM settings for coding
   code:
-    model: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
-    # model: gpt-4-turbo
+    model: o3-mini #deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+    planner_model: o3-mini #deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
     temp: 0.5
     max_new_tokens:  2048
     top_p : 0.9

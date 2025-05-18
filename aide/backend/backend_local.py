@@ -47,7 +47,6 @@ from rich.syntax import Syntax
 
 logger = logging.getLogger("aide") # More specific logger name
 console = Console()
-data_dir = cfg.data_dir # global variable for the data directory
 
 class LocalLLMManager:
     _cache = {}  # Cache to store loaded models
