@@ -193,6 +193,23 @@ class Agent:
                 "explicitly,structure your answer exactly like this: ") + fmt
         }
 
+    @property
+    def debug_prompt_resp_fmt(self):
+
+        fmt = (
+            "\n\n---\n"
+            "## Bugs Summary/Analysis: (plain text, no fences):\n"
+            "<your step‑by‑step reasoning abd summary of the bugs in the previous solution here>\n\n"
+            "## Plan: (plain text, no fences):\n"
+            "<your step‑by‑step reasoning and plan steps for fixing the bugs here>\n\n"
+                )
+        
+        return {
+        "Response format": ("Your response for the summary should be a detailed and high quality bullet points of the bugs in the previous solution, summarizing all the information and problems(5-7 sentences), "
+                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
+                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Bugs Summary/Analysis: and natural language text (plan) under ## Plan: "
+                "explicitly,structure your answer exactly like this: " ) + fmt
+        }
 
     @property
     def code_prompt_resp_fmt(self):
@@ -484,30 +501,15 @@ class Agent:
             "Execution output": wrap_code(parent_node.term_out, lang=""),
             "Instructions": {},
         }
-        plan_prompt["Instructions"] |= self._prompt_resp_fmt
+        plan_prompt["Instructions"] |= self.debug_prompt_resp_fmt
   
-        plan_prompt["Instructions"] |= self._prompt_impl_guideline
+        # plan_prompt["Instructions"] |= self._prompt_impl_guideline
 
         if self.acfg.data_preview:
             plan_prompt["Data Overview"] = self.data_preview
 
 
 
-        fmt = (
-            "\n\n---\n"
-            "## Bugs Summary/Analysis: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning abd summary of the bugs in the previous solution here>\n\n"
-            "## Plan: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning and plan steps for fixing the bugs here>\n\n"
-                )
-        response_format= {
-          
-                "Your response for the summary should be a detailed and high quality bullet points of the bugs in the previous solution, summarizing all the information and problems(5-7 sentences), "
-                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
-                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Bugs Summary/Analysis: and natural language text (plan) under ## Plan: "
-                "explicitly,structure your answer exactly like this: " + fmt
-        }
-        plan_prompt["Instructions"] |= response_format
 
         agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(plan_prompt)
 

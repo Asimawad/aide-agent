@@ -1,41 +1,23 @@
-# from openai import OpenAI
-# from dotenv import load_dotenv      
-# import os
-# load_dotenv()
+from typing import Any
 
-# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+fmt = (
+"\n\n---\n"
+"## Bugs Summary/Analysis: (plain text, no fences):\n"
+"<your step‑by‑step reasoning abd summary of the bugs in the previous solution here>\n\n"
+"## Plan: (plain text, no fences):\n"
+"<your step‑by‑step reasoning and plan steps for fixing the bugs here>\n\n"
+    )
+plan_prompt: Any = {
+            "Introduction": "v",
+            "Task description": "self.task_desc,",
+            "Previous (buggy) implementation": "wrap_code(parent_node.code)",
+            "Execution output": "wrap_code(parent_node.term_out",
+            "Instructions": {}
+        }
+plan_prompt["Instructions"] |= {
 
-
-# response = client.chat.completions.create(model="gpt-4o-mini",
-# messages=[
-#     {"role": "system", "content": "You are a helpful assistant."},
-#     {"role": "user", "content": "what model are you!, like what version exactly?"},
-# ],
-# max_tokens=20)
-import json
-def load_benchmarks(competition_name: str):
-    with open('competition_template.json', 'r') as f:
-        benchmarks = json.load(f)
-    return benchmarks[competition_name]
-# print(response.choices[0].message.content)
-competition_benchmarks = load_benchmarks("nomad2018-predict-transparent-conductors")
-print(competition_benchmarks)
-# import wandb
-
-# run = wandb.init()
-# print(f"Run ID: {run.id}")
-# wandb.log({"test": 1})
-# wandb.summary["test"] = 1
-# wandb.summary["test2"] = 2
-# wandb.summary["test3"] = 3
-# summary = wandb.summary._as_dict()
-# print(type(summary))
-# print(summary)
-# # turn to pandas dataframe
-# import pandas as pd
-# df = pd.DataFrame(summary)
-# print(df)
-# # save as csv
-# df.to_csv("summary.csv", index=False)
-
-# wandb.finish()
+    "Your response for the summary should be a detailed and high quality bullet points of the bugs in the previous solution, summarizing all the information and problems(5-7 sentences), "
+    "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
+    "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Bugs Summary/Analysis: and natural language text (plan) under ## Plan: "
+    "explicitly,structure your answer exactly like this: " + fmt
+}
