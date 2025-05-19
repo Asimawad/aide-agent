@@ -116,6 +116,7 @@ def query(
     func_spec: FunctionSpec | None = None,
     excute: bool = False,
     step_identifier = None,
+    planner = False,
     convert_system_to_user: bool = False,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:

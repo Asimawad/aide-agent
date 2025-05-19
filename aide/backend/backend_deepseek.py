@@ -45,6 +45,8 @@ def query(
     step_identifier = None,
     top_p :float = 0.9,
     num_responses:int=1,
+    planner = False,
+
     top_k:int=50,
     convert_system_to_user: bool = False,
     **model_kwargs,

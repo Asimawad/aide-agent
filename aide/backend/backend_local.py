@@ -173,6 +173,7 @@ def query(
     model: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" ,# "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct", # Example HF model ID
     func_spec=None,
     excute :bool = False,
+    planner = False,
     num_responses: int = 1,
     output_dir: Optional[Path] = None,
     step_identifier: str = "step",

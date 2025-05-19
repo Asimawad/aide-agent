@@ -11,9 +11,11 @@ from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
 
 logger = logging.getLogger("aide") 
 
-_client: openai.OpenAI = None 
+_client1: openai.OpenAI = None 
+_client2: openai.OpenAI = None 
 _vllm_config: dict = { 
-    "base_url": os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"), 
+    "base_url2": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
+    "base_url": os.getenv("VLLM_BASE_URL", f"http://localhost:8000/v1"), 
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"), }
 
 VLLM_API_EXCEPTIONS = (
@@ -24,13 +26,18 @@ VLLM_API_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-def _setup_vllm_client(): # <<< KEEP: Correctly initializes the OpenAI client once.
+def _setup_vllm_client(): 
     """Sets up the OpenAI client for vLLM server."""
-    global _client
-    if _client is None:
+    global _client1, _client2
+    if _client1 is None or _client2 is None:
         logger.debug(f"Setting up vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
-        try:
-            _client = openai.OpenAI(
+        try:  
+            _client1 = openai.OpenAI(
+                base_url=_vllm_config["base_url2"],
+                api_key=_vllm_config["api_key"],
+                max_retries=0,  # Rely on backoff_create for retries
+            )
+            _client2 = openai.OpenAI(
                 base_url=_vllm_config["base_url"],
                 api_key=_vllm_config["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
@@ -55,6 +62,7 @@ def query(
     user_message: Optional[str] = None,
     model: str = "Qwen/Qwen2-0.5B-Instruct", # Model name is passed to the server API call
     temperature: float = 0.7,
+    planner = False,
     func_spec=None, # Add func_spec argument (even if ignored by vLLM server) to match signature
     convert_system_to_user=False, # Add convert_system_to_user argument for signature match
     **model_kwargs: Any,
@@ -93,7 +101,11 @@ def query(
         #  logger.warning(f"Ignored invalid or unmapped model_kwargs for vLLM API backend: {ignored_kwargs}", extra={"verbose": True})
         pass
     # Perform API call
-    t0 = time.time() 
+    t0 = time.time()
+    if planner :
+        _client = _client2
+    else:
+        _client = _client1
     try:
         # Use backoff_create for retries on API errors
         completion = backoff_create(

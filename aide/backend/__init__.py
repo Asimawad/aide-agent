@@ -38,7 +38,7 @@ def query(
     func_spec: FunctionSpec | None = None,
     convert_system_to_user: bool = False,
     inference_engine:str|None = cfg.inference_engine,
-    excute: bool = False,
+    planner: bool = False,
     current_step:int=0,
     reasoning_effort: str | None = None,
     **model_kwargs,  # his mean that you can pass model specific keyword arguments as kwargs
@@ -101,6 +101,7 @@ def query(
         system_message=system_message,
         user_message=user_message,
         func_spec=func_spec,
+        planner = planner,
         convert_system_to_user=convert_system_to_user,
         step_identifier=step_id,
         **model_kwargs,
