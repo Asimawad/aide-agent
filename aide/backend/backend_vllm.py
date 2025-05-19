@@ -11,12 +11,15 @@ from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
 
 logger = logging.getLogger("aide") 
 
-_client: openai.OpenAI = None 
+
 _client1: openai.OpenAI = None 
-_client2: openai.OpenAI = None 
+_vllm_config1: dict = { 
+    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8000/v1"),
+    "api_key": os.getenv("VLLM_API_KEY", "EMPTY"), }
+
+_client: openai.OpenAI = None 
 _vllm_config: dict = { 
     "base_url": os.getenv("VLLM_BASE_URL", f"http://localhost:8000/v1"), 
-    "base_url2": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"), }
 
 VLLM_API_EXCEPTIONS = (
@@ -27,9 +30,9 @@ VLLM_API_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-def _setup_vllm_client(planner=False): 
+def _setup_vllm_client(): 
     """Sets up the OpenAI client for vLLM server."""
-    global _client1, _client2, _client
+    global _client
     if _client is None:
         logger.debug(f"Setting up vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
         try:  
@@ -38,16 +41,24 @@ def _setup_vllm_client(planner=False):
                 api_key=_vllm_config["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
             )
-            # if planner:
-            #     _client2 = openai.OpenAI(
-            #         base_url=_vllm_config["base_url2"],
-            #         api_key=_vllm_config["api_key"],
-            #         max_retries=0,  # Rely on backoff_create for retries
-            #     )
+
         except Exception as e:
             logger.error(f"Failed to setup vLLM client: {e}")
             raise
-
+def _setup_vllm_client1(): 
+    """Sets up the OpenAI client for vLLM server."""
+    global _client1
+    if _client1 is None:
+        logger.debug(f"Setting up vLLM client with base_url: {_vllm_config1['base_url']}", extra={"verbose": True})
+        try:  
+            _client1 = openai.OpenAI(
+                base_url=_vllm_config1["base_url"],
+                api_key=_vllm_config1["api_key"],
+                max_retries=0,  # Rely on backoff_create for retries
+            )
+        except Exception as e:
+            logger.error(f"Failed to setup vLLM client: {e}")
+            raise
 # Only needed if you configure base_url/api_key via a central OmegaConf object passed to it. Remove if config is purely via env vars or static. >>>
 def set_vllm_config(cfg: OmegaConf):
     """Update vLLM config from OmegaConf."""
@@ -72,7 +83,6 @@ def query(
     """
     Query a vLLM-hosted model using OpenAI-compatible API.
     """
-    _setup_vllm_client(planner=planner) 
 
     # Split prompt if needed (conditionally kept)
     
@@ -80,7 +90,6 @@ def query(
     messages = opt_messages_to_list(system_message, user_message, convert_system_to_user=False) # 
 
     # Filter kwargs and map to OpenAI API names
-    # Include common parameters vLLM's OpenAI endpoint accepts
     api_params = {
         "temperature": temperature,
         "max_tokens": model_kwargs.get("max_new_tokens"), # Map internal 'max_new_tokens' to API's 'max_tokens'
@@ -102,32 +111,47 @@ def query(
     if ignored_kwargs:
         #  logger.warning(f"Ignored invalid or unmapped model_kwargs for vLLM API backend: {ignored_kwargs}", extra={"verbose": True})
         pass
-    # Perform API call
-    t0 = time.time()
-    # if planner :
-    #     _client = _client2
-    # else:
-    #     _client = _client1
-    try:
-        # Use backoff_create for retries on API errors
-        completion = backoff_create(
-            _client.chat.completions.create,
-            VLLM_API_EXCEPTIONS, # Use the defined exceptions
-            messages=messages,
-            **filtered_api_params, # Pass the filtered API parameters
-        )
-    except Exception as e:
-        # Catch potential errors during the API call itself
-        logger.error(f"vLLM query failed: {e}", exc_info=True) # Log full traceback
-        # Return an error structure consistent with the expected tuple signature
-        return f"ERROR: {e}", time.time() - t0, 0, 0, {"error": str(e)}
 
+    if planner:
+            
+        _setup_vllm_client1() 
+        t0 = time.time()
+        try:
+            # Use backoff_create for retries on API errors
+            completion = backoff_create(
+                _client1.chat.completions.create,
+                VLLM_API_EXCEPTIONS, # Use the defined exceptions
+                messages=messages,
+                **filtered_api_params, # Pass the filtered API parameters
+            )
+        except Exception as e:
+            # Catch potential errors during the API call itself
+            logger.error(f"vLLM query failed: {e}", exc_info=True) # Log full traceback
+            # Return an error structure consistent with the expected tuple signature
+            return f"ERROR: {e}", time.time() - t0, 0, 0, {"error": str(e)}
+
+    else:
+        _setup_vllm_client() 
+        t0 = time.time()
+        try:
+            # Use backoff_create for retries on API errors
+            completion = backoff_create(
+                _client.chat.completions.create,
+                VLLM_API_EXCEPTIONS, # Use the defined exceptions
+                messages=messages,
+                **filtered_api_params, # Pass the filtered API parameters
+            )
+        except Exception as e:
+            # Catch potential errors during the API call itself
+            logger.error(f"vLLM query failed: {e}", exc_info=True) # Log full traceback
+            # Return an error structure consistent with the expected tuple signature
+            return f"ERROR: {e}", time.time() - t0, 0, 0, {"error": str(e)}
 
     req_time = time.time() - t0 
     # Process response
     if not completion or not completion.choices:
-         logger.error("vLLM API call returned empty or invalid completion object.")
-         return "ERROR: Invalid API response", req_time, 0, 0, {"error": "Invalid API response"}
+        logger.error("vLLM API call returned empty or invalid completion object.")
+        return "ERROR: Invalid API response", req_time, 0, 0, {"error": "Invalid API response"}
 
     choice = completion.choices[0]
     output = choice.message.content or "" # Generated text
