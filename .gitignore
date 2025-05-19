@@ -26,6 +26,7 @@ lib/
 lib64/
 aide-ds/
 parts/
+agent.py
 sdist/
 var/
 wandb/
