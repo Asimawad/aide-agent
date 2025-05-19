@@ -149,6 +149,7 @@ def perform_two_step_reflection(
         system_message=system_prompt2,
         user_message=coder_prompt,
         model=cfg.agent.code.model,  # Use the passed argument
+        planner=True,
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )
