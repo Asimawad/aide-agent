@@ -11,6 +11,7 @@ from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
 
 logger = logging.getLogger("aide") 
 
+_client: openai.OpenAI = None 
 _client1: openai.OpenAI = None 
 _client2: openai.OpenAI = None 
 _vllm_config: dict = { 
@@ -26,22 +27,23 @@ VLLM_API_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-def _setup_vllm_client(): 
+def _setup_vllm_client(planner=False): 
     """Sets up the OpenAI client for vLLM server."""
-    global _client1, _client2
-    if _client1 is None or _client2 is None:
+    global _client1, _client2, _client
+    if _client is None:
         logger.debug(f"Setting up vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
         try:  
-            _client1 = openai.OpenAI(
+            _client = openai.OpenAI(
                 base_url=_vllm_config["base_url"],
                 api_key=_vllm_config["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
             )
-            _client2 = openai.OpenAI(
-                base_url=_vllm_config["base_url2"],
-                api_key=_vllm_config["api_key"],
-                max_retries=0,  # Rely on backoff_create for retries
-            )
+            # if planner:
+            #     _client2 = openai.OpenAI(
+            #         base_url=_vllm_config["base_url2"],
+            #         api_key=_vllm_config["api_key"],
+            #         max_retries=0,  # Rely on backoff_create for retries
+            #     )
         except Exception as e:
             logger.error(f"Failed to setup vLLM client: {e}")
             raise
@@ -70,7 +72,7 @@ def query(
     """
     Query a vLLM-hosted model using OpenAI-compatible API.
     """
-    _setup_vllm_client() 
+    _setup_vllm_client(planner=planner) 
 
     # Split prompt if needed (conditionally kept)
     
@@ -102,10 +104,10 @@ def query(
         pass
     # Perform API call
     t0 = time.time()
-    if planner :
-        _client = _client2
-    else:
-        _client = _client1
+    # if planner :
+    #     _client = _client2
+    # else:
+    #     _client = _client1
     try:
         # Use backoff_create for retries on API errors
         completion = backoff_create(
@@ -135,7 +137,7 @@ def query(
     output_tokens = completion.usage.completion_tokens if completion.usage else 0
 
     # Metadata
-    info = { # <<< KEEP: Useful metadata to return
+    info = { 
         "model": completion.model, # Model name returned by the server
         "finish_reason": choice.finish_reason,
         # Add other useful info if available, e.g., completion ID
