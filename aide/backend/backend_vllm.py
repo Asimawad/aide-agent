@@ -14,7 +14,7 @@ logger = logging.getLogger("aide")
 
 _client1: openai.OpenAI = None 
 _vllm_config1: dict = { 
-    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8000/v1"),
+    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"), }
 
 _client: openai.OpenAI = None 
