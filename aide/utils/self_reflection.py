@@ -82,7 +82,8 @@ def perform_two_step_reflection(
     plan_raw = query_func(  # Use the passed function
         system_message=system_prompt1,
         user_message=critique_prompt,
-        model=cfg.agent.code.planner_model,  # Use the passed argument
+        model=cfg.agent.code.planner_model,
+        planner=True , # Use the passed argument,
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )
