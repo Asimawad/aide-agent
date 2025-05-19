@@ -260,7 +260,7 @@ class Agent:
                 system_message=system_prompt,
                 user_message=prompt,
                 model=self.acfg.code.planner_model,
-                planner=True
+                planner=True,
                 temperature=self.acfg.code.temp,
                 current_step=self.current_step,
                 convert_system_to_user=self.acfg.convert_system_to_user,
