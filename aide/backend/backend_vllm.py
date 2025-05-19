@@ -83,6 +83,7 @@ def query(
     """
     Query a vLLM-hosted model using OpenAI-compatible API.
     """
+    logger.info("activated vllm backend...")
 
     # Split prompt if needed (conditionally kept)
     

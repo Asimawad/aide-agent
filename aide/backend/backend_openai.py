@@ -120,6 +120,7 @@ def query(
     convert_system_to_user: bool = False,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:
+    logger.info("activated openai backend...")
 
     t0 = time.time()
     _setup_openai_client()

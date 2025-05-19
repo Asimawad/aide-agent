@@ -155,11 +155,11 @@ def query(
     if logger.isEnabledFor(logging.DEBUG): # Avoid expensive operations if not debugging
         logger.debug(f"  Final model kwargs: {final_model_kwargs}")
         if compiled_system_message:
-            logger.debug(f"  System message: {compiled_system_message[:500]}...")
+            logger.info(f"  System message: {compiled_system_message[:500]}...", extra={"verbose": True})
         if compiled_user_message:
-            logger.debug(f"  User message: {compiled_user_message[:500]}...")
+            logger.info(f"  User message: {compiled_user_message[:500]}...", extra={"verbose": True})
         if func_spec:
-            logger.debug(f"  Function spec: {func_spec.to_dict()}")
+            logger.info(f"  Function spec: {func_spec.to_dict()}",extra={"verbose": True})
 
     # Get the appropriate query function
     query_func = _PROVIDER_QUERY_FUNCTIONS.get(provider_name)
