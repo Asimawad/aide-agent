@@ -14,8 +14,8 @@ logger = logging.getLogger("aide")
 _client1: openai.OpenAI = None 
 _client2: openai.OpenAI = None 
 _vllm_config: dict = { 
-    "base_url2": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
     "base_url": os.getenv("VLLM_BASE_URL", f"http://localhost:8000/v1"), 
+    "base_url2": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"), }
 
 VLLM_API_EXCEPTIONS = (
@@ -33,12 +33,12 @@ def _setup_vllm_client():
         logger.debug(f"Setting up vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
         try:  
             _client1 = openai.OpenAI(
-                base_url=_vllm_config["base_url2"],
+                base_url=_vllm_config["base_url"],
                 api_key=_vllm_config["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
             )
             _client2 = openai.OpenAI(
-                base_url=_vllm_config["base_url"],
+                base_url=_vllm_config["base_url2"],
                 api_key=_vllm_config["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
             )
