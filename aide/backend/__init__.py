@@ -35,7 +35,7 @@ _MODEL_PREFIX_TO_PROVIDER_MAP: Dict[str, Tuple[str, ...]] = {
     # Add other providers and their prefixes here
     # e.g., "another_provider": ("another-prefix-",)
 }
-_DEFAULT_MODEL_PROVIDER = "hf" # Fallback provider if no prefix matches
+_DEFAULT_MODEL_PROVIDER = "vllm" # Fallback provider if no prefix matches
 
 
 # --- Helper Functions ---
