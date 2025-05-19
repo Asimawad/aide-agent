@@ -438,6 +438,7 @@ class Agent:
             "Introduction": planner_introduction,
             "Overall Task Description": self.task_desc, # This is the markdown/text from the competition
             "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
+            "Instructions": {},
         }
         plan_prompt_user_message["Previous solution"] = {
             "Code": wrap_code(parent_node.code),
