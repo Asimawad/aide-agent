@@ -154,13 +154,17 @@ def prep_cfg(cfg: Config):
 
     top_workspace_dir = Path(cfg.workspace_dir).resolve()
     top_workspace_dir.mkdir(parents=True, exist_ok=True)
-
+    model1 = cfg.agent.code.model
+    model2 = cfg.agent.code.planner_model
+    org1 = "_"
+    org2 = "_"
     # generate experiment name and prefix with consecutive index
     if "/" in cfg.agent.code.model:
-        org, model = parse_model_id(cfg.agent.code.model)
-        experiement_id = org+"_"+ model+"_"+ str(cfg.competition_name or str(cfg.data_dir.name))+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
-    else:
-        experiement_id = cfg.agent.code.model+"_"+cfg.competition_name or str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
+        org1, model1 =  parse_model_id(cfg.agent.code.model)
+    if "/" in cfg.agent.code.planner_model:
+        org2, model2 = parse_model_id(cfg.agent.code.planner_model) 
+    experiement_id = org2+"_"+ model2+"+"+ model1+str(cfg.competition_name or str(cfg.data_dir.name))+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
+  
     cfg.exp_name = cfg.exp_name or experiement_id # coolname.generate_slug(3)
 
     cfg.log_dir = (top_log_dir / cfg.exp_name).resolve()

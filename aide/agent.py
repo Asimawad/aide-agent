@@ -477,21 +477,21 @@ class Agent:
                 "you should strictly follow the plan for improvement and implement the code that implements the improvement.",
                 "Take the Memory section into consideration during the implementation to avoid bugs.",
                 "The code should be optimized for performance and should be efficient.",
-                "The code should be well formatted and should be easy to read.",  
-                "code should be between ```python fences"  
-                "only write code, do not write any other text"        
-                  ],
+                "The code should be well formatted and should be easy to read.",
+                "code should be between ```python fences",
+                "only write code, do not write any other text"
+            ],
         }
-        prompt["Instructions"] |=    {
-            "1. Write a complete, single-file Python script. ",
-            "2. starting with imports, and load necessary data from the './input/' directory, the same way the previous solution did.",
-            "3. Implement the improvement proposed in the plan.",
-            "4. remember to calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
-            "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. the same way the previous solution did.",
-            "6. The code should be clean and easy to understand. It should be well-documented and well-structured.",
+        prompt["Instructions"] |= {
+            "additional guidelines": [
+                "1. Write a complete, single-file Python script.",
+                "2. starting with imports, and load necessary data from the './input/' directory, the same way the previous solution did.",
+                "3. Implement the improvement proposed in the plan.",
+                "4. remember to calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
+                "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. the same way the previous solution did.",
+                "6. The code should be clean and easy to understand. It should be well-documented and well-structured.",
+            ]
         }
-
-
 
         _, generated_code , _ = self.code_query(prompt)
         new_node = Node(plan=agent_plan_for_step, code=generated_code, parent=parent_node)
@@ -619,6 +619,43 @@ class Agent:
             )
 
         return reflection_plan, revised_code
+    def summarize_task(self, task_desc: str) -> str:
+        """
+        Summarize a long, overwhelming or sometimes ambiguos task description into concise key points.
+        The model is prompted to focus only on the main important points relevant to the task.
+        """
+        system_prompt = {
+            "SYSTEM": "You are an expert summarization assistant. "
+                    "Given a long or sometimes ambiguos task description, highlight the main important points only. "
+                    "Ignore unimportant details and reduce verbosity."
+                    "focus on the goal, evaluation metric, dataset and any information that has direct relevance to the solution of the problem"
+        }
+        user_prompt = {
+            "Task Description": task_desc,
+            "Instructions": (
+                "Please provide a concise summary of the task, "
+                "focusing only on the critical and relevant points necessary to understand and solve the task. "
+                "Limit the summary to around 7 sentences."
+            )
+        }
+
+        # Call your existing query function to ask the model
+        summary = query(
+            system_message=system_prompt,
+            user_message=user_prompt,
+            model=self.acfg.code.planner_model,  # or a lighter model if you prefer
+            temperature=0.3,  # low temp for focused summaries
+            planner=True,
+            current_step=self.current_step,
+            convert_system_to_user=self.acfg.convert_system_to_user,
+        )
+
+        # Optionally post-process or extract summary if needed (your extract_summary function)
+        from .utils.response import extract_summary
+        concise_summary = extract_summary(summary) or summary
+
+        return concise_summary.strip()
+
     def update_data_preview(
         self,
     ):
@@ -639,7 +676,10 @@ class Agent:
 
         if not self.journal.nodes or self.data_preview is None:
             self.update_data_preview()
-
+        if  self.journal.task_summary is None or current_step_number == 12:
+            print("Summarizing the task description")
+            self.journal.task_summary = self.summarize_task(self.task_desc)
+            self.task_desc = self.journal.task_summary
         parent_node = self.search_policy()
 
         draft_flag = False
@@ -654,8 +694,6 @@ class Agent:
         else:
             node_stage = "improve"
             result_node = self._improve(parent_node)
-
-
 
         logger.info(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}")
         exec_start_time = time.time()

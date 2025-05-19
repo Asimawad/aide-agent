@@ -26,6 +26,7 @@ class Node(DataClassJsonMixin):
     code: str
     plan: str = field(default=None, kw_only=True)  # type: ignore
     summary:str = None,
+    task_summary:str = " "
     # ---- general attrs ----
     step: int = field(default=None, kw_only=True)  # type: ignore
     id: str = field(default_factory=lambda: uuid.uuid4().hex, kw_only=True)
@@ -143,6 +144,7 @@ class Journal(DataClassJsonMixin):
     """A collection of nodes representing the solution tree."""
 
     nodes: list[Node] = field(default_factory=list)
+    task_summary:str = None
     # eda: InteractiveSession = field(default_factory=lambda: InteractiveSession())
 
     def __getitem__(self, idx: int) -> Node:

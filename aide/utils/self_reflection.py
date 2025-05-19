@@ -8,7 +8,9 @@ QueryFuncType = Callable[..., str]  # Simplified type hint for query
 WrapCodeFuncType = Callable[[str], str]  # Simplified type hint for wrap_code
 ExtractCodeFuncType = Callable[[str], str]  # Simplified type hint for extract_code
 
-
+from .config import load_cfg
+# --- Configuration ---
+cfg = load_cfg()
 def perform_two_step_reflection(
     code: str,
     analysis: str,
@@ -80,7 +82,7 @@ def perform_two_step_reflection(
     plan_raw = query_func(  # Use the passed function
         system_message=system_prompt1,
         user_message=critique_prompt,
-        model=model_name,  # Use the passed argument
+        model=cfg.agent.code.planner_model,  # Use the passed argument
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )
@@ -145,7 +147,7 @@ def perform_two_step_reflection(
     revised_code_response = query_func(  # Use the passed function
         system_message=system_prompt2,
         user_message=coder_prompt,
-        model="o4-mini-2025-04-16",  # Use the passed argument
+        model=cfg.agent.code.model,  # Use the passed argument
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )
