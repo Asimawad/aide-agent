@@ -142,7 +142,7 @@ def perform_two_step_reflection(
     revised_code_response = query_func(  # Use the passed function
         system_message=system_prompt2,
         user_message=coder_prompt,
-        model=model_name,  # Use the passed argument
+        model="o4-mini-2025-04-16",  # Use the passed argument
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )

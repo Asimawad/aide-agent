@@ -13,7 +13,7 @@ logger = logging.getLogger("aide")
 
 _client: openai.OpenAI = None 
 _vllm_config: dict = { 
-    "base_url": os.getenv("VLLM_BASE_URL", "http://localhost:8001/v1"), 
+    "base_url": os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"), 
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"), }
 
 VLLM_API_EXCEPTIONS = (
