@@ -22,8 +22,8 @@ except ImportError:
     wandb = None
 
 logger = logging.getLogger("aide")
-
 console = Console()
+
 def format_time(time_in_sec: int):
     return f"{time_in_sec // 3600}hrs {(time_in_sec % 3600) // 60}mins {time_in_sec % 60}secs"
 
@@ -101,15 +101,13 @@ class Agent:
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
         search_cfg = self.acfg.search
+        logger.info("[search_policy] Determining next action.", extra={"verbose": True})
 
-        # initial drafting
         if len(self.journal.draft_nodes) < search_cfg.num_drafts:
-            logger.info("[search policy] drafting new node (not enough drafts)")
+            logger.info("[search_policy] Selected: Draft new node (not enough drafts).", extra={"verbose": True})
             return None
 
-        # debugging
         if random.random() < search_cfg.debug_prob:
-            # nodes that are buggy + leaf nodes + debug depth < max debug depth
             debuggable_nodes = [
                 n
                 for n in self.journal.buggy_nodes
@@ -117,19 +115,26 @@ class Agent:
             ]
             if debuggable_nodes:
                 node_to_debug = random.choice(debuggable_nodes)
-                logger.info(f"[search policy] debugging node {node_to_debug.id}")
+                logger.info(f"[search_policy] Selected: Debug node {node_to_debug.id}.", extra={"verbose": True})
                 return node_to_debug
+            else:
+                logger.info("[search_policy] Attempted debug, but no debuggable nodes found.", extra={"verbose": True})
 
-        # back to drafting if no nodes to improve
+
         good_nodes = self.journal.good_nodes
         if not good_nodes:
-            logger.info("[search policy] drafting new node (no good nodes)")
+            logger.info("[search_policy] Selected: Draft new node (no good nodes to improve).", extra={"verbose": True})
             return None
 
-        # greedy
         greedy_node = self.journal.get_best_node()
-        logger.info(f"[search policy] greedy node selected: node {greedy_node.id}")
-        return greedy_node
+        if greedy_node: # Ensure greedy_node is not None
+            logger.info(f"[search_policy] Selected: Improve greedy node {greedy_node.id}.", extra={"verbose": True})
+            return greedy_node
+        else: # Should ideally not happen if good_nodes exist, but as a fallback
+            logger.info("[search_policy] Selected: Draft new node (no best node found, fallback).", extra={"verbose": True})
+            return None
+
+
 
     @property
     def _prompt_environment(self):
