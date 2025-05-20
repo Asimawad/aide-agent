@@ -66,7 +66,13 @@ class AgentConfig:
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
-
+    # # Self-reflection specific parameters
+    criric: StageConfig
+    planner_model: StageConfig   # Model for self-reflection
+    # self_reflection_iterations: int = 10  # Number of self-reflection iterations per step
+    # self_reflection_temperature: float = 0.7  # Temperature for self-reflection
+    # self_reflection_max_new_tokens: int = 100  # Max tokens for self-reflection
+    # # Feedback specific parameters
     # # MCTS specific parameters
     # mcts_iterations: int = 10  # Number of MCTS iterations per step
     # mcts_exploration_weight: float = 1.414  # UCB exploration parameter

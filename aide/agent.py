@@ -382,7 +382,6 @@ class Agent:
             task_desc=self.task_desc,
             model_name=self.acfg.code.model,
             temperature=self.acfg.code.temp,
-            convert_system_to_user=self.acfg.convert_system_to_user,
             query_func=query,  # Pass the imported query function
             wrap_code_func=wrap_code,  # Pass the imported wrap_code function
             extract_code_func=extract_code,  # Pass the imported extract_code function
@@ -390,6 +389,7 @@ class Agent:
 
         if revised_code != code and revised_code:  # Check if code actually changed
             logger.info("Self-reflection resulted in code changes.")
+            logger.info(f"Revised code: {(revised_code[:100] + '...') if len(revised_code) > 100 else revised_code}")
         elif reflection_plan == "No specific errors found requiring changes.":
             logger.info("Self-reflection found no errors requiring changes.")
         else:
@@ -432,14 +432,6 @@ class Agent:
         plan ="\n".join(textwrap.wrap(result_node.plan, width=120))
         step_log_data = {
             f"{node_stage}/plan": wandb.Html(f"<pre>{plan}</pre>"),}
-     
-        # if self.wandb_run and self.cfg.wandb.log_code:
-             # Limit code length for logging
-            #  code_to_log = result_node.code[:10000] + ("\n..." if len(result_node.code) > 10000 else "")
-            #  step_log_data[f"{node_stage}/initial_code"] = wandb.Html(f"<pre>{code_to_log}</pre>")
-
-
-
 
         # Apply reflection if applicable
         reflection_applied = False
@@ -458,19 +450,15 @@ class Agent:
                     )
                     reflection_applied = True
                     # Log reflection results
-                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>") 
                     if self.wandb_run and self.cfg.wandb.log_code:
                          reflected_code_to_log = reflection_code[:10000] + ("\n..." if len(reflection_code) > 10000 else "")
-                        #  step_log_data[f"{node_stage}/reflected_code"] = wandb.Html(f"<pre>{reflected_code_to_log}</pre>") 
 
                 elif reflection_plan != "No specific errors found requiring changes.":
                     logger.info(
                         f"Node {result_node.id} self-reflection completed, but no changes applied."
                     )
-                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>")  # Log even if no code change
                 else:
                     message = "No errors found by reflection."
-                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{message}</pre>")  
 
 
             except Exception as e:
@@ -478,7 +466,6 @@ class Agent:
                     f"Error during self-reflection for node {result_node.id}: {e}",
                     exc_info=True,
                 )
-                # step_log_data[f"{node_stage}/reflection_error"] = str(e)
 
 
         # Execute the potentially reflected code
@@ -506,13 +493,9 @@ class Agent:
             f"progress/current_step": current_step_number,
             f"progress/total_steps": self.acfg.steps,
             f"progress/completion_percentage": (current_step_number / self.acfg.steps) * 100,
-
-            # This makes the 'exec/exception_type' column exist for *every* step.
             "exec/exception_type": result_node.exc_type if  result_node.exc_type is not None else 0,
-
             f"code/loc": loc,
             f"code/estimated_quality":int(self._code_quality),
-            # f"exec/term_out": wandb.Html(f"<pre>{trim_long_string(result_node.term_out, threshold=2000, k=1000)}</pre>"),
             f"eval/analysis": wandb.Html(f"<pre>{ analysis}</pre>") 
             
         })
@@ -532,18 +515,6 @@ class Agent:
             logger.info(
                 f"Actually, node {result_node.id} did not produce a submission.csv"
             )
-            # Update the logged data if W&B run exists
-            # if self.wandb_run:
-
-                # step_log_data[f"eval/validation_metric"] = float('nan')
-                # step_log_data[f'{node_stage}/final_code'] = wandb.Html(f"<pre>{result_node.code }</pre>") 
-            # if hasattr(result_node, 'buggy_reasons') and result_node.buggy_reasons:
-            #     buggy_reason = "; ".join(result_node.buggy_reasons)
-            #     step_log_data['eval/buggy_reasons'] =  wandb.Html(f"<pre>{ buggy_reason}</pre>")  
-            # elif result_node.is_buggy and result_node.analysis != "Feedback LLM failed.":
-            #     # If it's buggy but no specific reasons were extracted, log the general analysis
-            #     step_log_data['eval/buggy_summary'] = wandb.Html(f"<pre>{result_node.analysis}</pre>") 
-# 
         step_log_data[f"eval/submission_produced"] = 1 if submission_exists else 0
 
 
@@ -630,7 +601,6 @@ class Agent:
                          artifact_sub.add_file(str(best_submission_dir / "submission.csv"))
                          self.wandb_run.log_artifact(artifact_sub, aliases=["best", f"step_{current_step_number}"])
                          logger.info(f"Logged best submission artifact for step {current_step_number}")
-                         # Also update summary metric in W&B
                          wandb.summary["best_validation_metric"] = best_node.metric.value
                          wandb.summary["best_node_id"] = best_node.id
                          wandb.summary["best_node_step"] = best_node.step
@@ -762,11 +732,7 @@ class Agent:
             logger.info(f"Buggy reasons: {'; '.join(bug_reasons)}")
 
             node.metric = WorstMetricValue()
-
-
-        #     if self.wandb_run:
-        #          bug_log = {"eval/buggy_reasons": "; ".join(bug_reasons)}
-        #          self.wandb_run.log(bug_log) # Log without step, will associate with last logged step
+            
         else:
             logger.info(f"Parsed results: Node {node.id} is not buggy")
             node.metric = MetricValue(
