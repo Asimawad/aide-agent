@@ -738,6 +738,9 @@ class Agent:
             f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0, # More specific name
             f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0, # Renamed for clarity
         })
+        for flag_name in ["_above_median_flags", "_gold_medal_flags", "_silver_medal_flags", "_bronze_medal_flags", "_metric_hist", "_bug_flags", "_sub_flags"]:
+                if not hasattr(self, flag_name):
+                   setattr(self, flag_name, [])
         # ... (rest of your W&B metric logging, which seems fine) ...
         if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             step_log_data[f"eval/validation_metric"] = result_node.metric.value
@@ -752,9 +755,7 @@ class Agent:
                     "bronze_medal": 1 if result_node.metric.value > self.competition_benchmarks.get("bronze_threshold", float('inf')) else 0,
                 }
                 # ... (rest of your wandb plot generation, ensure self._*flags are initialized if not present) ...
-                for flag_name in ["_above_median_flags", "_gold_medal_flags", "_silver_medal_flags", "_bronze_medal_flags", "_metric_hist", "_bug_flags", "_sub_flags"]:
-                    if not hasattr(self, flag_name):
-                        setattr(self, flag_name, [])
+
             # --- Bar charts for threshold flags ---
             # Above Median
             self._above_median_flags.append(agent_validation_metrics["above_median"])
