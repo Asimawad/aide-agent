@@ -92,7 +92,8 @@ target/
 # IPython
 profile_default/
 ipython_config.py
-
+vllm-0.9.1.dev60+gd1211f879-cp38-abi3-manylinux1_x86_64.whl
+gold_reqs.txt
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
