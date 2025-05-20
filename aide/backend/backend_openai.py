@@ -1,4 +1,5 @@
 """Backend for OpenAI API."""
+
 import time
 import json
 import logging
@@ -28,7 +29,9 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
 )
 
 from rich.console import Console
+
 console = Console()
+
 
 @once
 def _setup_openai_client():
@@ -36,6 +39,8 @@ def _setup_openai_client():
         os.environ["OPENAI_API_KEY"] = input("Please enter your OpenAI API key: ")
     global _client
     _client = openai.OpenAI(max_retries=0)
+
+
 def filter_model_kwargs(model: str, kwargs: dict) -> dict:
     """
     Filter and adapt kwargs based on the model being used to prevent invalid parameters.
@@ -49,17 +54,36 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
         {
             "prefixes": ("o3-", "o4-"),
             "valid_params": {
-                "model",  "n", "stream", "stop", "max_completion_tokens",
-                "presence_penalty", "frequency_penalty", "logit_bias", "user", "reasoning_effort"
+                "model",
+                "n",
+                "stream",
+                "stop",
+                "max_completion_tokens",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
+                "reasoning_effort",
             },
             "renames": {"max_completion_tokens": "max_tokens"},
-            "remove": {"temperature","top_p"},  # Not supported
+            "remove": {"temperature", "top_p"},  # Not supported
         },
         {
             "prefixes": ("gpt-"),
             "valid_params": {
-                "model", "top_p", "n", "stream", "stop", "max_tokens", "presence_penalty",
-                "frequency_penalty", "logit_bias", "user", "response_format", "seed", "temperature"
+                "model",
+                "top_p",
+                "n",
+                "stream",
+                "stop",
+                "max_tokens",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
+                "response_format",
+                "seed",
+                "temperature",
             },
             "renames": {},
             "remove": set(),
@@ -67,12 +91,20 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
         {
             "prefixes": (),
             "valid_params": {
-                "model", "top_p", "n", "stream", "stop", "max_tokens", "presence_penalty",
-                "frequency_penalty", "logit_bias", "user"
+                "model",
+                "top_p",
+                "n",
+                "stream",
+                "stop",
+                "max_tokens",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
             },
             "renames": {},
             "remove": set(),
-        }
+        },
     ]
 
     # Find the spec for this model
@@ -92,7 +124,10 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
     for param in remove:
         if param in filtered_kwargs:
             filtered_kwargs.pop(param)
-            logger.debug(f"Removed '{param}' parameter for model {model} as it's not supported", extra={"verbose": True})
+            logger.debug(
+                f"Removed '{param}' parameter for model {model} as it's not supported",
+                extra={"verbose": True},
+            )
 
     # Filter and rename parameters
     result = {}
@@ -101,24 +136,37 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
             result[k] = v
         elif k in renames and renames[k] in valid_params:
             result[renames[k]] = v
-            logger.debug(f"Renamed '{k}' to '{renames[k]}' for model {model}", extra={"verbose": True})
+            logger.debug(
+                f"Renamed '{k}' to '{renames[k]}' for model {model}",
+                extra={"verbose": True},
+            )
         else:
-            logger.debug(f"Ignored invalid parameter '{k}' for model {model}", extra={"verbose": True})
+            logger.debug(
+                f"Ignored invalid parameter '{k}' for model {model}",
+                extra={"verbose": True},
+            )
 
     # Log which parameters were removed
     removed_params = set(filtered_kwargs.keys()) - set(result.keys())
     if removed_params:
-        logger.debug(f"Removed invalid parameters for model {model}: {removed_params}", extra={"verbose": True})
+        logger.debug(
+            f"Removed invalid parameters for model {model}: {removed_params}",
+            extra={"verbose": True},
+        )
     return result
+
+
 def query(
     system_message: str | None,
     user_message: str | None,
     func_spec: FunctionSpec | None = None,
     excute: bool = False,
-    step_identifier = None,
+    step_identifier=None,
+    planner=False,
     convert_system_to_user: bool = False,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:
+    logger.info("activated openai backend...")
 
     t0 = time.time()
     _setup_openai_client()
@@ -135,9 +183,12 @@ def query(
         filtered_kwargs["tools"] = [func_spec.as_openai_tool_dict]
         # force the model the use the function
         filtered_kwargs["tool_choice"] = func_spec.openai_tool_choice_dict
-    
-    logger.debug(f"Calling OpenAI API with model {model} and parameters: {filtered_kwargs}", extra={"verbose": True})
-    
+
+    logger.debug(
+        f"Calling OpenAI API with model {model} and parameters: {filtered_kwargs}",
+        extra={"verbose": True},
+    )
+
     t0 = time.time()
     try:
         completion = backoff_create(
@@ -149,8 +200,14 @@ def query(
     except Exception as e:
         logger.error(f"OpenAI API call failed: {str(e)}")
         error_info = {"error": str(e), "model": model}
-        return f"ERROR: OpenAI API call failed: {str(e)}", time.time() - t0, 0, 0, error_info
-    
+        return (
+            f"ERROR: OpenAI API call failed: {str(e)}",
+            time.time() - t0,
+            0,
+            0,
+            error_info,
+        )
+
     req_time = time.time() - t0
 
     choice = completion.choices[0]
@@ -181,7 +238,7 @@ def query(
         "system_fingerprint": completion.system_fingerprint,
         "model": completion.model,
         "created": completion.created,
-        "execution_summaries":"None",
+        "execution_summaries": "None",
     }
 
     return output, req_time, in_tokens, out_tokens, info

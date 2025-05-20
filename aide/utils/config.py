@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Hashable, cast
 
-import coolname
 import rich
 from omegaconf import OmegaConf
 from rich.syntax import Syntax
@@ -16,8 +15,7 @@ import logging
 from aide.journal import Journal, filter_journal
 
 from . import tree_export
-from . import copytree, preproc_data, serialize,parse_model_id  
-import re
+from . import copytree, preproc_data, serialize, parse_model_id
 
 shutup.mute_warnings()
 logger = logging.getLogger("aide")
@@ -35,9 +33,12 @@ class WandbConfig:
     run_name: str | None = None
     log_code: bool = True
     log_artifacts: bool = True
+
+
 @dataclass
 class StageConfig:
     model: str
+    planner_model: str
     temp: float
     max_new_tokens: int
     top_p: float = 1.0
@@ -61,11 +62,17 @@ class AgentConfig:
     data_preview: bool
     convert_system_to_user: bool
     obfuscate: bool
-    ITS_Strategy: str   
+    ITS_Strategy: str
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
-    strong_coder:str
+
+    # # MCTS specific parameters
+    # mcts_iterations: int = 10  # Number of MCTS iterations per step
+    # mcts_exploration_weight: float = 1.414  # UCB exploration parameter
+    # mcts_max_depth: int = 5  # Maximum tree depth
+    # mcts_parallel_simulations: int = 1  # Number of parallel simulations
+
 
 @dataclass
 class ExecConfig:
@@ -90,9 +97,9 @@ class Config(Hashable):
     copy_data: bool
     use_template: bool
     exp_name: str
-    
-    inference_engine:str
-    
+
+    inference_engine: str
+
     exec: ExecConfig
     agent: AgentConfig
     wandb: WandbConfig
@@ -149,22 +156,38 @@ def prep_cfg(cfg: Config):
 
     top_workspace_dir = Path(cfg.workspace_dir).resolve()
     top_workspace_dir.mkdir(parents=True, exist_ok=True)
-
+    model1 = cfg.agent.code.model
+    model2 = cfg.agent.code.planner_model
+    org1 = "_"
+    org2 = "_"
     # generate experiment name and prefix with consecutive index
     if "/" in cfg.agent.code.model:
-        org, model = parse_model_id(cfg.agent.code.model)
-        experiement_id = org+"_"+ model+"_"+ str(cfg.competition_name or str(cfg.data_dir.name))+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
-    else:
-        experiement_id = cfg.agent.code.model+"_"+cfg.competition_name or str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
-    cfg.exp_name = cfg.exp_name or experiement_id # coolname.generate_slug(3)
+        org1, model1 = parse_model_id(cfg.agent.code.model)
+    if "/" in cfg.agent.code.planner_model:
+        org2, model2 = parse_model_id(cfg.agent.code.planner_model)
+    experiement_id = (
+        org2
+        + "_"
+        + model2
+        + "+"
+        + model1
+        + str(cfg.competition_name or str(cfg.data_dir.name))
+        + "_"
+        + cfg.agent.ITS_Strategy
+        + "_"
+        + str(cfg.agent.steps)
+        + "_steps"
+    )
+
+    cfg.exp_name = cfg.exp_name or experiement_id  # coolname.generate_slug(3)
 
     cfg.log_dir = (top_log_dir / cfg.exp_name).resolve()
     cfg.workspace_dir = (top_workspace_dir / cfg.exp_name).resolve()
-    
 
+    # <<< ADD WANDB RUN NAME GENERATION (optional but good practice) >>>
     if cfg.wandb.enabled and cfg.wandb.run_name is None:
-         cfg.wandb.run_name = cfg.exp_name # Use the coolname generated name
-    
+        cfg.wandb.run_name = cfg.exp_name  # Use the coolname generated name
+
     # validate the config
 
     cfg_schema: Config = OmegaConf.structured(Config)

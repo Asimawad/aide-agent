@@ -3,6 +3,7 @@ import shutil
 import zipfile
 from pathlib import Path
 import json
+
 logger = logging.getLogger("aide")
 
 
@@ -99,22 +100,25 @@ def preproc_data(path: Path):
     extract_archives(path)
     clean_up_dataset(path)
 
+
 def parse_model_id(model_name: str) -> tuple:
     """
     Parse a model ID into organization and model name components.
-    
+
     Args:
         model_name: Full model identifier (e.g. "RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic")
-        
+
     Returns:
         Tuple of (organization, model_name) or (None, model_name) if no organization
     """
-    if '/' in model_name:
-        org, model = model_name.split('/', 1)
+    if "/" in model_name:
+        org, model = model_name.split("/", 1)
         return org, model
     else:
         return None, model_name
+
+
 def load_benchmarks(competition_name: str):
-    with open('competition_template.json', 'r') as f:
+    with open("competition_template.json", "r") as f:
         benchmarks = json.load(f)
     return benchmarks[competition_name]

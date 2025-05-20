@@ -80,6 +80,24 @@ def extract_code(text):
     return format_code("\n\n".join(valid_code_blocks))
 
 
+def extract_plan(text):
+    """Extract plan from the text."""
+    parsed_plan = []
+    if "</think>" in text:
+        parts = re.split(r"</think>", text, maxsplit=1, flags=re.DOTALL)
+        # parts[0] is everything before </think>, parts[1] is everything after
+        text = parts[1].strip() if len(parts) > 1 else ""
+
+    # Extract everything after 'PLAN:' including multi-line content
+    matches = re.findall(r"## Plan:\s*(.*)", text, re.DOTALL)
+    for plan in matches:
+        parsed_plan.append(plan.strip())
+
+    # validate the parsed plan and format it
+    # Combine and return the plan as a single string
+    return "\n\n".join(parsed_plan)
+
+
 def extract_text_up_to_code(s):
     """Extract (presumed) natural language text up to the start of the first code block."""
     if "```" not in s:
@@ -93,3 +111,18 @@ def format_code(code) -> str:
         return black.format_str(code, mode=black.FileMode())
     except black.parsing.InvalidInput:  # type: ignore
         return code
+
+
+# New: extract summary before PLAN
+def extract_summary(text, task=False):
+    """Extract summary from the response before the 'PLAN:' section."""
+    # Remove any thinking tags
+    if "</think>" in text:
+        parts = re.split(r"</think>", text, maxsplit=1, flags=re.DOTALL)
+        text = parts[1].strip() if len(parts) > 1 else text
+    # Split on PLAN: and return the first part as summary
+    if task:
+        return text
+
+    summary = text.split("PLAN:")[0].strip()
+    return summary
