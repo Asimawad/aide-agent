@@ -4,7 +4,7 @@ import pathlib
 from collections import Counter, defaultdict
 import sys
 import numpy as np
-from ..journal import journal2report
+from ..journal2report import journal2report
 from . import config
 from pathlib import Path
 import time
@@ -16,7 +16,7 @@ except Exception as e:
     pass
 # --- Configuration ---
 BASE_RUN_DATA_DIR = "." 
-RUN_FOLDER_NAME = f"logs/{run_name}" or f"logs/run_"
+RUN_FOLDER_NAME = f"logs/{run_name}" 
 JOURNAL_RELATIVE_PATH = f"journal.json" 
 
 BEST_CODE_RELATIVE_PATH = f"best_solution.py" 

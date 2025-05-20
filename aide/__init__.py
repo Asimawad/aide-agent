@@ -4,11 +4,11 @@ from .backend import compile_prompt_to_md
 
 from .agent import Agent
 from .interpreter import Interpreter
-from .journal import Journal
+from .journal import Journal, Node
 from omegaconf import OmegaConf
 from rich.status import Status
 from .utils.config import load_task_desc, prep_agent_workspace, save_run, _load_cfg, prep_cfg
-
+from pathlib import Path
 
 @dataclass
 class Solution:
@@ -48,14 +48,12 @@ class Experiment:
         )
 
     def run(self, steps: int) -> Solution:
-
         for _i in range(steps):
-            self.agent.step(exec_callback=self.interpreter.run,current_step_number=_i+1)
+            self.agent.step(exec_callback=self.interpreter.run)
             save_run(self.cfg, self.journal)
         self.interpreter.cleanup_session()
 
         best_node = self.journal.get_best_node()
         return Solution(code=best_node.code, valid_metric=best_node.metric.value)
-
 
 

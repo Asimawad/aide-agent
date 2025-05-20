@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Hashable, cast
 
+import coolname
 import rich
 from omegaconf import OmegaConf
 from rich.syntax import Syntax
@@ -16,6 +17,7 @@ from aide.journal import Journal, filter_journal
 
 from . import tree_export
 from . import copytree, preproc_data, serialize,parse_model_id  
+import re
 
 shutup.mute_warnings()
 logger = logging.getLogger("aide")
@@ -36,7 +38,6 @@ class WandbConfig:
 @dataclass
 class StageConfig:
     model: str
-    planner_model: str
     temp: float
     max_new_tokens: int
     top_p: float = 1.0
@@ -60,7 +61,8 @@ class AgentConfig:
     data_preview: bool
     convert_system_to_user: bool
     obfuscate: bool
-    ITS_Strategy: str   
+    ITS_Strategy: str  # Can be "self-reflection" or "mcts"
+
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
@@ -90,10 +92,10 @@ class Config(Hashable):
     log_dir: Path
     log_level: str
     workspace_dir: Path
-    competition_name: str
+
     preprocess_data: bool
     copy_data: bool
-    use_template: bool
+
     exp_name: str
     
     inference_engine:str
@@ -138,10 +140,6 @@ def prep_cfg(cfg: Config):
             "You must provide either a description of the task goal (`goal=...`) or a path to a plaintext file containing the description (`desc_file=...`)."
         )
 
-    # Default competition_name to the name of the data_dir if not provided
-    if cfg.competition_name is None:
-        cfg.competition_name = Path(cfg.data_dir).parent.name
-
     if cfg.data_dir.startswith("example_tasks/"):
         cfg.data_dir = Path(__file__).parent.parent / cfg.data_dir
     cfg.data_dir = Path(cfg.data_dir).resolve()
@@ -154,17 +152,13 @@ def prep_cfg(cfg: Config):
 
     top_workspace_dir = Path(cfg.workspace_dir).resolve()
     top_workspace_dir.mkdir(parents=True, exist_ok=True)
-    model1 = cfg.agent.code.model
-    model2 = cfg.agent.code.planner_model
-    org1 = "_"
-    org2 = "_"
+
     # generate experiment name and prefix with consecutive index
     if "/" in cfg.agent.code.model:
-        org1, model1 =  parse_model_id(cfg.agent.code.model)
-    if "/" in cfg.agent.code.planner_model:
-        org2, model2 = parse_model_id(cfg.agent.code.planner_model) 
-    experiement_id = org2+"_"+ model2+"+"+ model1+str(cfg.competition_name or str(cfg.data_dir.name))+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
-  
+        org, model = parse_model_id(cfg.agent.code.model)
+        experiement_id = org+"_"+ model+"_"+ str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
+    else:
+        experiement_id = cfg.agent.code.model+"_"+ str(cfg.data_dir.name)+"_"+cfg.agent.ITS_Strategy +"_"+str(cfg.agent.steps)+"_steps"
     cfg.exp_name = cfg.exp_name or experiement_id # coolname.generate_slug(3)
 
     cfg.log_dir = (top_log_dir / cfg.exp_name).resolve()
@@ -173,7 +167,6 @@ def prep_cfg(cfg: Config):
     # <<< ADD WANDB RUN NAME GENERATION (optional but good practice) >>>
     if cfg.wandb.enabled and cfg.wandb.run_name is None:
          cfg.wandb.run_name = cfg.exp_name # Use the coolname generated name
-    
     # validate the config
 
     cfg_schema: Config = OmegaConf.structured(Config)

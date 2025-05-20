@@ -1,6 +1,7 @@
 import shutil
 import logging
 import random
+import textwrap
 import time
 from rich.syntax import Syntax
 from rich.console import Console
@@ -10,21 +11,17 @@ from .interpreter import ExecutionResult
 from .journal import Journal, Node
 from .utils import data_preview
 from .utils.config import Config
-from .utils.pretty_logging import log_step, logger        
 from .utils.metric import MetricValue, WorstMetricValue
-from .utils.response import extract_code, extract_text_up_to_code, wrap_code,trim_long_string, format_code, extract_plan, extract_summary
-from .utils.self_reflection import perform_two_step_reflection  , perform_two_step_reflection_with_fewshot
-
+from .utils.response import extract_code, extract_text_up_to_code, wrap_code,trim_long_string, format_code
+from .utils.self_reflection import perform_two_step_reflection  
+from pathlib import Path 
+import os
 try:
     import wandb
 except ImportError:
     wandb = None
 
-
-
-logger = logging.getLogger("aide")  # A separate logger for agent.py
-
-
+logger = logging.getLogger("aide")
 
 console = Console()
 def format_time(time_in_sec: int):
@@ -89,8 +86,7 @@ class Agent:
         task_desc: str,
         cfg: Config,
         journal: Journal,
-        wandb_run=None,
-        competition_benchmarks=None
+        wandb_run=None
     ):
         super().__init__()
         self.task_desc = task_desc
@@ -100,10 +96,7 @@ class Agent:
         self.data_preview: str | None = None
         self.start_time = time.time()
         self.current_step = 0
-        self._prev_buggy: bool = False
         self.wandb_run = wandb_run
-        self.competition_benchmarks = competition_benchmarks
-        self.competition_name = self.cfg.competition_name
 
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
@@ -166,11 +159,10 @@ class Agent:
         impl_guideline = [
             "1. Write a complete, single-file Python script. ",
             "2. starting with imports, and load necessary data from the './input/' directory.",
-            "3. Implement the solution proposed in the plan.",
+            "3. Implement the simple solution proposed in your plan.",
             "4. Calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
             "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. Ensure the file format matches the task description.",
             "6. The script must run without errors. Focus on correctness first.",
-            "7. The code should be clean and easy to understand. It should be well-documented and well-structured.",
         ]
         return {"Implementation Guideline": impl_guideline}
 
@@ -192,105 +184,36 @@ class Agent:
                 "There should be no additional headings or text in your response. Just natural language text followed by a newline and then the markdown code block. "
                 "explicitly,structure your answer exactly like this: ") + fmt
         }
-
-    @property
-    def debug_prompt_resp_fmt(self):
-
-        fmt = (
-            "\n\n---\n"
-            "## Bugs Summary/Analysis: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning abd summary of the bugs in the previous solution here>\n\n"
-            "## Plan: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning and plan steps for fixing the bugs here>\n\n"
-                )
-        
-        return {
-        "Response format": ("Your response for the summary should be a detailed and high quality bullet points of the bugs in the previous solution, summarizing all the information and problems(5-7 sentences), "
-                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
-                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Bugs Summary/Analysis: and natural language text (plan) under ## Plan: "
-                "explicitly,structure your answer exactly like this: " ) + fmt
-        }
-
-    @property
-    def code_prompt_resp_fmt(self):
-        fmt = (
-                    "\n\n---\n"
-                    "1) CODE (one fenced Python block):\n"
-                    "```python\n"
-                    "<your python code here>\n"
-                    "```"
-                )
-        return {
-            "Response format": (
-                "Your response should be a single markdown code block (wrapped in ```) which implements this solution and prints out the evaluation metric. "
-                "There should be no additional headings or text in your response. Just the markdown code block. "
-                "explicitly,structure your answer exactly like this: ") + fmt
-        }
-    @property
-    def plan_prompt_resp_fmt(self):
-        fmt = (
-                    "\n\n---\n"
-                    "## Task Summary: (plain text, no fences):\n"
-                    "<your step‑by‑step reasoning abd summary of the task here>\n\n"
-                    "## Plan: (plain text, no fences):\n"
-                    "<your step‑by‑step reasoning and plan steps here>\n\n"
-                )
-        return {
-            "Response format": (
-                "Your response for the summary should be a detailed and high quality bullet points of what the task is about, summarizing all the information in the task description (5-7 sentences), "
-                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
-                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Task Summary: and natural language text (plan) under ## Plan: "
-                "explicitly,structure your answer exactly like this: ") + fmt
-        }
-    def plan_query(self, prompt, retries=3) -> tuple[str]:
-        """Generate a step by step natural language plan that will be fed to the coder model."""
+    def plan_and_code_query(self, prompt,excute, retries=3) -> tuple[str, str]:
+        """Generate a natural language plan + code in the same LLM call and split them apart."""
         system_prompt = {
-            "SYSTEM":"You are a Kaggle Grandmaster and a team leader. you can plan high detailed and quality machine learning engineering solutions,",
+            "SYSTEM":"You are a Kaggle Grandmaster. you can plan , implement, debug and improve and machine learning engineering code,",
             "user_instructions": {
-               "Possible Questions you will face": "You will be asked to come up with a step by step plan to solve the kaggle competetion",
-               "How to answer the user": "Whenever you answer, always: 1. Write a \"## Task Summary:\" section in plain text consisting of 5-7 sentences distilling the task for you team members that are responsible for implementing the solution. 2. Write a \"## Plan:\" section in plain text consisting of detailed and high quality bullet points that will be used by the team members to implement the solution (7-10 bullet points). ",
-                "Critical Instructions":"Do not give/write code solutions, coding is not your job, just consice summary and detailed plan"
-                }
-        }
-
-        completion_text = None
-
-        for _ in range(retries):
-            completion_text  = query(
-                system_message=system_prompt,
-                user_message=prompt,
-                model=self.acfg.code.planner_model,
-                planner=True,
-                temperature=self.acfg.code.temp,
-                current_step=self.current_step,
-                convert_system_to_user=self.acfg.convert_system_to_user,
-            )
-
-            plan    = extract_plan(completion_text)
-            summary = extract_summary(completion_text)
-
-            if plan and summary:
-                # merge all code blocks into a single string
-                return summary, plan, ""
-
-            logger.info("Plan + summary extraction failed, retrying...")
-        logger.info("Final plan + summary extraction attempt failed, giving up...")
-        return "", completion_text, ""  # type: ignore
-    # Inside aide-ds/aide/agent.py, within the Agent class
-    def code_query(self, prompt, retries=3) -> tuple[str, str]:
-        """Follow a predefined plan and implement the code that solves the kaggle competetion."""
-        system_prompt = {
-            "SYSTEM":"You are a Kaggle Grandmaster and great at implementing machine learning engineering code. Precisely follow the plan to implement the code that solves the kaggle competetion.",
-            "user_instructions": {
-               "What you will face": "You will be given a plan to implement the code that solves the kaggle competetion. Precisely follow the plan to implement the code.",
-               "How to answer the user": "Whenever you answer, always: answer in one section called \"CODE:\" containing exactly one fenced Python block: ```python implementing the plan"
+               "Possible Questions you will face": "1. you will be asked to either come up with a plan and a code to solve the kaggle competetion, or debug a code or improve a working code to get better results",
+               "How to answer the user": "Whenever you answer, always: 1. Write a \"PLAN:\" section in plain text—3–5 concise bullet points. 2. Then write a \"CODE:\" section containing exactly one fenced Python block: ```python"
             }
         }
-
+   # Your code here
         completion_text = None
+        execution_summary= None
         for _ in range(retries):
-
-            completion_text  = query(
+            if self.cfg.inference_engine == "HF" and self.acfg.code.model != "o3-mini" :
+                completion_text = query(
+                system_message=system_prompt,
+                user_message=prompt,
+                model=self.acfg.code.model,
+                temperature=self.acfg.code.temp,
+                max_tokens=self.acfg.code.max_new_tokens,
+                top_p=self.acfg.code.top_p,
+                top_k=self.acfg.code.top_k,
+                excute=excute,
+                current_step=self.current_step,
+                inference_engine = self.cfg.inference_engine,
+                num_responses=self.acfg.code.num_return_sequences,
+                convert_system_to_user=self.acfg.convert_system_to_user,
+                )
+            else:
+                completion_text  = query(
                 system_message=system_prompt,
                 user_message=prompt,
                 model=self.acfg.code.model,
@@ -298,299 +221,155 @@ class Agent:
                 current_step=self.current_step,
                 convert_system_to_user=self.acfg.convert_system_to_user,
             )
-
+            # for debugging -> delete later
 
             code = extract_code(completion_text)
             nl_text = extract_text_up_to_code(completion_text)
 
-            if code:
+            if code and nl_text:
                 # merge all code blocks into a single string
-                return nl_text, code , ""
+                return nl_text, code , "execution_summary"
 
-            logger.info("code extraction failed, retrying...")
-        logger.info("Final code extraction attempt failed, giving up...")
-        return "", completion_text, ""  # type: ignore
+            logger.info("Plan + code extraction failed, retrying...")
+        logger.info("Final plan + code extraction attempt failed, giving up...")
+        return "", completion_text, "None"  # type: ignore
 
-    def _draft(self, parent_node=None) -> Node: 
-        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting") # Keep if you like console output here
-        # logger.info(f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})")
-
-        comp_data = self.competition_benchmarks
-
-        code_template = None
-        if self.competition_benchmarks and self.competition_name and self.cfg.use_template:
-            if comp_data and comp_data["template"]:
-                code_template = comp_data["template"]
-                logger.info(f"Found code template for competition: {self.competition_name}")
-            else:
-                logger.warning(f"No template found for competition: {self.competition_name} in competition_benchmarks. Proceeding without template.")
-        else:
-            logger.warning("Competition benchmarks or competition name not available or not enabled. Proceeding without template.")
-
-        # --- Construct the prompt ---
-        plan_introduction = (
-            f"given the following task description for a machine learning competition named {self.competition_name}, develop a complete and detailed plan to solve it."
+    def _draft(self, parent_node = None) -> Node:
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
+        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node})")
+        introduction = (
+            "You are a Kaggle grandmaster attending a competition. "
+            "In order to win this competition, you need to come up with an excellent and creative plan "
+            "for a solution and then implement this solution in Python. We will now provide a description of the task."
         )
-        code_introduction = (
-            f"given the following task description about a machine learning competition named {self.competition_name}, and the plan to solve it, develop a complete code to solve it."
-        )
-        prompt_user_message: Any = {
-            "Introduction": plan_introduction,
-            "Overall Task Description": self.task_desc, # This is the markdown/text from the competition
-            "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
+        if self.acfg.obfuscate:
+            introduction = (
+                "You are an expert machine learning engineer attempting a task. "
+                "In order to complete this task, you need to come up with an excellent and creative plan "
+                "for a solution and then implement this solution in Python. We will now provide a description of the task."
+            )
+        prompt: Any = {
+            "Introduction": introduction,
+            "Task description": self.task_desc,
+            "Memory": self.journal.generate_summary(),
             "Instructions": {},
         }
-
-# Fallback if no template is found - revert to original _draft prompting style
-        prompt_user_message["Instructions"] |= self.plan_prompt_resp_fmt # Original response format
-        prompt_user_message["Instructions"] |= { # Original sketch guidelines
-            "Solution plan guideline": [
-                "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization. as we are using this as a first draft for future improvements",
-                "the summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan",
-                "Take the Memory section into consideration when proposing the design.",
-                "The solution plan should be detailed and high quality bullet points that are easy to follow.",
+        prompt["Instructions"] |= self._prompt_resp_fmt
+        prompt["Instructions"] |= {
+            "Solution sketch guideline": [
+                "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.",
+                "Take the Memory section into consideration when proposing the design,"
+                " don't propose the same modelling solution but keep the evaluation the same.",
+                "The solution sketch should be 3-5 sentences.",
                 "Propose an evaluation metric that is reasonable for this task.",
                 "Don't suggest to do EDA.",
                 "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
             ],
         }
-        # prompt_user_message["Instructions"] |= self._prompt_impl_guideline # Original implementation guidelines
-
-        prompt_user_message["Instructions"] |= self._prompt_environment # Common environment prompt
+        prompt["Instructions"] |= self._prompt_impl_guideline
+        prompt["Instructions"] |= self._prompt_environment
 
         if self.acfg.data_preview:
-            prompt_user_message["Data Overview"] = self.data_preview
+            prompt["Data Overview"] = self.data_preview
 
-        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(prompt_user_message)
-
+        plan, code ,execution_summary = self.plan_and_code_query(prompt, excute=False)
+        formatted_extracted_code = format_code(code)
         
-        code_prompt_user_message: Any = {
-            "Introduction": code_introduction,
-            "Overall Task Description": agent_summary_for_step, # This is the markdown/text from the competition
-            "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
-            "Instructions": {},
-        }
-
-
-        code_prompt_user_message["Instructions"] |= self._prompt_environment # Common environment prompt
-        code_prompt_user_message["Instructions"] |= {
-            "Solution code guideline": [
-                "Strictly implement the code that implements the plan.",
-                "Provide a single, complete Python script wrapped in a ```python code block.",
-                "Include all necessary imports and load data from './input/' correctly.",
-                "Write clear, concise comments explaining each part of the code.",
-                "Ensure the code adheres to PEP8 style and is easy to read.",
-                "Optimize performance without sacrificing clarity.",
-                "Calculate and print the validation metric in the format: `Validation Metric: {metric_value}`.",
-                "Save test predictions to './submission/submission.csv' exactly as required.",
-                "The code should be between ```python fences",
-                "only write code, do not write any other text"
-            ],
-        }
-        code_prompt_user_message["Instructions"] |= self.code_prompt_resp_fmt
-        if self.acfg.data_preview:
-            code_prompt_user_message["Data Overview"] = self.data_preview
-
-
-
-        _, generated_code , _ = self.code_query(code_prompt_user_message)
-        
-        formatted_extracted_code = format_code(generated_code)
         if formatted_extracted_code:
-            # console.print(f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]")
-            # console.print(Syntax(formatted_extracted_code, "python", theme="default", line_numbers=True))
-            logger.info("Code generated for drafting stage:", extra={"verbose": True}) # General log
-            logger.debug(f"{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}",  extra={"verbose": True}) # Verbose log with code
-            # console.print("-" * 60)
-        
-        new_node = Node(
-            plan=agent_plan_for_step, 
-            code=generated_code,
-            summary=agent_summary_for_step, # This field seems not heavily used, but kept for consistency
-            # high_level_plan will be None if we are not doing the hierarchical plan for now
-            # current_hl_step_index will be None
-        )
-        # Parent will be set by the caller if this isn't a root draft
-        if parent_node:
-            new_node.parent = parent_node
-
-        logger.info(f"Drafted new node {new_node.id} (Template used: {bool(code_template)})")
-        return new_node
-
+            console.print(f"[bold green]Extracted Code for step {self.current_step}:[/bold green]")
+            console.print(Syntax(formatted_extracted_code, "python", theme="default", line_numbers=True))
+            console.print("-" * 20)
+        new_node = Node(plan=plan, code=code , summary=execution_summary)
+        logger.info(f"Drafted new node {new_node.id}")
+        return new_node 
 
     def _improve(self, parent_node: Node) -> Node:
-        console.rule(f"[cyan]Stage : Improving")
-        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})",extra={"verbose": True})
-        planner_introduction = (
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Improving")
+        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})")
+        introduction = (
             "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
             "solution below and should improve it in order to further increase the (test time) performance. "
-            "For this you should first summarize the task, and outline your proposed improvement in natural language based on the provided previous solution. "
-            "then you should outline a high quality and detailed step by step plan in natural language for how the solution can be improved "
+            "For this you should first outline a brief plan in natural language for how the solution can be improved and "
+            "then implement this improvement in Python based on the provided previous solution. "
         )
-        
-        code_introduction = (
+        if self.acfg.obfuscate:
+            introduction = (
                 "You are an expert machine learning engineer attempting a task. You are provided with a previously developed "
-                "solution and a high quality plan for improvement below and should implement the improvement in order to further increase the (test time) performance. "
-                "for this you should write the code that implement this improvement plan in Python based on the provided previous solution and following the given plan. "
-        )
-
-        plan_prompt_user_message: Any = {
-            "Introduction": planner_introduction,
-            "Overall Task Description": self.task_desc, # This is the markdown/text from the competition
-            # "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
-            "Instructions": {},
-        }
-        plan_prompt_user_message["Previous solution"] = {
-            "Code": wrap_code(parent_node.code),
-        }
-        plan_prompt_user_message["Instructions"] |= self.plan_prompt_resp_fmt
-        plan_prompt_user_message["Instructions"] |= {
-            "Solution improvement sketch guideline": [
-                "you should provide a summary of the task description and the previous solution and then outline a high quality and detailed step by step plan in natural language for how the solution can be improved ",
-                "You should be very specific and should only propose a single actionable improvement.",
-                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
-                "Take the Memory section into consideration when proposing the improvement.",
-            ],
-        }
-
-
-        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(plan_prompt_user_message)
-
+                "solution below and should improve it in order to further increase the (test time) performance. "
+                "For this you should first outline a brief plan in natural language for how the solution can be improved and "
+                "then implement this improvement in Python based on the provided previous solution. "
+            )
         prompt: Any = {
-            "Introduction": code_introduction,
-            "Task description summary and previous solution": agent_summary_for_step,
+            "Introduction": introduction,
+            "Task description": self.task_desc,
             "Memory": self.journal.generate_summary(),
             "Instructions": {},
         }
         prompt["Previous solution"] = {
             "Code": wrap_code(parent_node.code),
         }
-        prompt["Improvement plan"] = {
-            "Plan": agent_plan_for_step,
-        }
-        prompt["Instructions"] |= self.code_prompt_resp_fmt
+
+        prompt["Instructions"] |= self._prompt_resp_fmt
         prompt["Instructions"] |= {
-            "code improvement guideline": [
-                "You should precisely follow the plan for improvement and implement the code that implements the improvement.",
-                "the final code should be a single code block and should be formatted using the code block format. and it should be complete and self contained.",
-                "the code should be well documented and should be easy to understand.",
-                "you should strictly follow the plan for improvement and implement the code that implements the improvement.",
-                "Take the Memory section into consideration during the implementation to avoid bugs.",
-                "The code should be optimized for performance and should be efficient.",
-                "The code should be well formatted and should be easy to read.",
-                "code should be between ```python fences",
-                "only write code, do not write any other text"
+            "Solution improvement sketch guideline": [
+                "The solution sketch should be a brief natural language description of how the previous solution can be improved.",
+                "You should be very specific and should only propose a single actionable improvement.",
+                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
+                "Take the Memory section into consideration when proposing the improvement.",
+                "The solution sketch should be 3-5 sentences.",
+                "Don't suggest to do EDA.",
             ],
         }
-        prompt["Instructions"] |= {
-            "additional guidelines": [
-                "1. Write a complete, single-file Python script.",
-                "2. starting with imports, and load necessary data from the './input/' directory, the same way the previous solution did.",
-                "3. Implement the improvement proposed in the plan.",
-                "4. remember to calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
-                "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. the same way the previous solution did.",
-                "6. The code should be clean and easy to understand. It should be well-documented and well-structured.",
-            ]
-        }
+        prompt["Instructions"] |= self._prompt_impl_guideline
 
-        _, generated_code , _ = self.code_query(prompt)
-        new_node = Node(plan=agent_plan_for_step, code=generated_code, parent=parent_node)
+        plan, code , _ = self.plan_and_code_query(prompt,excute=False)
+        new_node = Node(plan=plan, code=code, parent=parent_node)
         logger.info(f"Improved node {parent_node.id} to create new node {new_node.id}")
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
-        console.rule(f"[cyan]Stage : Debugging")
-        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})", extra={"verbose": True})
-        plan_introduction = (
-            "You are a Kaggle grandmaster AND A TEAM LEADER. "
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Debugging")
+        logger.info(f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})")
+        introduction = (
+            "You are a Kaggle grandmaster attending a competition. "
             "Your previous solution had a bug and/or did not produce a submission.csv, "
             "so based on the information below, you should revise it in order to fix this. "
-            "Your response should be a summary of the problems/bugs in the previous solution in natural language bullet points."
-            "followed by a detailed plan for fixing the bugs in natural language bullet points.(7-10 bullet points)"
+            "Your response should be an implementation outline in natural language,"
+            " followed by a single markdown code block which implements the bugfix/solution."
         )
-
-        plan_prompt: Any = {
-            "Introduction": plan_introduction,
+        if self.acfg.obfuscate:
+            introduction = (
+                "You are an expert machine learning engineer attempting a task. "
+                "Your previous solution had a bug and/or did not produce a submission.csv, "
+                "so based on the information below, you should revise it in order to fix this. "
+                "Your response should be an implementation outline in natural language,"
+                " followed by a single markdown code block which implements the bugfix/solution."
+            )
+        prompt: Any = {
+            "Introduction": introduction,
             "Task description": self.task_desc,
             "Previous (buggy) implementation": wrap_code(parent_node.code),
             "Execution output": wrap_code(parent_node.term_out, lang=""),
             "Instructions": {},
         }
-        plan_prompt["Instructions"] |= self.debug_prompt_resp_fmt
-  
-        # plan_prompt["Instructions"] |= self._prompt_impl_guideline
-
-        if self.acfg.data_preview:
-            plan_prompt["Data Overview"] = self.data_preview
-
-
-
-
-        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(plan_prompt)
-
-
-        code_introduction = (
-            "You are a Kaggle grandmaster AND A TEAM MEMBER. "
-            "Your team's previous solution had a bug and/or did not produce a submission.csv, "
-            "you will be given the previous solution and the plan for fixing the bugs. "
-            "you should implement the bugfix/solution in Python based on the provided previous solution and following the given plan. "
-        )
-
-        code_prompt: Any = {
-            "Introduction": code_introduction,
-            "Task description": agent_summary_for_step,
-            "Previous (buggy) implementation": wrap_code(parent_node.code),
-            "Execution output": wrap_code(parent_node.term_out, lang=""),
-            "Instructions": {},
-        }
-
-
-        code_prompt["Instructions"] |= {
+        prompt["Instructions"] |= self._prompt_resp_fmt
+        prompt["Instructions"] |= {
             "Bugfix improvement sketch guideline": [
-                "precisely follow the plan for fixing the bugs and implement the code that implements the improvement.",
-                "the final code should be a single code block and should be formatted using the code block format. and it should be complete and self contained.",
+                "You should write a brief natural language description (3-5 sentences) of how the issue in the previous implementation can be fixed.",
+                "Don't suggest to do EDA.",
             ],
         }
-        code_prompt["Instructions"] |= self.code_prompt_resp_fmt
+        prompt["Instructions"] |= self._prompt_impl_guideline
 
-        _, generated_code , _ = self.code_query(code_prompt)
-        new_node = Node(plan=agent_plan_for_step, code=generated_code, parent=parent_node)
+        if self.acfg.data_preview:
+            prompt["Data Overview"] = self.data_preview
+
+        plan, code, _ = self.plan_and_code_query(prompt,excute=False)
+        new_node = Node(plan=plan, code=code, parent=parent_node)
         logger.info(f"Debugged node {parent_node.id} to create new node {new_node.id}")
         return new_node
 
-    def reflect(self, node: Node) -> tuple[str, str]:
-        """
-        Performs a two-step self-reflection using the external utility function.
-
-        Returns:
-            Tuple: (reflection_plan, revised_code)
-        """
-        logger.info("Initiating two-step self-reflection...")
-        reflection_plan, revised_code = perform_two_step_reflection(
-            code=node.code,
-            analysis=node.analysis,
-            term_out=node.term_out,
-            task_desc=self.task_desc,
-            model_name=self.acfg.code.model,
-            temperature=self.acfg.code.temp,
-            convert_system_to_user=self.acfg.convert_system_to_user,
-            query_func=query,  # 
-            wrap_code_func=wrap_code,  # 
-            extract_code_func=extract_code,  # 
-        )
-
-        if revised_code != node.code and revised_code:  # Check if code actually changed
-            logger.info("Self-reflection resulted in code changes.")
-        elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info("Self-reflection found no errors requiring changes.")
-        else:
-            logger.warning(
-                "Self-reflection finished, but revised code is same as original or empty."
-            )
-
-        return reflection_plan, revised_code
-
-    def double_reflect(self, code: str) -> tuple[str, str]:
+    def reflect(self, code: str) -> tuple[str, str]:
         """
         Performs a two-step self-reflection using the external utility function.
 
@@ -604,9 +383,9 @@ class Agent:
             model_name=self.acfg.code.model,
             temperature=self.acfg.code.temp,
             convert_system_to_user=self.acfg.convert_system_to_user,
-            query_func=query,  # 
-            wrap_code_func=wrap_code,  # 
-            extract_code_func=extract_code,  #
+            query_func=query,  # Pass the imported query function
+            wrap_code_func=wrap_code,  # Pass the imported wrap_code function
+            extract_code_func=extract_code,  # Pass the imported extract_code function
         )
 
         if revised_code != code and revised_code:  # Check if code actually changed
@@ -619,68 +398,23 @@ class Agent:
             )
 
         return reflection_plan, revised_code
-    def summarize_task(self, task_desc: str) -> str:
-        """
-        Summarize a long, overwhelming or sometimes ambiguos task description into concise key points.
-        The model is prompted to focus only on the main important points relevant to the task.
-        """
-        system_prompt = {
-            "SYSTEM": "You are an expert summarization assistant. "
-                    "Given a long or sometimes ambiguos task description, highlight the main important points only. "
-                    "Ignore unimportant details and reduce verbosity."
-                    "focus on the goal, evaluation metric, dataset and any information that has direct relevance to the solution of the problem"
-        }
-        user_prompt = {
-            "Task Description": task_desc,
-            "Instructions": (
-                "Please provide a concise summary of the task, "
-                "focusing only on the critical and relevant points necessary to understand and solve the task. "
-                "Limit the summary to around 7 sentences."
-            )
-        }
-
-        # Call your existing query function to ask the model
-        summary = query(
-            system_message=system_prompt,
-            user_message=user_prompt,
-            model=self.acfg.code.planner_model,  # or a lighter model if you prefer
-            temperature=0.3,  # low temp for focused summaries
-            planner=True,
-            current_step=self.current_step,
-            convert_system_to_user=self.acfg.convert_system_to_user,
-        )
-
-        # Optionally post-process or extract summary if needed (your extract_summary function)
-        from .utils.response import extract_summary
-        concise_summary = extract_summary(summary) or summary
-
-        return concise_summary.strip()
 
     def update_data_preview(
         self,
     ):
         self.data_preview = data_preview.generate(self.cfg.workspace_dir)
-        logger.info(f"Data preview updated to {self.data_preview}")
 
-    def step(self, exec_callback: ExecCallbackType, current_step_number: int): 
-
-        t0 = time.time()
-
+    def step(self, exec_callback: ExecCallbackType, current_step_number: int): # Add current_step_number
         # clear the submission dir from previous steps
         submission_dir = self.cfg.workspace_dir / "submission" # Define once
         shutil.rmtree(submission_dir, ignore_errors=True)
         submission_dir.mkdir(exist_ok=True)
 
-        last = time.time()
-        self.current_step = current_step_number
-
         if not self.journal.nodes or self.data_preview is None:
             self.update_data_preview()
-        if  self.journal.task_summary is None or current_step_number == 12:
-            print("Summarizing the task description")
-            self.journal.task_summary = self.summarize_task(self.task_desc)
-            self.task_desc = self.journal.task_summary
+
         parent_node = self.search_policy()
+        parent_type = "None" if parent_node is None else parent_node.stage_name
 
         draft_flag = False
         if parent_node is None:
@@ -690,35 +424,29 @@ class Agent:
         elif parent_node.is_buggy:
             node_stage = "debug"
             result_node = self._debug(parent_node)
-
         else:
             node_stage = "improve"
             result_node = self._improve(parent_node)
+  
+        # Log plan and initial code *before* reflection
+        plan ="\n".join(textwrap.wrap(result_node.plan, width=120))
+        step_log_data = {
+            f"{node_stage}/plan": wandb.Html(f"<pre>{plan}</pre>"),}
+     
+        # if self.wandb_run and self.cfg.wandb.log_code:
+             # Limit code length for logging
+            #  code_to_log = result_node.code[:10000] + ("\n..." if len(result_node.code) > 10000 else "")
+            #  step_log_data[f"{node_stage}/initial_code"] = wandb.Html(f"<pre>{code_to_log}</pre>")
 
-        logger.info(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}")
-        exec_start_time = time.time()
 
-        exec_result = exec_callback(
-            result_node.code,
-            reset_session=True
-        )
-        # Flag if execution threw any exception
-        exec_duration = time.time() - exec_start_time
 
-        # Parse execution result
-        logger.info(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
-
-        result_node = self.parse_exec_result(
-            node=result_node, exec_result=exec_result,
-            )
-        self._prev_buggy = result_node.is_buggy
 
         # Apply reflection if applicable
         reflection_applied = False
-        if draft_flag and self.acfg.ITS_Strategy=="self-reflection" and result_node.is_buggy:  
+        if draft_flag and self.acfg.ITS_Strategy=="self-reflection":  # Or based on your reflection strategy
             try:
-                console.rule(f"[cyan]Stage : Self Reflection")
-                reflection_plan, reflection_code = self.reflect(node=result_node)
+                console.rule(f"[cyan]Agent Step {current_step_number} - Stage : Self Reflection")
+                reflection_plan, reflection_code = self.reflect(code=result_node.code)
                 if (
                     reflection_code
                     and reflection_code.strip()
@@ -729,117 +457,70 @@ class Agent:
                         f"Node {result_node.id} self-reflected and updated code"
                     )
                     reflection_applied = True
+                    # Log reflection results
+                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>") 
+                    if self.wandb_run and self.cfg.wandb.log_code:
+                         reflected_code_to_log = reflection_code[:10000] + ("\n..." if len(reflection_code) > 10000 else "")
+                        #  step_log_data[f"{node_stage}/reflected_code"] = wandb.Html(f"<pre>{reflected_code_to_log}</pre>") 
 
                 elif reflection_plan != "No specific errors found requiring changes.":
                     logger.info(
                         f"Node {result_node.id} self-reflection completed, but no changes applied."
                     )
+                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{reflection_plan}</pre>")  # Log even if no code change
                 else:
-                    logger.info("No errors found by reflection.")
+                    message = "No errors found by reflection."
+                    # step_log_data[f"{node_stage}/reflection_plan"] = wandb.Html(f"<pre>{message}</pre>")  
+
+
             except Exception as e:
                 logger.error(
                     f"Error during self-reflection for node {result_node.id}: {e}",
                     exc_info=True,
                 )
-        if reflection_applied:
-            logger.info(f"Agent is executing the reflect code for node {result_node.id}")
-            exec_start_time = time.time()
+                # step_log_data[f"{node_stage}/reflection_error"] = str(e)
 
-            exec_result = exec_callback(
-                result_node.code,
-                reset_session=True
-            )
-            # Flag if execution threw any exception
-            exec_duration = time.time() - exec_start_time
 
-            # Parse execution result
-            logger.info(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
+        # Execute the potentially reflected code
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Code Execution and Parsing ")
 
-            result_node = self.parse_exec_result(
-                node=result_node, exec_result=exec_result,
-                )
+        logger.info(f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}, reflection applied: {reflection_applied})")
+        exec_start_time = time.time()
+        exec_result = exec_callback(result_node.code, True) # reset_session=True usually
+        exec_duration = time.time() - exec_start_time
+        logger.info(f"Code execution finished in {exec_duration:.2f}s")
 
-        if self._prev_buggy and not result_node.is_buggy:
-            result_node.effective_debug_step = True
-            if reflection_applied:
-                result_node.effective_reflections = True
-            else:
-                result_node.effective_reflections = False
-        else:
-            result_node.effective_debug_step = False
-            result_node.effective_reflections = False
-        self._prev_buggy = result_node.is_buggy
+        # Parse execution result
+        logger.info(f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}")
+        result_node = self.parse_exec_result(
+            node=result_node, exec_result=exec_result
+            ,)
 
-        step_log_data=({
+        loc = len(result_node.code.splitlines())
+        analysis ="\n".join(textwrap.wrap(result_node.analysis, width=120))
+        # Log execution and evaluation results
+        step_log_data.update({
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
+            # Explicitly track current step for easy monitoring
             f"progress/current_step": current_step_number,
-            f"progress/competition_name":self.competition_name,
-            "exec/exception_type": result_node.exc_type if  result_node.exc_type  else 0,
+            f"progress/total_steps": self.acfg.steps,
+            f"progress/completion_percentage": (current_step_number / self.acfg.steps) * 100,
+
+            # This makes the 'exec/exception_type' column exist for *every* step.
+            "exec/exception_type": result_node.exc_type if  result_node.exc_type is not None else 0,
+
+            f"code/loc": loc,
             f"code/estimated_quality":int(self._code_quality),
-            f"eval/reflection_usage": 1 if reflection_applied and not result_node.is_buggy else 0,
-            f"eval/effective_debug_step": 1 if result_node.effective_debug_step else 0,
-            f"eval/effective_reflections": 1 if result_node.effective_reflections else 0,
+            # f"exec/term_out": wandb.Html(f"<pre>{trim_long_string(result_node.term_out, threshold=2000, k=1000)}</pre>"),
+            f"eval/analysis": wandb.Html(f"<pre>{ analysis}</pre>") 
+            
         })
         if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             step_log_data[f"eval/validation_metric"] = result_node.metric.value
-            agent_validation_metrics = {'value': result_node.metric.value, 'step': current_step_number ,
-                                         'competition_name': self.competition_name,
-                                         "above_median": 1 if result_node.metric.value > self.competition_benchmarks["median_threshold"] else 0,
-                                         "gold_medal": 1 if result_node.metric.value > self.competition_benchmarks["gold_threshold"] else 0,
-                                         "silver_medal": 1 if result_node.metric.value > self.competition_benchmarks["silver_threshold"] else 0,
-                                         "bronze_medal": 1 if result_node.metric.value > self.competition_benchmarks["bronze_threshold"] else 0,
-                                         }
-            # --- Bar charts for threshold flags ---
-            # Above Median
-            self._above_median_flags = getattr(self, "_above_median_flags", [])
-            self._above_median_flags.append(agent_validation_metrics["above_median"])
-            above_true = sum(self._above_median_flags)
-            above_false = len(self._above_median_flags) - above_true
-            above_table = wandb.Table(
-                data=[["Above Median", above_true], ["Below Median", above_false]],
-                columns=["label","count"]
-            )
-            step_log_data["plots/above_median_bar"] = wandb.plot.bar(
-                above_table, "label", "count", title="Above Median Steps"
-            )
-            # Gold Medal
-            self._gold_medal_flags = getattr(self, "_gold_medal_flags", [])
-            self._gold_medal_flags.append(agent_validation_metrics["gold_medal"])
-            gold_true = sum(self._gold_medal_flags)
-            gold_false = len(self._gold_medal_flags) - gold_true
-            gold_table = wandb.Table(
-                data=[["Gold Medal", gold_true], ["No Gold Medal", gold_false]],
-                columns=["label","count"]
-            )
-            step_log_data["plots/gold_medal_bar"] = wandb.plot.bar(
-                gold_table, "label", "count", title="Gold Medal Steps"
-            )
-            # Silver Medal
-            self._silver_medal_flags = getattr(self, "_silver_medal_flags", [])
-            self._silver_medal_flags.append(agent_validation_metrics["silver_medal"])
-            silver_true = sum(self._silver_medal_flags)
-            silver_false = len(self._silver_medal_flags) - silver_true
-            silver_table = wandb.Table(
-                data=[["Silver Medal", silver_true], ["No Silver Medal", silver_false]],
-                columns=["label","count"]
-            )
-            step_log_data["plots/silver_medal_bar"] = wandb.plot.bar(
-                silver_table, "label", "count", title="Silver Medal Steps"
-            )
-            # Bronze Medal
-            self._bronze_medal_flags = getattr(self, "_bronze_medal_flags", [])
-            self._bronze_medal_flags.append(agent_validation_metrics["bronze_medal"])
-            bronze_true = sum(self._bronze_medal_flags)
-            bronze_false = len(self._bronze_medal_flags) - bronze_true
-            bronze_table = wandb.Table(
-                data=[["Bronze Medal", bronze_true], ["No Bronze Medal", bronze_false]],
-                columns=["label","count"]
-            )
-            step_log_data["plots/bronze_medal_bar"] = wandb.plot.bar(
-                bronze_table, "label", "count", title="Bronze Medal Steps"
-            )
+
         else:
+            # Log a placeholder if metric is invalid/buggy
             step_log_data[f"eval/validation_metric"] = float('nan') # W&B handles NaN well
 
         # Final check for submission file existence
@@ -851,6 +532,17 @@ class Agent:
             logger.info(
                 f"Actually, node {result_node.id} did not produce a submission.csv"
             )
+            # Update the logged data if W&B run exists
+            # if self.wandb_run:
+
+                # step_log_data[f"eval/validation_metric"] = float('nan')
+                # step_log_data[f'{node_stage}/final_code'] = wandb.Html(f"<pre>{result_node.code }</pre>") 
+            # if hasattr(result_node, 'buggy_reasons') and result_node.buggy_reasons:
+            #     buggy_reason = "; ".join(result_node.buggy_reasons)
+            #     step_log_data['eval/buggy_reasons'] =  wandb.Html(f"<pre>{ buggy_reason}</pre>")  
+            # elif result_node.is_buggy and result_node.analysis != "Feedback LLM failed.":
+            #     # If it's buggy but no specific reasons were extracted, log the general analysis
+            #     step_log_data['eval/buggy_summary'] = wandb.Html(f"<pre>{result_node.analysis}</pre>") 
 # 
         step_log_data[f"eval/submission_produced"] = 1 if submission_exists else 0
 
@@ -865,10 +557,22 @@ class Agent:
             tbl = wandb.Table(
                 data=[[v] for v in self._metric_hist], columns=["val"]
             )
-            step_log_data["plots/val_metric_hist"] = wandb.plot.scatter(
-                tbl, "val", "step", title="Validation-metric distribution"
+            step_log_data["plots/val_metric_hist"] = wandb.plot.histogram(
+                tbl, "val", title="Validation-metric distribution"
             )
 
+        # --- Scatter: LOC vs Validation metric 
+        self._loc_vs_val = getattr(
+            self, "_loc_vs_val", wandb.Table(columns=["loc", "val"])
+        )
+        if result_node.metric and result_node.metric.value is not None:
+            self._loc_vs_val.add_data(loc, result_node.metric.value)
+
+        step_log_data["plots/loc_vs_val"] = wandb.plot.scatter(
+            self._loc_vs_val, "loc", "val",
+            title="Lines-of-code vs validation metric"
+        )
+        # --- Bar chart: Buggy (1) vs Clean (0) 
         # Keep a rolling list of 0/1 flags for every step
         self._bug_flags = getattr(self, "_bug_flags", [])
         self._bug_flags.append(1 if result_node.is_buggy else 0)
@@ -901,17 +605,17 @@ class Agent:
  
         # --- Send log data to W&B ---
         if self.wandb_run:
-            t_wandb_start = time.time()
             self.wandb_run.log(step_log_data, step=current_step_number)
-
-            last = time.time()
         # --- End Send log data ---
+
+
         self.journal.append(result_node)
+         
 
         # Log best solution artifacts *immediately* when a new best is found
         best_node = self.journal.get_best_node()
         if best_node is not None and best_node.id == result_node.id:
-             logger.debug(f"Node {result_node.id} is the best node so far (Metric: {best_node.metric.value:.4f})")
+             logger.info(f"Node {result_node.id} is the best node so far (Metric: {best_node.metric.value:.4f})")
              best_solution_dir = self.cfg.workspace_dir / "best_solution"
              best_submission_dir = self.cfg.workspace_dir / "best_submission"
              best_solution_dir.mkdir(exist_ok=True, parents=True)
@@ -919,6 +623,20 @@ class Agent:
 
              if submission_exists:
                  shutil.copy(submission_path, best_submission_dir)
+
+                 if self.wandb_run and self.cfg.wandb.log_artifacts:
+                     try:
+                         artifact_sub = wandb.Artifact(f'best_submission', type='submission')
+                         artifact_sub.add_file(str(best_submission_dir / "submission.csv"))
+                         self.wandb_run.log_artifact(artifact_sub, aliases=["best", f"step_{current_step_number}"])
+                         logger.info(f"Logged best submission artifact for step {current_step_number}")
+                         # Also update summary metric in W&B
+                         wandb.summary["best_validation_metric"] = best_node.metric.value
+                         wandb.summary["best_node_id"] = best_node.id
+                         wandb.summary["best_node_step"] = best_node.step
+                     except Exception as e:
+                          logger.error(f"Failed to log best submission artifact: {e}")
+
              else:
                   logger.warning(f"Best node {result_node.id} did not produce submission.csv, cannot cache/log artifact.")
 
@@ -931,25 +649,21 @@ class Agent:
                  f.write(str(result_node.id))
 
 
+             if self.wandb_run and self.cfg.wandb.log_artifacts:
+                  try:
+                       artifact_code = wandb.Artifact(f'best_solution_code', type='code')
+                       artifact_code.add_file(str(best_code_path))
+                       self.wandb_run.log_artifact(artifact_code, aliases=["best", f"step_{current_step_number}"])
+                       logger.info(f"Logged best solution code artifact for step {current_step_number}")
+                  except Exception as e:
+                       logger.error(f"Failed to log best code artifact: {e}")
+
         elif best_node:
-             logger.debug(f"This Node is not the best node (Best: {best_node.id} with metric {best_node.metric.value:.4f})")
-            # …existing code that fills exec_duration / result_node.metric / etc.
-
-        result_node.stage      = node_stage
-        result_node.exec_time  = exec_duration
-
-        log_step(
-            step   = current_step_number,
-            total  = self.acfg.steps,
-            stage  = node_stage,
-            is_buggy = result_node.is_buggy,
-            exec_time = exec_duration,
-            metric = (result_node.metric.value
-                    if result_node.metric and result_node.metric.value else None),
-        )
-
+             logger.info(f"Node {result_node.id} is not the best node (Best: {best_node.id} with metric {best_node.metric.value:.4f})")
+        self.current_step += 1
 
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
+        logger.info(f"Agent is parsing execution results for node {node.id}")
 
         node.absorb_exec_result(exec_result)
 
@@ -1026,7 +740,6 @@ class Agent:
 
         node.analysis = review_response.get("summary", "Feedback LLM failed.") # Default value
         # Determine buggy status based on multiple factors
-        logger.info(f"summary: {node.analysis}")
         node.is_buggy = (
             review_response.get("is_bug", True) # Default to True if key missing
             or node.exc_type is not None
@@ -1037,19 +750,25 @@ class Agent:
 
         if node.is_buggy:
             logger.info(
-                f"Feedback results: Current Node is buggy."
+                f"Parsed results: Node {node.id} is buggy."
             )
             # Log reasons for being buggy
             bug_reasons = []
-            if review_response.get("is_bug", True): bug_reasons.append("LLM judged buggy") ; bug_reasons.append(review_response.get("summary", "Feedback LLM failed."))
+            if review_response.get("is_bug", True): bug_reasons.append("LLM judged buggy")
             if node.exc_type is not None: bug_reasons.append(f"Exception ({node.exc_type})")
             if metric_value is None: bug_reasons.append("Metric missing/invalid")
+            if not has_csv_submission_reported: bug_reasons.append("LLM reported no submission")
+            if not has_csv_submission_actual: bug_reasons.append("Submission file not found")
             logger.info(f"Buggy reasons: {'; '.join(bug_reasons)}")
 
             node.metric = WorstMetricValue()
 
+
+        #     if self.wandb_run:
+        #          bug_log = {"eval/buggy_reasons": "; ".join(bug_reasons)}
+        #          self.wandb_run.log(bug_log) # Log without step, will associate with last logged step
         else:
-            logger.info(f"Feedback results: Current Node is not buggy")
+            logger.info(f"Parsed results: Node {node.id} is not buggy")
             node.metric = MetricValue(
                 metric_value, maximize=not review_response.get("lower_is_better", True) # Default lower is better
             )

@@ -10,13 +10,13 @@ eval: null
 log_dir: logs
 log_level: INFO
 workspace_dir: workspaces
-competition_name: "null"
+
 # whether to unzip any archives in the data directory
 preprocess_data: True
 # whether to copy the data to the workspace directory (otherwise it will be symlinked)
 # copying is recommended to prevent the agent from accidentally modifying the original data
 copy_data: True
-use_template: False
+
 exp_name: null # a random experiment name will be generated if not provided
 
 inference_engine: HF
@@ -47,10 +47,10 @@ agent:
   ITS_Strategy: "self-reflection" 
   # LLM settings for coding
   code:
-    model: o4-mini #deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
-    planner_model: o3-mini #deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
-    temp: 0.6
-    max_new_tokens:  2048
+    model: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+    # model: gpt-4-turbo
+    temp: 0.5
+    max_new_tokens:  3200
     top_p : 0.9
     top_k : 50
     num_return_sequences : 1
@@ -59,19 +59,20 @@ agent:
   feedback:
     # model: MFDoom/deepseek-r1-tool-calling:1.5b
     model: o3-mini
+    # model: gpt-4-turbo
     temp: 0.5
 
   # hyperparameters for the tree search
   search:
     max_debug_depth: 5 
-    debug_prob: 0.7
+    debug_prob: 0.5
     num_drafts: 5
 
 # W&B Logging Configuration
 wandb:
   enabled: true             # Set to false to disable W&B logging
-  project: "MLE_BENCH_AIDE"      # Your W&B project name
+  project: "MLE_BENCH"      # Your W&B project name
   entity: null              # Your W&B entity (username or team), null uses default
-  run_name:           # Optional: Set a specific run name, null generates one
+  run_name: null            # Optional: Set a specific run name, null generates one
   log_code: true            # Log the generated code for each step
   log_artifacts: true       # Log best solution code and submission as artifacts

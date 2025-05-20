@@ -8,13 +8,9 @@ QueryFuncType = Callable[..., str]  # Simplified type hint for query
 WrapCodeFuncType = Callable[[str], str]  # Simplified type hint for wrap_code
 ExtractCodeFuncType = Callable[[str], str]  # Simplified type hint for extract_code
 
-from .config import load_cfg
-# --- Configuration ---
-cfg = load_cfg()
+
 def perform_two_step_reflection(
     code: str,
-    analysis: str,
-    term_out: str,
     task_desc: str,
     model_name: str,
     temperature: float,
@@ -45,7 +41,7 @@ def perform_two_step_reflection(
                - revised_code: The minimally revised code, or original if no changes.
     """
 
-    system_prompt1 = {"SYSTEM":"You are a senior data scientist, trying to check a code written by an junior data scientist to solve a machine learning engineering task - a Kaggle competetion" ,
+    system_prompt1 = {"SYSTEM":"    You are a senior data scientist, trying to check a code written by an junior data scientist to solve a machine learning engineering task - a Kaggle competetion" ,
                     "How to answer the user":" Whenever you answer, always:"
                     " 1. Write a “PLAN:” section in plain text—3–5 concise bullet points."
                     " 2. Then write a “CODE:” section containing exactly one fenced Python block:"
@@ -58,10 +54,8 @@ def perform_two_step_reflection(
         
         # --- CODE TO REVIEW ---
         "Code to Review": wrap_code_func(code),  # Use the passed function
-        "execution_output": term_out,
-        "excution_feedback": analysis,
         # --- RULES ---
-        "Your Task": "Provide a Code review for mistakes and bugs , and also give steps to fix it systimatically",
+        "Your Task": "Provide a Code review for possible mistakes and bugs , and also give steps to fix it systimatically",
         "Rules I need you to follow": (
             "RULE 1: **DO NOT WRITE ANY PYTHON CODE IN YOUR RESPONSE.**\n"
             "RULE 2: Do not suggest big changes or new ideas.\n"
@@ -71,19 +65,21 @@ def perform_two_step_reflection(
         ),
         # --- OUTPUT FORMAT ---
         "Output Format": (
-            "your response should contain two sections: \n"
+            "If mistakes are found, your response should contain two sections: \n"
             
             "1. ”Review” Section: - Explaining the main mistake(s).\n"
             "2. ”Instructions” Section: write a NUMBERED list of fix instructions.\n"
             "- Each number is ONE simple step Guiding ne from the start to the finish of the code.\n"
+            "\n"
+            "If no mistakes are found:\n"
+            "- Write only this sentence: ```No specific errors found requiring changes.```."
             "\n"
         ),
     }
     plan_raw = query_func(  # Use the passed function
         system_message=system_prompt1,
         user_message=critique_prompt,
-        model=cfg.agent.code.planner_model,
-        planner=True , # Use the passed argument,
+        model=model_name,  # Use the passed argument
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )
@@ -114,15 +110,13 @@ def perform_two_step_reflection(
         "Question" : f"I am trying to improve my code to solve this task : {task_desc} , following the review and instructions I got from my teammates ",
 
         "Task": (
-            "1. Read the 'Original Code and execution output and feedback'.\n"
+            "1. Read the 'Original Code'.\n"
             "2. Read the 'Edit Instructions'. These are text instructions, NOT code.\n"
             "3. Apply ONLY the changes from 'Edit Instructions' to the 'Original Code'.\n"
             "4. Output the result EXACTLY as shown in 'Output Format'."
         ),
         # --- ORIGINAL CODE ---
-        "Original Code": wrap_code_func(code),
-        "execution_output": term_out,
-        "excution_feedback": analysis,
+        "Original Code": wrap_code_func(code),  # Use the passed function
         # --- EDIT INSTRUCTIONS ---
         "Edit Instructions": reflection_plan,  # Use the cleaned plan from Stage 1
         # --- RULES ---
@@ -148,8 +142,7 @@ def perform_two_step_reflection(
     revised_code_response = query_func(  # Use the passed function
         system_message=system_prompt2,
         user_message=coder_prompt,
-        model=cfg.agent.code.model,  # Use the passed argument
-        planner=True,
+        model=model_name,  # Use the passed argument
         temperature=temperature,  # Use the passed argument
         convert_system_to_user=convert_system_to_user,  # Use the passed argument
     )

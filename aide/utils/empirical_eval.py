@@ -17,7 +17,7 @@ except Exception as e:
 
 
 WANDB_ENTITY = "asim_awad" 
-WANDB_PROJECT = "MLE_BENCH_AIDE" 
+WANDB_PROJECT = "MLE_BENCH" 
 logger = logging.getLogger("aide")
 # This is CRITICAL. Adjust these filters to select the specific set of runs
 
@@ -38,7 +38,7 @@ MAX_STEPS_PER_ATTEMPT = 25
 
 INF_STEPS_REPLACEMENT = MAX_STEPS_PER_ATTEMPT + 10 # penalty
 
-def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filters=RUN_FILTERS, max_steps=MAX_STEPS_PER_ATTEMPT, inf_steps_replacement=INF_STEPS_REPLACEMENT,run_name=exp_name,id=None):
+def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filters=RUN_FILTERS, max_steps=MAX_STEPS_PER_ATTEMPT, inf_steps_replacement=INF_STEPS_REPLACEMENT,run_name=exp_name):
     """
     Calculates empirical and other informative metrics for a set of runs.
 
@@ -57,15 +57,15 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
         project_path = f"{entity}/{project}"
 
         print(f"Searching for runs in '{project_path}' with filters: {filters}")
-        if id:
-            run = api.run(f"{entity}/{project}/{id}")
-            print(f"Found run matching the filters. Proceeding to calculate metrics.")
-        else:
-            # Get runs matching the filters
-            runs = api.runs(project_path, filters=filters)
-            print(f"Found {len(runs)} run(s) matching the filters. Proceeding to calculate metrics.")
 
+        # Get runs matching the filters
+        runs = api.runs(project_path, filters=filters)
 
+        if not runs:
+            print("No runs found matching the specified filters.")
+            return None
+
+        print(f"Found {len(runs)} run(s) matching the filters. Proceeding to calculate metrics.")
 
         # Lists to store metrics for each individual run before averaging
         run_vcgrs = []
@@ -73,6 +73,7 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
         run_steps_to_wo = [] # Steps to First Working Code
         run_total_times = [] # Total Run Time
         run_avg_exec_times = [] # Average Step Execution Time
+        run_avg_locs = [] # Average Lines of Code per Step
         run_avg_code_quality = [] # Average LLM Estimated Code Quality
 
         # Dictionary to aggregate exception counts across all runs
@@ -82,7 +83,8 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
         runs_without_working_code = 0
         calc_only_one = True #False
         if calc_only_one:
-            runs = [run]
+            print(type(runs))
+            runs = [runs[-1]]
         for i, run in enumerate(runs):
             print(f"\nProcessing run {i+1}/{len(runs)}: '{run.name}' ({run.id})")
 
@@ -137,6 +139,13 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
             run_avg_exec_times.append(avg_exec_time)
             print(avg_exec_time)
 
+            # Average Lines of Code per Step
+            avg_loc = np.nan # Default if column is missing or empty
+            if 'code/loc' in history.columns and not history['code/loc'].empty:
+                 avg_loc = history['code/loc'].mean()
+            else:
+                 print(f"Warning: 'code/loc' column not found or empty in history for run '{run.name}'. Cannot calculate average LOC per step.")
+            run_avg_locs.append(avg_loc)
 
 
             # Average LLM Estimated Code Quality
@@ -182,7 +191,7 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
 
         avg_total_time = np.nanmean(run_total_times) if run_total_times else np.nan
         avg_avg_exec_time = np.nanmean(run_avg_exec_times) if run_avg_exec_times else np.nan
-
+        avg_avg_loc = np.nanmean(run_avg_locs) if run_avg_locs else np.nan
         avg_avg_code_quality = np.nanmean(run_avg_code_quality) if run_avg_code_quality else np.nan
 
 
@@ -199,6 +208,7 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
                 "Percentage of Runs with No Working Code (%)": round(percentage_no_working_code, 2),
                 "Total Run Time (seconds)": round(avg_total_time, 2) if not np.isnan(avg_total_time) else None,
                 "Average Step Execution Time (seconds/step)": round(avg_avg_exec_time, 4) if not np.isnan(avg_avg_exec_time) else None,
+                "Average LOC per Step (lines of code)": round(avg_avg_loc, 2) if not np.isnan(avg_avg_loc) else None,
                 "Average LLM Estimated Code Quality (0-10)": round(avg_avg_code_quality, 2) if not np.isnan(avg_avg_code_quality) else None,
                 "Aggregated Exception Type Frequencies": aggregated_exception_counts,
             },
@@ -209,6 +219,7 @@ def calculate_empirical_metrics(entity=WANDB_ENTITY, project=WANDB_PROJECT, filt
                 "StepsToWO": run_steps_to_wo,
                 "TotalTime": run_total_times,
                 "AvgExecTime": run_avg_exec_times,
+                "AvgLOC": run_avg_locs,
                 "AvgCodeQuality": run_avg_code_quality,
             }
         }

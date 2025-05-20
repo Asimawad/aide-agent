@@ -18,6 +18,7 @@ from .interpreter import ExecutionResult
 from .utils.metric import MetricValue
 from .utils.response import trim_long_string
 
+
 @dataclass(eq=False)
 class Node(DataClassJsonMixin):
     """A single node in the solution tree. Contains code, execution results, and evaluation information."""
@@ -26,7 +27,6 @@ class Node(DataClassJsonMixin):
     code: str
     plan: str = field(default=None, kw_only=True)  # type: ignore
     summary:str = None,
-    task_summary:str = " "
     # ---- general attrs ----
     step: int = field(default=None, kw_only=True)  # type: ignore
     id: str = field(default_factory=lambda: uuid.uuid4().hex, kw_only=True)
@@ -45,13 +45,6 @@ class Node(DataClassJsonMixin):
     # post-execution result analysis (findings/feedback)
     analysis: str = field(default=None, kw_only=True)  # type: ignore
     metric: MetricValue = field(default=None, kw_only=True)  # type: ignore
-    code_quality: float = field(default=0, kw_only=True)  # type: ignore
-    gold_medal: bool = field(default=0, kw_only=True)  # type: ignore
-    silver_medal: bool = field(default=0, kw_only=True)  # type: ignore
-    bronze_medal: bool = field(default=0, kw_only=True)  # type: ignore
-    above_median: bool = field(default=0, kw_only=True)  # type: ignore
-    effective_debug_step: bool = field(default=0, kw_only=True)  # type: ignore
-    effective_reflections: bool = field(default=0, kw_only=True)  # type: ignore
     # whether the agent decided that the code is buggy
     # -> always True if exc_type is not None or no valid metric
     is_buggy: bool = field(default=None, kw_only=True)  # type: ignore
@@ -144,7 +137,6 @@ class Journal(DataClassJsonMixin):
     """A collection of nodes representing the solution tree."""
 
     nodes: list[Node] = field(default_factory=list)
-    task_summary:str = None
     # eda: InteractiveSession = field(default_factory=lambda: InteractiveSession())
 
     def __getitem__(self, idx: int) -> Node:
@@ -253,32 +245,3 @@ def filter_journal(journal: Journal) -> Journal:
         filtered_journal = filter_for_longest_path(journal)
 
     return filtered_journal
-
-
-def journal2report(journal: Journal, task_desc: dict):
-    from .backend import query
-
-    """
-    Generate a report from a journal, the report will be in markdown format.
-    """
-    report_input = journal.generate_summary(include_code=True)
-    system_prompt_dict = {
-        "Role": "You are a research assistant that always uses concise language.",
-        "Goal": "The goal is to write a technical report summarising the empirical findings and technical decisions.",
-        "Input": "You are given a raw research journal with list of design attempts and their outcomes, and a task description.",
-        "Output": [
-            "Your output should be a single markdown document.",
-            "Your report should have the following sections: Introduction, Preprocessing, Modellind Methods, Results Discussion, Future Work",
-            "You can include subsections if needed.",
-        ],
-    }
-    context_prompt = (
-        f"Here is the research journal of the agent: <journal>{report_input}<\\journal>, "
-        f"and the task description is: <task>{task_desc}<\\task>."
-    )
-    return query(
-        system_message=system_prompt_dict,
-        user_message=context_prompt,
-        model="o3-mini", 
-        max_tokens=4096,
-    )

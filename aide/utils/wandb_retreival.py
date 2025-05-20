@@ -4,53 +4,17 @@ from .config import load_cfg
 import pandas as pd
 # --- Configuration ---
 cfg = load_cfg()
-from . import copytree
-import os
-import shutil
-import wandb
-from pathlib import Path
-
 WANDB_ENTITY = "asim_awad"
 
-WANDB_PROJECT = "MLE_BENCH_AIDE" 
+WANDB_PROJECT = "MLE_BENCH" 
 
 WANDB_RUN_NAME = cfg.wandb.run_name
 
 DOWNLOAD_DIR = "./logs"
 
-FILE_FILTER_PATTERN = cfg.wandb.run_name #solve me
-def copy_best_solution_and_submission():
-    # Define the source and target directories
-    workspaces_dir = os.path.join("workspaces", cfg.exp_name)
-    logs_dir = Path(os.path.join("logs", cfg.exp_name) )
+FILE_FILTER_PATTERN = cfg.wandb.run_name
 
-    # Define the specific folders to copy
-    best_solution_dir = Path(os.path.join(workspaces_dir, "best_solution"))
-    best_submission_dir = Path(os.path.join(workspaces_dir, "best_submission"))
-
-    # Check if the directories exist and copy them to the logs directory
-    if os.path.exists(best_solution_dir):
-        copytree(best_solution_dir, logs_dir ,use_symlinks=False)
-        print(f"Copied best_solution directory to {logs_dir}")
-    else:
-        print(f"best_solution directory not found in {workspaces_dir}")
-
-    if os.path.exists(best_submission_dir):
-        copytree(best_submission_dir, logs_dir,use_symlinks=False)
-        print(f"Copied best_submission directory to {logs_dir}")
-    else:
-        print(f"best_submission directory not found in {workspaces_dir}")
-
-def save_logs_to_wandb():
-    # Ensure the logs directory is populated with the relevant folders (best_solution and best_submission)
-    copy_best_solution_and_submission()
-
-    # Save the entire logs directory to WandB
-    print("Saving logs directory to WandB")
-    wandb.save(f"logs/{cfg.exp_name}/*", base_path="logs")  # Save log files
-
-
-def get_wb_data(project_name = "MLE_BENCH_AIDE", wandb_run_name=WANDB_RUN_NAME , filter_pattern =FILE_FILTER_PATTERN, download_dir = "./logs" ):
+def get_wb_data(project_name = "MLE_BENCH", wandb_run_name=WANDB_RUN_NAME , filter_pattern =FILE_FILTER_PATTERN, download_dir = "./" ):
         
     # --- Download Logic ---
     try:
