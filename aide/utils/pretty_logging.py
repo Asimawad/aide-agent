@@ -9,7 +9,7 @@ from rich.theme import Theme
 # 1) Root-logger: 2 handlers →   • run.log  (DEBUG, all noise)
 #                                • Rich TTY (INFO+, coloured)
 # ────────────────────────────────────────────────────────────
-LOG_PATH = pathlib.Path("run.log")                # flat file in CWD
+LOG_PATH = pathlib.Path("run.log")  # flat file in CWD
 
 file_handler = logging.FileHandler(LOG_PATH, mode="w", encoding="utf-8")
 file_handler.setLevel(logging.INFO)
@@ -22,7 +22,7 @@ rich_handler = RichHandler(
     rich_tracebacks=True,
     markup=True,
     show_level=True,
-    show_time=False,          # we print our own time stamp in log_step
+    show_time=False,  # we print our own time stamp in log_step
     show_path=False,
 )
 rich_handler.setLevel(logging.INFO)
@@ -31,7 +31,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     handlers=[file_handler, rich_handler],
     format="%(message)s",
-    force=True,               # override any earlier basicConfig
+    force=True,  # override any earlier basicConfig
 )
 
 logger = logging.getLogger("aide")
@@ -41,22 +41,25 @@ logger = logging.getLogger("aide")
 # ────────────────────────────────────────────────────────────
 _T0 = time.time()
 
-def log_step(*,
-             step: int,
-             total: int,
-             stage: str,
-             is_buggy: bool,
-             exec_time: float | None = None,
-             metric: float | None = None) -> None:
+
+def log_step(
+    *,
+    step: int,
+    total: int,
+    stage: str,
+    is_buggy: bool,
+    exec_time: float | None = None,
+    metric: float | None = None,
+) -> None:
     """
     Print a neat progress line to stdout **and** to the rich handler.
     Example:
         00:03  step 2/25  self-reflection  ✓  exec 1.07s  metric 0.8529
     """
-    mm, ss       = divmod(int(time.time() - _T0), 60)
-    status       = "[red]✗[/]" if is_buggy else "[green]✓[/]"
-    exec_str     = f"exec {exec_time:>.2f}s" if exec_time is not None else ""
-    metric_str   = f"metric {metric:>.4f}"   if metric     is not None else ""
+    mm, ss = divmod(int(time.time() - _T0), 60)
+    status = "[red]✗[/]" if is_buggy else "[green]✓[/]"
+    exec_str = f"exec {exec_time:>.2f}s" if exec_time is not None else ""
+    metric_str = f"metric {metric:>.4f}" if metric is not None else ""
     logger.debug(
         f"[dim]{mm:02d}:{ss:02d}[/]  "
         f"step {step}/{total:<2}  "

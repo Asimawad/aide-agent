@@ -4,10 +4,11 @@ import shutil
 import sys
 import pandas as pd
 import os
-from .utils import copytree, empirical_eval, advanced_metrics,load_benchmarks
+from .utils import copytree, empirical_eval, advanced_metrics, load_benchmarks
 from tqdm import tqdm  # Import tqdm for progress bar
 import time
-os.environ['WANDB_API_KEY'] = "8ca0d241dd66f5a643d64a770d61ad066f937c48"
+
+os.environ["WANDB_API_KEY"] = "8ca0d241dd66f5a643d64a770d61ad066f937c48"
 
 try:
     import wandb
@@ -15,7 +16,7 @@ except ImportError:
     wandb = None
 
 from . import backend
-from .agent import Agent
+from .agent import Agent, PlannerAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node
 from omegaconf import OmegaConf
@@ -36,6 +37,7 @@ from rich.status import Status
 from rich.tree import Tree
 from .utils.config import load_task_desc, prep_agent_workspace, save_run, load_cfg
 from .utils.wandb_retreival import get_wb_data, save_logs_to_wandb
+
 
 class VerboseFilter(logging.Filter):
     """
@@ -99,45 +101,45 @@ def journal_to_string_tree(journal: Journal) -> str:
     return tree_str
 
 
-def run():    
+def run():
     cfg = load_cfg()
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
 
     log_format = "[%(asctime)s] %(levelname)s: %(message)s"
-    
+
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, cfg.log_level.upper()))
-    
+
     # Clear any existing handlers to prevent duplicates
     root_logger.handlers.clear()
-    
+
     # Configure httpx logger
     httpx_logger = logging.getLogger("httpx")
     httpx_logger.setLevel(logging.WARNING)
-    
+
     # Configure aide logger
     logger = logging.getLogger("aide")
     logger.handlers.clear()  # Clear any existing handlers
-    
+
     # Create handlers
     file_handler = logging.FileHandler(cfg.log_dir / "aide.log")
     file_handler.setFormatter(logging.Formatter(log_format))
     file_handler.addFilter(VerboseFilter())
-    
+
     verbose_file_handler = logging.FileHandler(cfg.log_dir / "aide.verbose.log")
     verbose_file_handler.setFormatter(logging.Formatter(log_format))
-    
+
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(logging.Formatter(log_format))
     console_handler.setLevel(getattr(logging, cfg.log_level.upper()))
     console_handler.addFilter(VerboseFilter())
-    
+
     # Add handlers to aide logger
     logger.addHandler(file_handler)
     logger.addHandler(verbose_file_handler)
     logger.addHandler(console_handler)
-    
+
     # Set propagate to False to prevent duplicate logging
     logger.propagate = False
     logger.info(f'Starting run "{cfg.exp_name}"')
@@ -147,20 +149,18 @@ def run():
         try:
             wandb_run = wandb.init(
                 project=cfg.wandb.project,
-                entity=cfg.wandb.entity, 
-                name=cfg.wandb.run_name, 
+                entity=cfg.wandb.entity,
+                name=cfg.wandb.run_name,
                 # dir="./",
-                config=OmegaConf.to_container(cfg, resolve=True), # Log the config
+                config=OmegaConf.to_container(cfg, resolve=True),  # Log the config
                 job_type="aide_run",
-                tags=["aide-agent", cfg.agent.code.model], # Example tags
-
+                tags=["aide-agent", cfg.agent.code.model],  # Example tags
             )
-            
 
         except Exception as e:
             logger.error(f"Failed to initialize W&B: {e}")
-            wandb_run = None 
-    
+            wandb_run = None
+
     task_desc = load_task_desc(cfg)
     task_desc_str = backend.compile_prompt_to_md(task_desc)
 
@@ -176,13 +176,23 @@ def run():
     competition_benchmarks = load_benchmarks(cfg.competition_name)
 
     journal = Journal()
-    agent = Agent(
-        task_desc=task_desc,
-        cfg=cfg,
-        journal=journal,
-        wandb_run=wandb_run,
-        competition_benchmarks=competition_benchmarks
-    )
+    if cfg.ITS_strategy == "planner":
+        agent = PlannerAgent(
+            task_desc=task_desc,
+            cfg=cfg,
+            journal=journal,
+            wandb_run=wandb_run,
+            competition_benchmarks=competition_benchmarks,
+        )
+    else:
+        # Default to the standard Agent
+        agent = Agent(
+            task_desc=task_desc,
+            cfg=cfg,
+            journal=journal,
+            wandb_run=wandb_run,
+            competition_benchmarks=competition_benchmarks,
+        )
 
     interpreter = Interpreter(
         cfg.workspace_dir, **OmegaConf.to_container(cfg.exec)  # type: ignore
@@ -238,7 +248,7 @@ def run():
         with tqdm(total=cfg.agent.steps, desc="Agent Steps", unit="step") as pbar:
             for i in range(cfg.agent.steps):
                 t0 = time.time()
-                agent.step(exec_callback=exec_callback, current_step_number=i+1)
+                agent.step(exec_callback=exec_callback, current_step_number=i + 1)
                 t1 = time.time()
                 print(f"Time taken for step {i+1}: {t1-t0} seconds")
                 save_run(cfg, journal)  # Save progress locally
@@ -251,7 +261,7 @@ def run():
         save_run(cfg, journal)
 
     finally:  # Add finally block - This block runs no matter what.
-        interpreter.cleanup_session() 
+        interpreter.cleanup_session()
 
         # # Check if a W&B run was successfully started
         if wandb_run:
@@ -259,36 +269,50 @@ def run():
             logger.info("Finishing W&B Run...")
             try:
                 wo_step = None
-                no_of_csvs=0
-                buggy_nodes=0
-                avg_code_quality=0
-                gold_medals=0
-                silver_medals=0
-                bronze_medals=0
-                above_amedian=0
-                effective_debugs=0
+                no_of_csvs = 0
+                buggy_nodes = 0
+                avg_code_quality = 0
+                gold_medals = 0
+                silver_medals = 0
+                bronze_medals = 0
+                above_amedian = 0
+                effective_debugs = 0
 
                 for node in journal.nodes:
                     if not node.is_buggy:
                         wo_step = node.step if wo_step is None else wo_step
-                        no_of_csvs+=1
-                        avg_code_quality+=node.code_quality
-                        if node.metric.value>=competition_benchmarks["median_threshold"]:
-                            above_amedian+=1
+                        no_of_csvs += 1
+                        avg_code_quality += node.code_quality
+                        if (
+                            node.metric.value
+                            >= competition_benchmarks["median_threshold"]
+                        ):
+                            above_amedian += 1
                         if node.effective_debug_step:
-                            effective_debugs+=1
-                        if node.metric.value>=competition_benchmarks["gold_threshold"]:
-                            gold_medals+=1
-                        elif node.metric.value>=competition_benchmarks["silver_threshold"]:
-                            silver_medals+=1
-                        elif node.metric.value>=competition_benchmarks["bronze_threshold"]:
-                            bronze_medals+=1
+                            effective_debugs += 1
+                        if (
+                            node.metric.value
+                            >= competition_benchmarks["gold_threshold"]
+                        ):
+                            gold_medals += 1
+                        elif (
+                            node.metric.value
+                            >= competition_benchmarks["silver_threshold"]
+                        ):
+                            silver_medals += 1
+                        elif (
+                            node.metric.value
+                            >= competition_benchmarks["bronze_threshold"]
+                        ):
+                            bronze_medals += 1
                     else:
-                        buggy_nodes+=1
-                        avg_code_quality+=node.code_quality
+                        buggy_nodes += 1
+                        avg_code_quality += node.code_quality
 
-                avg_code_quality/=cfg.agent.steps
-                wandb.summary["steps_to_first_working_code"] = wo_step if wo_step is not None else cfg.agent.steps + 10
+                avg_code_quality /= cfg.agent.steps
+                wandb.summary["steps_to_first_working_code"] = (
+                    wo_step if wo_step is not None else cfg.agent.steps + 10
+                )
                 wandb.summary["no_of_csvs"] = no_of_csvs
                 wandb.summary["buggy_nodes"] = buggy_nodes
                 wandb.summary["avg_code_quality"] = avg_code_quality
@@ -304,15 +328,15 @@ def run():
                 wandb.summary["best_validation_metric"] = best_node.metric.value
                 wandb.summary["best_node_id"] = best_node.id
                 wandb.summary["best_node_step"] = best_node.step
-            
+
             try:
-                shutil.rmtree(cfg.workspace_dir/"input",ignore_errors=True)
+                shutil.rmtree(cfg.workspace_dir / "input", ignore_errors=True)
                 df = pd.DataFrame(wandb.summary._as_dict())
-                df.to_csv("logs/summary.csv", index=False)
+                df.to_csv(f"{cfg.log_dir}/summary.csv", index=False)
             except:
                 pass
             try:
-                empirical_eval.calculate_empirical_metrics(id = wandb_run.id)
+                empirical_eval.calculate_empirical_metrics(id=wandb_run.id)
             except Exception as e:
                 print(f"calculating empirical metrics gone wrong with this error : {e}")
             try:
@@ -325,20 +349,21 @@ def run():
                 logger.info("W&B Run finished.")
             except Exception as e_finalization:
                 logger.error(f"Error during W&B finalization: {e_finalization}")
-                if wandb_run: 
+                if wandb_run:
                     try:
-                         wandb_run.finish()
-                         logger.info("W&B Run finished after encountering an error.")
+                        wandb_run.finish()
+                        logger.info("W&B Run finished after encountering an error.")
                     except Exception as e_finish_retry:
-                         logger.error(f"Error during W&B finish retry: {e_finish_retry}")
+                        logger.error(f"Error during W&B finish retry: {e_finish_retry}")
 
         # Clean up workspace if this was the first step
         if global_step == 0 or global_step == cfg.agent.steps:
             try:
                 if global_step == cfg.agent.steps:
-                    shutil.rmtree(cfg.workspace_dir/"input")
+                    shutil.rmtree(cfg.workspace_dir / "input")
             except:
                 shutil.rmtree(cfg.workspace_dir)
+
 
 if __name__ == "__main__":
     run()
