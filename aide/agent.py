@@ -4,7 +4,7 @@ import random
 import time
 from rich.syntax import Syntax # Keep for potential internal use, but not for verbose file logging
 from rich.console import Console
-from typing import Any, Callable, cast
+from typing import Any, Callable, cast, Optional
 
 # Assuming backend.__init__.query is the one being called
 from .backend import FunctionSpec, query as backend_query # Rename to avoid conflict if any local 'query'
@@ -651,7 +651,7 @@ class Agent:
         if not self.journal.nodes or self.data_preview is None:
             self.update_data_preview()
         # Consider if task summarization should happen only once or under certain conditions
-        if self.journal.task_summary is None: # Only summarize if not already done
+        if self.journal.task_summary is None and self.cfg.goal is None: # Only summarize if not already done
              logger.info(f"AGENT_STEP{current_step_number}: Task summary not found in journal, generating new one.", extra={"verbose": True})
              self.journal.task_summary = self.summarize_task(self.task_desc)
              self.task_desc = self.journal.task_summary # Update internal task_desc to summarized version
@@ -829,8 +829,8 @@ class Agent:
         result_node.stage = node_stage
         result_node.exec_time = exec_duration
         # Add code_quality to node if it's not there from parse_exec_result
-        if not hasattr(node, 'code_quality'):
-            node.code_quality = self._code_quality
+        if not hasattr(result_node, 'code_quality'):
+            result_node.code_quality = self._code_quality
 
 
         self.journal.append(result_node)
