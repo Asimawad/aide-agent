@@ -35,9 +35,9 @@ def perform_two_step_reflection(
     """
     log_prefix_main = f"SELF_REFLECT_STEP{current_step}"
     logger.info(f"{log_prefix_main}: Starting two-step reflection.", extra={"verbose": True})
-    logger.debug(f"{log_prefix_main}_INITIAL_CODE_START\n{code}\n{log_prefix_main}_INITIAL_CODE_END", extra={"verbose": True})
-    logger.debug(f"{log_prefix_main}_INITIAL_ANALYSIS_START\n{analysis}\n{log_prefix_main}_INITIAL_ANALYSIS_END", extra={"verbose": True})
-    logger.debug(f"{log_prefix_main}_INITIAL_TERM_OUT_START\n{term_out}\n{log_prefix_main}_INITIAL_TERM_OUT_END", extra={"verbose": True})
+    # logger.debug(f"{log_prefix_main}_INITIAL_CODE_START\n{code}\n{log_prefix_main}_INITIAL_CODE_END", extra={"verbose": True})
+    # logger.debug(f"{log_prefix_main}_INITIAL_ANALYSIS_START\n{analysis}\n{log_prefix_main}_INITIAL_ANALYSIS_END", extra={"verbose": True})
+    # logger.debug(f"{log_prefix_main}_INITIAL_TERM_OUT_START\n{term_out}\n{log_prefix_main}_INITIAL_TERM_OUT_END", extra={"verbose": True})
 
 
     # --- Stage 1: Critique and Edit Proposal ---

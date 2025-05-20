@@ -34,7 +34,7 @@ def _setup_vllm_client():
     """Sets up the OpenAI client for vLLM server."""
     global _client
     if _client is None:
-        logger.info(f"Setting up vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
+        logger.info(f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
         try:  
             _client = openai.OpenAI(
                 base_url=_vllm_config["base_url"],
@@ -49,7 +49,7 @@ def _setup_vllm_client1():
     """Sets up the OpenAI client for vLLM server."""
     global _client1
     if _client1 is None:
-        logger.info(f"Setting up vLLM client with base_url: {_vllm_config1['base_url']}", extra={"verbose": True})
+        logger.info(f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}", extra={"verbose": True})
         try:  
             _client1 = openai.OpenAI(
                 base_url=_vllm_config1["base_url"],
@@ -61,7 +61,7 @@ def _setup_vllm_client1():
             raise
 # Only needed if you configure base_url/api_key via a central OmegaConf object passed to it. Remove if config is purely via env vars or static. >>>
 def set_vllm_config(cfg: OmegaConf):
-    """Update vLLM config from OmegaConf."""
+    """Update planner vLLM config from OmegaConf."""
     global _vllm_config
     if cfg.get("vllm"):
         _vllm_config.update({
@@ -110,7 +110,7 @@ def query(
         filtered_api_params["model"] = model
 
         try:
-            if planner:
+            if not planner:
                 _setup_vllm_client1()
                 t0 = time.time()
                 completion = backoff_create(
@@ -120,6 +120,8 @@ def query(
                     **filtered_api_params,
                 )
             else:
+                logger.debug(f"Calling vLLM planner API>>>>> {model}", extra={"verbose": True})
+                logger.info(f"Calling vLLM planner API>>>>> {model}")
                 _setup_vllm_client()
                 t0 = time.time()
                 completion = backoff_create(
