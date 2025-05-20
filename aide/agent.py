@@ -103,6 +103,15 @@ class Agent:
         self.competition_name = self.cfg.competition_name
         self._code_quality = 0 # Initialize code quality
 
+        # Initialize W&B plot data lists
+        self._metric_hist = []
+        self._bug_flags = []
+        self._sub_flags = []
+        self._above_median_flags = []
+        self._gold_medal_flags = []
+        self._silver_medal_flags = []
+        self._bronze_medal_flags = []
+
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
         search_cfg = self.acfg.search
@@ -728,110 +737,148 @@ class Agent:
 
         # --- Logging to W&B and Journal ---
         logger.info(f"AGENT_STEP{current_step_number}: Preparing step log data for W&B.", extra={"verbose": True})
-        step_log_data = ({
+        step_log_data=({
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
             f"progress/current_step": current_step_number,
-            f"progress/competition_name": self.competition_name,
-            "exec/exception_type": result_node.exc_type if result_node.exc_type else "None", # Log string "None"
-            f"code/estimated_quality": int(self._code_quality), # Already set in parse_exec_result
+            f"progress/competition_name":self.competition_name,
+            "exec/exception_type": result_node.exc_type if  result_node.exc_type  else "None", # Ensure it's a string
+            f"code/estimated_quality":int(self._code_quality),
+            # f"eval/reflection_usage": 1 if reflection_applied and not result_node.is_buggy else 0, # Old name
             f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0, # More specific name
+            # f"eval/effective_debug_step": 1 if result_node.effective_debug_step else 0, # Old name
             f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0, # Renamed for clarity
+            # f"eval/effective_reflections": 1 if result_node.effective_reflections else 0, # This was probably redundant with reflection_applied_successfully
         })
-        for flag_name in ["_above_median_flags", "_gold_medal_flags", "_silver_medal_flags", "_bronze_medal_flags", "_metric_hist", "_bug_flags", "_sub_flags"]:
-                if not hasattr(self, flag_name):
-                   setattr(self, flag_name, [])
-        # ... (rest of your W&B metric logging, which seems fine) ...
+
+        agent_validation_metrics_defined = False # Flag to track if it's defined
         if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             step_log_data[f"eval/validation_metric"] = result_node.metric.value
-            # ... [your existing threshold and medal logging for wandb] ...
+            agent_validation_metrics_defined = True # Set flag
+
             if self.competition_benchmarks: # Check if benchmarks are available
-                agent_validation_metrics = {
-                    'value': result_node.metric.value, 'step': current_step_number,
-                    'competition_name': self.competition_name,
-                    "above_median": 1 if result_node.metric.value > self.competition_benchmarks.get("median_threshold", float('inf')) else 0,
-                    "gold_medal": 1 if result_node.metric.value > self.competition_benchmarks.get("gold_threshold", float('inf')) else 0,
-                    "silver_medal": 1 if result_node.metric.value > self.competition_benchmarks.get("silver_threshold", float('inf')) else 0,
-                    "bronze_medal": 1 if result_node.metric.value > self.competition_benchmarks.get("bronze_threshold", float('inf')) else 0,
-                }
-                # ... (rest of your wandb plot generation, ensure self._*flags are initialized if not present) ...
+                # Use .get with a default that ensures comparison is false if key missing
+                # (e.g. comparing to float('inf') for '>' will be false)
+                above_median_val = 1 if result_node.metric.value > self.competition_benchmarks.get("median_threshold", float('inf')) else 0
+                gold_medal_val = 1 if result_node.metric.value > self.competition_benchmarks.get("gold_threshold", float('inf')) else 0
+                silver_medal_val = 1 if result_node.metric.value > self.competition_benchmarks.get("silver_threshold", float('inf')) else 0
+                bronze_medal_val = 1 if result_node.metric.value > self.competition_benchmarks.get("bronze_threshold", float('inf')) else 0
+                
+                self._above_median_flags.append(above_median_val)
+                self._gold_medal_flags.append(gold_medal_val)
+                self._silver_medal_flags.append(silver_medal_val)
+                self._bronze_medal_flags.append(bronze_medal_val)
 
-            # --- Bar charts for threshold flags ---
-            # Above Median
-            self._above_median_flags.append(agent_validation_metrics["above_median"])
-            above_true = sum(self._above_median_flags)
-            above_false = len(self._above_median_flags) - above_true
-            if wandb and self.wandb_run : # Check if wandb is available
-                above_table = wandb.Table(data=[["Above Median", above_true], ["Below Median", above_false]], columns=["label","count"])
-                step_log_data["plots/above_median_bar"] = wandb.plot.bar(above_table, "label", "count", title="Above Median Steps")
-            # Gold Medal
-            self._gold_medal_flags.append(agent_validation_metrics["gold_medal"])
-            gold_true = sum(self._gold_medal_flags)
-            gold_false = len(self._gold_medal_flags) - gold_true
-            if wandb and self.wandb_run :
-                gold_table = wandb.Table(data=[["Gold Medal", gold_true], ["No Gold Medal", gold_false]], columns=["label","count"])
-                step_log_data["plots/gold_medal_bar"] = wandb.plot.bar(gold_table, "label", "count", title="Gold Medal Steps")
-            # Silver Medal
-            self._silver_medal_flags.append(agent_validation_metrics["silver_medal"])
-            silver_true = sum(self._silver_medal_flags)
-            silver_false = len(self._silver_medal_flags) - silver_true
-            if wandb and self.wandb_run :
-                silver_table = wandb.Table(data=[["Silver Medal", silver_true], ["No Silver Medal", silver_false]], columns=["label","count"])
-                step_log_data["plots/silver_medal_bar"] = wandb.plot.bar(silver_table, "label", "count", title="Silver Medal Steps")
-            # Bronze Medal
-            self._bronze_medal_flags.append(agent_validation_metrics["bronze_medal"])
-            bronze_true = sum(self._bronze_medal_flags)
-            bronze_false = len(self._bronze_medal_flags) - bronze_true
-            if wandb and self.wandb_run :
-                bronze_table = wandb.Table(data=[["Bronze Medal", bronze_true], ["No Bronze Medal", bronze_false]], columns=["label","count"])
-                step_log_data["plots/bronze_medal_bar"] = wandb.plot.bar(bronze_table, "label", "count", title="Bronze Medal Steps")
+                # --- Bar charts for threshold flags ---
+                if wandb and self.wandb_run : # Check if wandb is available
+                    # Above Median
+                    above_true = sum(self._above_median_flags)
+                    above_false = len(self._above_median_flags) - above_true
+                    above_table = wandb.Table(data=[["Above Median", above_true], ["Below Median", above_false]], columns=["label","count"])
+                    step_log_data["plots/above_median_bar"] = wandb.plot.bar(above_table, "label", "count", title="Above Median Steps")
+                    
+                    # Gold Medal
+                    gold_true = sum(self._gold_medal_flags)
+                    gold_false = len(self._gold_medal_flags) - gold_true
+                    gold_table = wandb.Table(data=[["Gold Medal", gold_true], ["No Gold Medal", gold_false]], columns=["label","count"])
+                    step_log_data["plots/gold_medal_bar"] = wandb.plot.bar(gold_table, "label", "count", title="Gold Medal Steps")
 
+                    # Silver Medal
+                    silver_true = sum(self._silver_medal_flags)
+                    silver_false = len(self._silver_medal_flags) - silver_true
+                    silver_table = wandb.Table(data=[["Silver Medal", silver_true], ["No Silver Medal", silver_false]], columns=["label","count"])
+                    step_log_data["plots/silver_medal_bar"] = wandb.plot.bar(silver_table, "label", "count", title="Silver Medal Steps")
+
+                    # Bronze Medal
+                    bronze_true = sum(self._bronze_medal_flags)
+                    bronze_false = len(self._bronze_medal_flags) - bronze_true
+                    bronze_table = wandb.Table(data=[["Bronze Medal", bronze_true], ["No Bronze Medal", bronze_false]], columns=["label","count"])
+                    step_log_data["plots/bronze_medal_bar"] = wandb.plot.bar(bronze_table, "label", "count", title="Bronze Medal Steps")
+            else:
+                logger.warning(f"AGENT_STEP{current_step_number}: Competition benchmarks not available, skipping medal plots.", extra={"verbose": True})
         else:
-            step_log_data[f"eval/validation_metric"] = float('nan')
+            step_log_data[f"eval/validation_metric"] = float('nan') # W&B handles NaN well
 
+        # Final check for submission file existence
         submission_path = submission_dir / "submission.csv"
         submission_exists = submission_path.exists()
-        if not result_node.is_buggy and not submission_exists:
+        if not result_node.is_buggy and not submission_exists: # This logic is good
             logger.warning(f"AGENT_STEP{current_step_number}: Node {result_node.id} was not buggy but submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
-            result_node.is_buggy = True
-            result_node.metric = WorstMetricValue() # Reset metric
+            result_node.is_buggy = True # Mark as buggy
+            result_node.metric = WorstMetricValue() # Reset metric because it's effectively a failure
+            # If it was previously considered not buggy and had a metric, that metric is now invalid.
+            # We should also ensure that `step_log_data["eval/validation_metric"]` reflects this.
+            step_log_data[f"eval/validation_metric"] = float('nan')
+            # And remove it from metric_hist if it was added based on the now-invalid assumption
+            if agent_validation_metrics_defined and self._metric_hist and self._metric_hist[-1] == result_node.metric.original_value_before_reset_to_worst: # hypothetical attribute
+                 # This logic is tricky: if it was added to _metric_hist based on a value that's now invalid
+                 # because submission.csv is missing, we might want to remove it.
+                 # For simplicity now, we'll let it be logged as NaN for this step.
+                 # The key is that is_buggy is now true.
+                 pass
+
+
         step_log_data[f"eval/submission_produced"] = 1 if submission_exists else 0
 
-        # --- Histogram and other plots for W&B (ensure wandb and self.wandb_run checks) ---
+
+        # --- Histogram of validation metric
+        # This should only append if the node is NOT buggy AND has a valid metric.
+        # The previous block already sets step_log_data["eval/validation_metric"] to NaN if buggy.
+        if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
+            self._metric_hist.append(result_node.metric.value)
+
         if wandb and self.wandb_run:
-            if result_node.metric and result_node.metric.value is not None:
-                self._metric_hist.append(result_node.metric.value)
-            if len(self._metric_hist) >= 3: # Reduced from 3 for earlier plotting
-                tbl = wandb.Table(data=[[v] for v in self._metric_hist], columns=["val"])
-                # Changed to scatter plot as histogram might not be best for sequential data
-                step_log_data["plots/val_metric_scatter"] = wandb.plot.scatter(tbl, "val", "val", title="Validation Metric Values")
+            if len(self._metric_hist) >= 1: # Plot even with one point
+                try: # Add try-except for W&B table creation
+                    metric_table_data = [[v] for v in self._metric_hist if isinstance(v, (int, float))] # Ensure data is plottable
+                    if metric_table_data:
+                        tbl = wandb.Table(data=metric_table_data, columns=["val"])
+                        step_log_data["plots/val_metric_scatter"] = wandb.plot.scatter(
+                            tbl, "val", "val", title="Validation Metric Values (Non-Buggy Steps)"
+                        )
+                    else:
+                        logger.warning(f"AGENT_STEP{current_step_number}: No valid metric data to plot for val_metric_scatter.", extra={"verbose": True})
+                except Exception as e:
+                    logger.error(f"AGENT_STEP{current_step_number}: Error creating W&B scatter plot for metrics: {e}", exc_info=True, extra={"verbose": True})
 
 
+            # Keep a rolling list of 0/1 flags for every step
             self._bug_flags.append(1 if result_node.is_buggy else 0)
-            bug_count = sum(self._bug_flags)
+            bug_count   = sum(self._bug_flags)
             clean_count = len(self._bug_flags) - bug_count
-            bug_table = wandb.Table(data=[["Buggy", bug_count], ["Clean", clean_count]], columns=["label", "count"])
-            step_log_data["plots/bug_vs_clean"] = wandb.plot.bar(bug_table, "label", "count", title="Buggy vs Clean Steps")
-
-            self._sub_flags.append(1 if submission_exists else 0)
-            with_sub = sum(self._sub_flags)
+            try:
+                bug_table = wandb.Table(data=[["Buggy", bug_count], ["Clean", clean_count]], columns=["label", "count"])
+                step_log_data["plots/bug_vs_clean"] = wandb.plot.bar(bug_table, "label", "count", title="Buggy vs clean steps")
+            except Exception as e:
+                logger.error(f"AGENT_STEP{current_step_number}: Error creating W&B bar plot for bug_vs_clean: {e}", exc_info=True, extra={"verbose": True})
+            
+            # --- Bar chart: Submission produced vs missing
+            self._sub_flags.append(1 if submission_exists else 0) # submission_exists is defined above
+            with_sub   = sum(self._sub_flags)
             without_sub = len(self._sub_flags) - with_sub
-            sub_table = wandb.Table(data=[["Has submission", with_sub], ["No submission", without_sub]], columns=["label", "count"])
-            step_log_data["plots/submission_presence"] = wandb.plot.bar(sub_table, "label", "count", title="Submission Produced vs Missing")
+            try:
+                sub_table = wandb.Table(data=[["Has submission", with_sub], ["No submission", without_sub]], columns=["label", "count"])
+                step_log_data["plots/submission_presence"] = wandb.plot.bar(sub_table, "label", "count", title="Submission produced vs missing")
+            except Exception as e:
+                logger.error(f"AGENT_STEP{current_step_number}: Error creating W&B bar plot for submission_presence: {e}", exc_info=True, extra={"verbose": True})
 
+        # --- Send log data to W&B ---
         if self.wandb_run:
-            logger.info(f"AGENT_STEP{current_step_number}: Logging to W&B.", extra={"verbose": True})
-            self.wandb_run.log(step_log_data, step=current_step_number)
+            # t_wandb_start = time.time() # last variable seems unused
+            logger.info(f"AGENT_STEP{current_step_number}: Logging data to W&B. Keys: {list(step_log_data.keys())}", extra={"verbose": True})
+            try:
+                self.wandb_run.log(step_log_data, step=current_step_number)
+            except Exception as e:
+                logger.error(f"AGENT_STEP{current_step_number}: Error logging to W&B: {e}", exc_info=True, extra={"verbose": True})
+            # last = time.time() # Unused
         else:
             logger.info(f"AGENT_STEP{current_step_number}: W&B run not available, skipping W&B log.", extra={"verbose": True})
+        # --- End Send log data ---
 
+        # Storing node.code_quality happens in parse_exec_result now.
 
         result_node.stage = node_stage
         result_node.exec_time = exec_duration
-        # Add code_quality to node if it's not there from parse_exec_result
-        if not hasattr(result_node, 'code_quality'):
-            result_node.code_quality = self._code_quality
-
 
         self.journal.append(result_node)
         logger.info(f"AGENT_STEP{current_step_number}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}", extra={"verbose": True})
