@@ -35,7 +35,7 @@ agent:
   data_preview: true
   convert_system_to_user: false
   obfuscate: false
-  ITS_Strategy: "Baseline"  #Split-planner-coder
+  ITS_Strategy: "Baseline"  #planner
 
   # ── LLM settings for coding ───────────────────────────────────────────────
   code:
