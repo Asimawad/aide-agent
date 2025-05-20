@@ -79,7 +79,7 @@ def perform_two_step_reflection(
         plan_raw = query_func(
             system_message=system_prompt1,
             user_message=critique_user_prompt,
-            model=cfg.agent.code.planner_model, # Using planner model for critique
+            model=model_name, # Using planner model for critique
             planner=True, # Treat critique as a planning-like task
             temperature=temperature,
             convert_system_to_user=convert_system_to_user,
@@ -91,10 +91,8 @@ def perform_two_step_reflection(
         logger.error(f"{log_prefix_critique}: Error during critique LLM query: {e}", exc_info=True, extra={"verbose": True})
         return f"REFLECTION_CRITIQUE_ERROR: {e}", code # Return original code on error
 
-    # Your original code to remove <think> tags.
-    # This assumes the LLM for critique DOES NOT use <think> tags.
-    # If it does, you might need to adjust.
-    # For now, I'll assume the critique model outputs the plan directly as per its instructions.
+   
+    
     reflection_plan = plan_raw.strip() if isinstance(plan_raw, str) else str(plan_raw)
 
     logger.debug(f"{log_prefix_critique}_EXTRACTED_PLAN_START\n{reflection_plan}\n{log_prefix_critique}_EXTRACTED_PLAN_END", extra={"verbose": True})
@@ -155,9 +153,7 @@ def perform_two_step_reflection(
             system_message=system_prompt2,
             user_message=coder_user_prompt,
             model=model_name, # This should be the coder model, e.g., cfg.agent.code.model
-            planner=False, # Coder is not a planner, but your prompt for sys2 says planner=True. Clarify model role.
-                           # For now, setting planner=False based on typical coder role.
-                           # If the model for system_prompt2 IS a planner model, then set True.
+            planner=False, 
             temperature=temperature,
             convert_system_to_user=convert_system_to_user,
             current_step=current_step, # Pass current_step
