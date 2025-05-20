@@ -35,8 +35,9 @@ aide data_dir="example_tasks/house_prices" goal="Predict the sales price for eac
 ### And here’s your model-friendly prompt-style instruction:
 
 ```bash
-aide data_dir="data/spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=o3-mini agent.ITS_Strategy="none" agent.steps=3
+aide data_dir="spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=o3-mini agent.ITS_Strategy="none" agent.steps=3 agent.code.planner_model="RedHatAI_DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"
 
+logs/+o3-minispooky-author-identification_none_3_steps
 
 
 python -m vllm.entrypoints.openai.api_server \
@@ -197,3 +198,16 @@ aide data_dir="aide/example_tasks/nomad2018-predict-transparent-conductors/datas
 
 
 ```
+
+
+
+
+python -m vllm.entrypoints.openai.api_server \
+    --model "RedHatAI/DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"  \
+    --port 8001 \
+    --dtype bfloat16 \
+    --device cuda \
+    --max-model-len 16384 \
+    --gpu-memory-utilization 0.6 \
+    --trust-remote-code \
+    --enforce-eager
