@@ -570,6 +570,8 @@ class Agent:
                 query_func=backend_query, # Pass the master query
                 wrap_code_func=wrap_code,
                 extract_code_func=extract_code,
+                current_step=self.current_step, # Add this to the function signature
+
                 # ADD current_step for logging within perform_two_step_reflection if modified
                 # current_step = self.current_step 
             )
@@ -679,9 +681,9 @@ class Agent:
         exec_start_time = time.time()
         exec_result = exec_callback(result_node.code, reset_session=True)
         exec_duration = time.time() - exec_start_time
-        logger.info(f"AGENT_STEP{current_step_number}: Code execution finished in {exec_duration:.2f}s. Success: {exec_result.success}", extra={"verbose": True})
-        logger.debug(f"AGENT_STEP{current_step_number}_EXEC_RESULT_STDOUT_START\n{exec_result.stdout}\nAGENT_STEP{current_step_number}_EXEC_RESULT_STDOUT_END", extra={"verbose": True})
-        logger.debug(f"AGENT_STEP{current_step_number}_EXEC_RESULT_STDERR_START\n{exec_result.stderr}\nAGENT_STEP{current_step_number}_EXEC_RESULT_STDERR_END", extra={"verbose": True})
+        logger.info(f"AGENT_STEP{current_step_number}: Code execution finished in {exec_duration:.2f}s. Success: {exec_result.term_out}", extra={"verbose": True})
+        logger.debug(f"AGENT_STEP{current_step_number}_EXEC_RESULT_STDOUT_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_EXEC_RESULT_STDOUT_END", extra={"verbose": True})
+        logger.debug(f"AGENT_STEP{current_step_number}_EXEC_RESULT_STDERR_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_EXEC_RESULT_STDERR_END", extra={"verbose": True})
 
 
         logger.info(f"AGENT_STEP{current_step_number}: Parsing execution results for node {result_node.id}.", extra={"verbose": True})
@@ -704,9 +706,9 @@ class Agent:
                     exec_start_time = time.time()
                     exec_result = exec_callback(result_node.code, reset_session=True)
                     exec_duration = time.time() - exec_start_time # Update exec_duration
-                    logger.info(f"AGENT_STEP{current_step_number}: Reflected code execution finished in {exec_duration:.2f}s. Success: {exec_result.success}", extra={"verbose": True})
-                    logger.debug(f"AGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDOUT_START\n{exec_result.stdout}\nAGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDOUT_END", extra={"verbose": True})
-                    logger.debug(f"AGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDERR_START\n{exec_result.stderr}\nAGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDERR_END", extra={"verbose": True})
+                    logger.info(f"AGENT_STEP{current_step_number}: Reflected code execution finished in {exec_duration:.2f}s. Success: {exec_result.term_out}", extra={"verbose": True})
+                    logger.debug(f"AGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDOUT_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDOUT_END", extra={"verbose": True})
+                    logger.debug(f"AGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDERR_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDERR_END", extra={"verbose": True})
 
                     logger.info(f"AGENT_STEP{current_step_number}: Parsing execution results for reflected code of node {result_node.id}.", extra={"verbose": True})
                     result_node = self.parse_exec_result(node=result_node, exec_result=exec_result) # Re-parse
@@ -798,7 +800,7 @@ class Agent:
         if wandb and self.wandb_run:
             if result_node.metric and result_node.metric.value is not None:
                 self._metric_hist.append(result_node.metric.value)
-            if len(self._metric_hist) >= 1: # Reduced from 3 for earlier plotting
+            if len(self._metric_hist) >= 3: # Reduced from 3 for earlier plotting
                 tbl = wandb.Table(data=[[v] for v in self._metric_hist], columns=["val"])
                 # Changed to scatter plot as histogram might not be best for sequential data
                 step_log_data["plots/val_metric_scatter"] = wandb.plot.scatter(tbl, "val", "val", title="Validation Metric Values")
