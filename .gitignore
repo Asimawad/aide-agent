@@ -78,7 +78,7 @@ instance/
 
 # Scrapy stuff:
 .scrapy
-
+bfg-1.14.0.jar
 # Sphinx documentation
 docs/_build/
 
