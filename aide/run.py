@@ -176,7 +176,7 @@ def run():
     competition_benchmarks = load_benchmarks(cfg.competition_name)
 
     journal = Journal()
-    if cfg.ITS_strategy == "planner":
+    if cfg.agent.ITS_Strategy == "planner":
         agent = PlannerAgent(
             task_desc=task_desc,
             cfg=cfg,
@@ -250,7 +250,9 @@ def run():
                 t0 = time.time()
                 agent.step(exec_callback=exec_callback, current_step_number=i + 1)
                 t1 = time.time()
-                print(f"Time taken for step {i+1}: {t1-t0} seconds")
+                print(
+                    f"*****************Time taken for step {i+1}: {t1-t0} seconds***************"
+                )
                 save_run(cfg, journal)  # Save progress locally
                 global_step += 1
                 pbar.update(1)
