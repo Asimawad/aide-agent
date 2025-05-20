@@ -43,6 +43,8 @@ agent:
   convert_system_to_user: True
   # whether to obfuscate that we're doing kaggle
   obfuscate: False
+  # whether to use the agent's own code as a prompt
+  strong_coder: null
 
   ITS_Strategy: "None" #"self-reflection" 
   # LLM settings for coding

@@ -65,7 +65,7 @@ class AgentConfig:
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
-
+    strong_coder:str
 
 @dataclass
 class ExecConfig:
