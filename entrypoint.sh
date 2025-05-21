@@ -3,7 +3,17 @@ set -e
 set -o pipefail
 
 echo "Entrypoint script started..."
-
+mkdir -p ./logs
+touch ./logs/vllm_coder.log ./logs/vllm_planner.log
+sudo chown $(whoami) ./logs/vllm_coder.log
+sudo chown $(whoami) ./logs/vllm_planner.log
+sudo chmod 777 ./logs/vllm_coder.log
+sudo chmod 777 ./logs/vllm_planner.log
+echo "vLLM server log file created at ./logs/vllm_server.log"
+# echo "Starting vLLM server..."
+export VLLM_LOG_LEVEL=DEBUG
+export VLLM_LOG_FILE="./logs/vllm_server.log"
+export VLLM_LOG_FORMAT="%(asctime)s %(message)s"
 export VLLM_TRACE_LEVEL=DEBUG
 export OLLAMA_NUM_PARALLEL=8
 export OLLAMA_MAX_QUEUE=1024
@@ -12,8 +22,8 @@ export CODER_MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
 # export PLANNER_MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-16B"
 export MODEL_NAME="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 export FEEDBACK_MODEL_NAME="deepseek-ai/DeepSeek-Feedback-Model"
-export first_model_log="vllm_coder.log"
-export second_model_log="vllm_planner.log"
+export first_model_log="./logs/vllm_coder.log"
+export second_model_log="./logs/vllm_planner.log"
 
 # --- Start first model ---
 echo "Starting vLLM server for coder model #1 with $CODER_MODEL_NAME on port 8000..."
