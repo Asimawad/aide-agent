@@ -17,13 +17,12 @@ export VLLM_LOG_FORMAT="%(asctime)s %(message)s"
 export VLLM_TRACE_LEVEL=DEBUG
 export OLLAMA_NUM_PARALLEL=8
 export OLLAMA_MAX_QUEUE=1024
-
-export CODER_MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
-# export PLANNER_MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-16B"
-export MODEL_NAME="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
-export FEEDBACK_MODEL_NAME="deepseek-ai/DeepSeek-Feedback-Model"
 export first_model_log="./logs/vllm_coder.log"
 export second_model_log="./logs/vllm_planner.log"
+
+export FEEDBACK_MODEL_NAME="o4-mini-2025-04-16"
+export CODER_MODEL_NAME="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
+# export PLANNER_MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-16B"
 
 # --- Start first model ---
 echo "Starting vLLM server for coder model #1 with $CODER_MODEL_NAME on port 8000..."
