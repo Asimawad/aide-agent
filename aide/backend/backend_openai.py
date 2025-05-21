@@ -170,9 +170,9 @@ def query(
 
     t0 = time.time()
     _setup_openai_client()
-    logger.debug(f"[Timing] _setup_openai_client end: {time.time() - t0:.3f}s")
-    # Filter kwargs bas ed on the model being used
+    logger.debug(f"[Timing] _setup_openai_client took: {time.time() - t0:.3f}s")
     t0 = time.time()
+    # Prepare messages list for OpenAI API format
     model = model_kwargs.get("model", "")
     filtered_kwargs = filter_model_kwargs(model, model_kwargs)
 

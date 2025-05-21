@@ -121,11 +121,6 @@ def _prepare_model_kwargs(
         # Add other provider-specific max_tokens names if necessary
         # logger.warning(f"Max tokens specified, but unsure of param name for provider '{provider_name}'.")
 
-    # Reasoning effort is specific to certain OpenAI models
-    if provider_name == "openai" and model_name.startswith(("o3-", "o4-")):
-        if reasoning_effort:
-            final_kwargs["reasoning_effort"] = reasoning_effort
-
     return final_kwargs
 
 
@@ -158,17 +153,14 @@ def query(
     log_identifier = f"BACKEND_QUERY_STEP{current_step}_MODEL_{model.replace('/', '_').replace('-', '_')}_PROVIDER_{provider_name}"
 
     logger.info(f"{log_identifier}: Dispatching query.", extra={"verbose": True})
-    # For verbose logs, print the full prompts and func_spec
     # Use json.dumps for better readability of dicts/lists in log files
     if compiled_system_message:
         try:
-            # If system_message was a dict, compile_prompt_to_md makes it a string.
-            # If you want to log the original dict structure for dict prompts:
-            # system_log_content = json.dumps(system_message, indent=2) if isinstance(system_message, (dict, list)) else compiled_system_message
-            system_log_content = compiled_system_message  # Current behavior
+            system_log_content = json.dumps(system_message, indent=2) if isinstance(system_message, (dict, list)) else compiled_system_message
+            # system_log_content = compiled_system_message  # Current behavior
         except (
             TypeError
-        ):  # Handle non-serializable if original dict had complex objects
+        ):  
             system_log_content = str(system_message)
         logger.debug(
             f"{log_identifier}_SYSTEM_MESSAGE_START\n{system_log_content}\n{log_identifier}_SYSTEM_MESSAGE_END",
@@ -177,8 +169,8 @@ def query(
 
     if compiled_user_message:
         try:
-            # user_log_content = json.dumps(user_message, indent=2) if isinstance(user_message, (dict, list)) else compiled_user_message
-            user_log_content = compiled_user_message  # Current behavior
+            user_log_content = json.dumps(user_message, indent=2) if isinstance(user_message, (dict, list)) else compiled_user_message
+            # user_log_content = compiled_user_message  # Current behavior
         except TypeError:
             user_log_content = str(user_message)
         logger.debug(
@@ -205,10 +197,6 @@ def query(
         )
         raise ValueError(f"Unsupported provider: {provider_name}")
 
-    # step_identifier is already used by you, which is good. Let's ensure it's passed.
-    # The 'step_identifier' passed to the backend (e.g. vllm) should be unique and informative.
-    # The one you generate (f"Step_{current_step}_Model_{model.replace('/', '_')}") is good.
-
     t0 = time.time()
     raw_responses, latency, input_tokens, output_tokens, info = (
         "ERROR_DEFAULT",
@@ -219,7 +207,7 @@ def query(
     )  # Defaults
     try:
         print(f"Querying {provider_name} with model {model}...")
-        # Pass current_step to the specific backend if it can use it for more granular logging
+
         raw_responses, latency, input_tokens, output_tokens, info = query_func(
             system_message=compiled_system_message,
             user_message=compiled_user_message,
@@ -243,8 +231,6 @@ def query(
         f"{log_identifier}: Query completed. Provider Latency: {latency:.3f}s, Total Dispatch: {query_duration:.3f}s, Tokens In/Out: {input_tokens}/{output_tokens}",
         extra={"verbose": True},
     )
-
-    # Log raw response to verbose log
     if func_spec:
         try:
             response_log_content = (
@@ -258,10 +244,10 @@ def query(
             f"{log_identifier}_RAW_FUNCTION_RESPONSE_START\n{response_log_content}\n{log_identifier}_RAW_FUNCTION_RESPONSE_END",
             extra={"verbose": True},
         )
-    else:
-        logger.debug(
-            f"{log_identifier}_RAW_TEXT_RESPONSE_START\n{str(raw_responses)}\n{log_identifier}_RAW_TEXT_RESPONSE_END",
-            extra={"verbose": True},
-        )
+    # else:
+    #     logger.debug(
+    #         f"{log_identifier}_RAW_TEXT_RESPONSE_START\n{str(raw_responses)}\n{log_identifier}_RAW_TEXT_RESPONSE_END",
+    #         extra={"verbose": True},
+    #     )
 
     return raw_responses
