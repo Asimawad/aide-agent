@@ -181,12 +181,8 @@ logs
 data/
 Datasets.zip
 Fulld_dataset.zip
-aide/example_tasks/house_prices/
 .asim
 finetuning
 prompt_playground
-aide/example_tasks/*/outputs/
-Play-Code
-aide/agent_mcts.py
-aide_mcts.zip
+
 
