@@ -12,6 +12,7 @@ from . import (
     backend_local,
     backend_openai,
     backend_vllm,
+    backend_ollama,
 )
 from .utils import FunctionSpec, OutputType, PromptType, compile_prompt_to_md
 
@@ -29,6 +30,7 @@ _PROVIDER_QUERY_FUNCTIONS: Dict[
     "openai": backend_openai.query,
     "vllm": backend_vllm.query,
     "deepseek": backend_deepseek.query,
+    "ollama": backend_ollama.query,  # Assuming Ollama uses OpenAI's API
     "hf": backend_local.query,  # Renamed "HF" to "hf" for consistency
 }
 
@@ -36,7 +38,7 @@ _PROVIDER_QUERY_FUNCTIONS: Dict[
 # Order matters: more specific prefixes should come before more general ones if overlap is possible.
 _MODEL_PREFIX_TO_PROVIDER_MAP: Dict[str, Tuple[str, ...]] = {
     "openai": ("gpt-", "o4-", "o3-"),
-    "deepseek": ("deepseek-", "wojtek/"),
+    "deepseek": ("deepseek", "wojtek/"),
     # Add other providers and their prefixes here
     # e.g., "another_provider": ("another-prefix-",)
 }
@@ -88,6 +90,9 @@ def _resolve_provider(
     ):
         # If it's VLLM engine and NOT an explicit OpenAI or DeepSeek API model, force VLLM
         return "vllm"
+    elif current_inference_engine == "ollama":
+        # If the inference engine is explicitly set to OpenAI, use it
+        return "ollama"
     # Default determination based on model name
     return _determine_provider_from_model_name(model_name)
 
@@ -218,6 +223,7 @@ def query(
         {},
     )  # Defaults
     try:
+        print(f"Querying {provider_name} with model {model}...")
         # Pass current_step to the specific backend if it can use it for more granular logging
         raw_responses, latency, input_tokens, output_tokens, info = query_func(
             system_message=compiled_system_message,
