@@ -20,16 +20,16 @@ export OLLAMA_MAX_QUEUE=1024
 export first_model_log="./logs/vllm_coder.log"
 export second_model_log="./logs/vllm_planner.log"
 
-export FEEDBACK_MODEL_NAME="o4-mini-2025-04-16"
-export CODER_MODEL_NAME="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
-# export PLANNER_MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-16B"
+export FEEDBACK_MODEL="o4-mini-2025-04-16"
+export CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
+# export PLANNER_MODEL="deepseek-ai/DeepSeek-Coder-V2-16B"
 
 # --- Start first model ---
-echo "Starting vLLM server for coder model #1 with $CODER_MODEL_NAME on port 8000..."
+echo "Starting vLLM server for coder model #1 with $CODER_MODEL on port 8000..."
 touch $first_model_log
 
 python -m vllm.entrypoints.openai.api_server \
-    --model "$CODER_MODEL_NAME" \
+    --model "$CODER_MODEL" \
     --port 8000 \
     --dtype bfloat16 \
     --device cuda \
@@ -63,14 +63,14 @@ kill $TAIL_PID
 echo "Model $CODER_MODEL is healthy."
 
 
-if [ -n "$PLANNER_MODEL_NAME" ]; then
-    echo "PLANNER_MODEL_NAME is set to $PLANNER_MODEL_NAME"
+if [ -n "$PLANNER_MODEL" ]; then
+    echo "PLANNER_MODEL is set to $PLANNER_MODEL"
     # # --- Start second model ---
-    echo "Starting vLLM server for planner model #2 with $PLANNER_MODEL_NAME on port 8001..."
+    echo "Starting vLLM server for planner model #2 with $PLANNER_MODEL on port 8001..."
     touch $second_model_log
 
     python -m vllm.entrypoints.openai.api_server \
-        --model "$PLANNER_MODEL_NAME" \
+        --model "$PLANNER_MODEL" \
         --port 8001 \
         --device cuda \
         --max-model-len 4096 \
@@ -99,7 +99,7 @@ if [ -n "$PLANNER_MODEL_NAME" ]; then
     echo "Model 2 is healthy."
     echo "Started model 2 with PID: $PLANNER_PID"
 else
-    echo "PLANNER_MODEL_NAME is not set. Skipping second model start."
+    echo "PLANNER_MODEL is not set. Skipping second model start."
 fi
 
 
