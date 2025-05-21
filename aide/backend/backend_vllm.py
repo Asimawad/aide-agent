@@ -130,10 +130,10 @@ def query(
 
         try:
             if not planner:
-                _setup_vllm_client1()
+                _setup_vllm_client()
                 t0 = time.time()
                 completion = backoff_create(
-                    _client1.chat.completions.create,
+                    _client.chat.completions.create,
                     VLLM_API_EXCEPTIONS,
                     messages=messages,
                     **filtered_api_params,
@@ -143,10 +143,10 @@ def query(
                     f"Calling vLLM planner API>>>>> {model}", extra={"verbose": True}
                 )
                 logger.info(f"Calling vLLM planner API>>>>> {model}")
-                _setup_vllm_client()
+                _setup_vllm_client1()
                 t0 = time.time()
                 completion = backoff_create(
-                    _client.chat.completions.create,
+                    _client1.chat.completions.create,
                     VLLM_API_EXCEPTIONS,
                     messages=messages,
                     **filtered_api_params,

@@ -17,9 +17,6 @@ from . import (
 from .utils import FunctionSpec, OutputType, PromptType, compile_prompt_to_md
 
 # --- Configuration & Globals ---
-# It's good practice to load config once or pass it around explicitly.
-# If cfg can change during runtime for different calls, consider passing it to query.
-# For now, assuming cfg.inference_engine is a global default for the query function.
 _DEFAULT_CONFIG = load_cfg()
 logger = logging.getLogger("aide.backend")  # Standard logger name
 
@@ -46,8 +43,6 @@ _DEFAULT_MODEL_PROVIDER = "vllm"  # Fallback provider if no prefix matches
 
 
 # --- Helper Functions ---
-
-
 def _determine_provider_from_model_name(model_name: str) -> str:
     """Determines the provider based on the model name's prefix."""
     for provider, prefixes in _MODEL_PREFIX_TO_PROVIDER_MAP.items():
