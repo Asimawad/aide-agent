@@ -203,7 +203,7 @@ class Agent:
             + fmt
         }
 
-    def plan_and_code_query(self, prompt, excute, retries=3) -> tuple[str, str]:
+    def plan_and_code_query(self, prompt, excute, retries=1) -> tuple[str, str]:
         """Generate a natural language plan + code in the same LLM call and split them apart."""
         system_prompt = {
             "SYSTEM": "You are a Kaggle Grandmaster. you can plan , implement, debug and improve and machine learning engineering code,",
@@ -216,76 +216,43 @@ class Agent:
         completion_text = None
         execution_summary = None
         for _ in range(retries):
-            if self.cfg.inference_engine == "HF" and self.acfg.code.model != "o3-mini":
-                completion_text = query(
-                    system_message=system_prompt,
-                    user_message=prompt,
-                    model=self.acfg.code.model,
-                    temperature=self.acfg.code.temp,
-                    max_tokens=self.acfg.code.max_new_tokens,
-                    top_p=self.acfg.code.top_p,
-                    top_k=self.acfg.code.top_k,
-                    excute=excute,
-                    current_step=self.current_step,
-                    inference_engine=self.cfg.inference_engine,
-                    num_responses=self.acfg.code.num_return_sequences,
-                    convert_system_to_user=self.acfg.convert_system_to_user,
-                )
-            else:
-                completion_text = query(
-                    system_message=system_prompt,
-                    user_message=prompt,
-                    model=self.acfg.code.model,
-                    temperature=self.acfg.code.temp,
-                    current_step=self.current_step,
-                    convert_system_to_user=self.acfg.convert_system_to_user,
-                )
-
+            self.cfg.inference_engine == "HF" and self.acfg.code.model != "o3-mini"
+            completion_text = query(
+                        system_message=system_prompt,
+                        user_message=prompt,
+                        model=self.acfg.code.model,
+                        temperature=self.acfg.code.temp,
+                        max_tokens=self.acfg.code.max_new_tokens,
+                        top_p=self.acfg.code.top_p,
+                        top_k=self.acfg.code.top_k,
+                        excute=excute,
+                        current_step=self.current_step,
+                        inference_engine=self.cfg.inference_engine,
+                        num_responses=self.acfg.code.num_return_sequences,
+                        convert_system_to_user=self.acfg.convert_system_to_user,
+                    )
+  
             code = extract_code(completion_text)
             nl_text = extract_text_up_to_code(completion_text)
 
             if code and nl_text:
-                # merge all code blocks into a single string
+
                 return nl_text, code, "execution_summary"
 
             logger.info("Plan + code extraction failed, retrying...")
         logger.info("Final plan + code extraction attempt failed, giving up...")
         return "", completion_text, "None"  # type: ignore
 
-    # Inside aide-ds/aide/agent.py, within the Agent class
-
     def _draft(
         self, parent_node=None
     ) -> (
         Node
-    ):  # Removed initial_high_level_plan for now, as we focus on templated full draft
-        # console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting") # Keep if you like console output here
+    ):  
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
         logger.info(
-            f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})"
+            f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})", extra={"verbose": True}
         )
-
-        # --- Try to get the competition-specific template ---
         comp_data = self.competition_benchmarks
-
-        code_template = None
-        if (
-            self.competition_benchmarks
-            and self.competition_name
-            and self.cfg.use_template
-        ):
-            if comp_data and comp_data["template"]:
-                code_template = comp_data["template"]
-                logger.info(
-                    f"Found code template for competition: {self.competition_name}"
-                )
-            else:
-                logger.warning(
-                    f"No template found for competition: {self.competition_name} in competition_benchmarks. Proceeding without template."
-                )
-        else:
-            logger.warning(
-                "Competition benchmarks or competition name not available or not enabled. Proceeding without template."
-            )
 
         # --- Construct the prompt ---
         introduction = "You are a Kaggle grandmaster. Your task is to develop a complete Python script to solve the described machine learning competition."
@@ -294,56 +261,26 @@ class Agent:
 
         prompt_user_message: Any = {
             "Introduction": introduction,
-            "Overall Task Description": self.task_desc,  # This is the markdown/text from the competition
+            "Overall Task Description": self.task_desc, 
             "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
             "Instructions": {},
         }
-
-        if code_template:
-            prompt_user_message["Code Template to Complete"] = (
-                f"```python\n{code_template}\n```"
-            )
-            prompt_user_message["Instructions"]["Template Guidance"] = [
-                "You are provided with a Python code template above. Your primary goal is to complete the sections marked with `{{PLACEHOLDER_NAME}}`.",
-                "Specifically, you need to provide Python code for:",
-                "  1. `{{FEATURE_ENGINEERING_CODE}}`: Load data as per template, preprocess, and create features necessary for your model.",
-                '  2. `{{MODEL_TRAINING_VALIDATION_CODE}}`: Define your model, set up training loops, and perform validation. This section *must* print the primary validation metric in the format: `print(f"Validation Metric: {your_validation_score:.4f}")` (adjust precision as needed for the metric).',
-                "  3. `{{PREDICTION_CODE}}`: Use your trained model to generate predictions on the test data.",
-                "  4. `{{CREATE_FINAL_SUBMISSION_DATAFRAME_CODE}}`: Construct a pandas DataFrame named `final_submission_df`. This DataFrame must strictly follow the submission format specified by the `sample_submission.csv` for this competition (column names, number of rows, ID column).",
-                "Do NOT modify the pre-filled data loading sections or the final submission saving logic in the template unless absolutely critical for your approach and you explain why.",
-                "Ensure all necessary libraries not already in the template are imported at the beginning of the relevant placeholder or at the top of the script if globally needed.",
-                "Focus on creating a robust, runnable first version of the complete solution based on the template.",
-            ]
-            prompt_user_message["Instructions"]["Output Format"] = (
-                "Your response should be a brief natural language PLAN (3-5 sentences) outlining your approach to filling the template placeholders, "
-                "followed by a SINGLE markdown code block containing the *complete, filled-in Python script* based on the provided template."
-                "There should be no additional headings or text in your response. Just the PLAN, a newline, and then the markdown code block."
-                "explicitly,structure your answer exactly like this:"
-                "\n\n---\n"
-                "1) PLAN (plain text, no fences):\n"
-                "<your step‑by‑step reasoning for filling the placeholders>\n\n"
-                "2) CODE (one fenced Python block):\n"
-                "```python\n"
-                "<your COMPLETE python code here, with template placeholders filled>\n"
-                "```"
-            )
-        else:  # Fallback if no template is found - revert to original _draft prompting style
-            prompt_user_message[
-                "Instructions"
-            ] |= self._prompt_resp_fmt  # Original response format
-            prompt_user_message["Instructions"] |= {  # Original sketch guidelines
-                "Solution sketch guideline": [
-                    "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.",
-                    "Take the Memory section into consideration when proposing the design.",
-                    "The solution sketch should be 3-5 sentences.",
-                    "Propose an evaluation metric that is reasonable for this task.",
-                    "Don't suggest to do EDA.",
-                    "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
-                ],
-            }
-            prompt_user_message[
-                "Instructions"
-            ] |= self._prompt_impl_guideline  # Original implementation guidelines
+        prompt_user_message[
+            "Instructions"
+        ] |= self._prompt_resp_fmt  # Original response format
+        prompt_user_message["Instructions"] |= {  # Original sketch guidelines
+            "Solution sketch guideline": [
+                "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.",
+                "Take the Memory section into consideration when proposing the design.",
+                "The solution sketch should be 3-5 sentences.",
+                "Propose an evaluation metric that is reasonable for this task.",
+                "Don't suggest to do EDA.",
+                "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
+            ],
+        }
+        prompt_user_message[
+            "Instructions"
+        ] |= self._prompt_impl_guideline  # Original implementation guidelines
 
         prompt_user_message[
             "Instructions"
@@ -352,45 +289,45 @@ class Agent:
         if self.acfg.data_preview:
             prompt_user_message["Data Overview"] = self.data_preview
 
-        # The `plan` from LLM here is its plan for filling the template / solving the task.
-        # The `code` is the complete script (either filled template or from scratch).
         agent_plan_for_step, generated_code, execution_summary = (
             self.plan_and_code_query(prompt_user_message, excute=False)
         )
 
         formatted_extracted_code = format_code(generated_code)
         if formatted_extracted_code:
-            # console.print(f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]")
+            console.print(f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]")
             # console.print(Syntax(formatted_extracted_code, "python", theme="default", line_numbers=True))
             logger.info(
-                "Code generated for drafting stage:", extra={"verbose": True}
+                "Plan and Code generated for drafting stage", extra={"verbose": True}
             )  # General log
+            logger.debug(
+                f"Plan and Code generated for drafting stage:\n{agent_plan_for_step}",
+                extra={"verbose": True}
+            )
             logger.debug(
                 f"{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}",
                 extra={"verbose": True},
-            )  # Verbose log with code
-            # console.print("-" * 60)
+            )
+            console.print("-" * 60)
 
         new_node = Node(
             plan=agent_plan_for_step,
             code=generated_code,
-            summary=execution_summary,  # This field seems not heavily used, but kept for consistency
-            # high_level_plan will be None if we are not doing the hierarchical plan for now
-            # current_hl_step_index will be None
+            summary=execution_summary, 
         )
         # Parent will be set by the caller if this isn't a root draft
         if parent_node:
             new_node.parent = parent_node
 
         logger.info(
-            f"Drafted new node {new_node.id} (Template used: {bool(code_template)})"
+            f"Drafted new node {new_node.id}, plan and code generated successfully",
         )
         return new_node
 
     def _improve(self, parent_node: Node) -> Node:
         console.rule(f"[cyan]Stage : Improving")
         logger.info(
-            f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})",
+            f"Agent step {self.current_step}: Generating Impoved code (parent type: {parent_node.stage_name})",
             extra={"verbose": True},
         )
         introduction = (
@@ -399,13 +336,6 @@ class Agent:
             "For this you should first outline a brief plan in natural language for how the solution can be improved and "
             "then implement this improvement in Python based on the provided previous solution. "
         )
-        if self.acfg.obfuscate:
-            introduction = (
-                "You are an expert machine learning engineer attempting a task. You are provided with a previously developed "
-                "solution below and should improve it in order to further increase the (test time) performance. "
-                "For this you should first outline a brief plan in natural language for how the solution can be improved and "
-                "then implement this improvement in Python based on the provided previous solution. "
-            )
         prompt: Any = {
             "Introduction": introduction,
             "Task description": self.task_desc,
@@ -431,30 +361,25 @@ class Agent:
 
         plan, code, _ = self.plan_and_code_query(prompt, excute=False)
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        logger.info(f"Improved node {parent_node.id} to create new node {new_node.id}")
+        console.rule(f"[cyan]Improvement Done for step {self.current_step}")
+
+        logger.info(f"Improvement Plan  {plan}", extra={"verbose": True})
+        logger.info(f"Improved node {parent_node.id} to create new Code {wrap_code(code)}", extra={"verbose": True})
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
         console.rule(f"[cyan]Stage : Debugging")
         logger.info(
-            f"Agent step {self.current_step}: Generating code (parent type: {parent_node.stage_name})",
+            f"Agent step {self.current_step}: DEBUGING code (parent type: {parent_node.stage_name})",
             extra={"verbose": True},
         )
         introduction = (
             "You are a Kaggle grandmaster attending a competition. "
             "Your previous solution had a bug and/or did not produce a submission.csv, "
             "so based on the information below, you should revise it in order to fix this. "
-            "Your response should be an implementation outline in natural language,"
+            "Your response should be an implementation plan in natural language,"
             " followed by a single markdown code block which implements the bugfix/solution."
         )
-        if self.acfg.obfuscate:
-            introduction = (
-                "You are an expert machine learning engineer attempting a task. "
-                "Your previous solution had a bug and/or did not produce a submission.csv, "
-                "so based on the information below, you should revise it in order to fix this. "
-                "Your response should be an implementation outline in natural language,"
-                " followed by a single markdown code block which implements the bugfix/solution."
-            )
         prompt: Any = {
             "Introduction": introduction,
             "Task description": self.task_desc,
@@ -477,6 +402,8 @@ class Agent:
         plan, code, _ = self.plan_and_code_query(prompt, excute=False)
         new_node = Node(plan=plan, code=code, parent=parent_node)
         logger.info(f"Debugged node {parent_node.id} to create new node {new_node.id}")
+        logger.debug(f"Debugging plan: {plan}", extra={"verbose": True})
+        logger.debug(f"Debugging code: {wrap_code(code)}", extra={"verbose": True})
         return new_node
 
     def reflect(self, node: Node) -> tuple[str, str]:
@@ -502,6 +429,10 @@ class Agent:
 
         if revised_code != node.code and revised_code:  # Check if code actually changed
             logger.info("Self-reflection resulted in code changes.")
+            logger.debug(
+                f"Self-reflection plan: {reflection_plan}", extra={"verbose": True}
+            )
+            logger.debug(f"Self-reflection code: {wrap_code(revised_code)}", extra={"verbose": True})
         elif reflection_plan == "No specific errors found requiring changes.":
             logger.info("Self-reflection found no errors requiring changes.")
         else:
@@ -819,10 +750,7 @@ class Agent:
 
         # --- Send log data to W&B ---
         if self.wandb_run:
-            t_wandb_start = time.time()
             self.wandb_run.log(step_log_data, step=current_step_number)
-
-            last = time.time()
         # --- End Send log data ---
         self.journal.append(result_node)
 
@@ -966,8 +894,7 @@ class Agent:
         node.analysis = review_response.get(
             "summary", "Feedback LLM failed."
         )  # Default value
-        # Determine buggy status based on multiple factors
-        logger.info(f"summary: {node.analysis}")
+
         node.is_buggy = (
             review_response.get("is_bug", True)  # Default to True if key missing
             or node.exc_type is not None
@@ -977,7 +904,7 @@ class Agent:
         )
 
         if node.is_buggy:
-            logger.info(f"Feedback results: Current Node is buggy.")
+            logger.info(f"Feedback results: Current Node is buggy, summary: {node.analysis}")
             # Log reasons for being buggy
             bug_reasons = []
             if review_response.get("is_bug", True):
@@ -989,23 +916,21 @@ class Agent:
                 bug_reasons.append(f"Exception ({node.exc_type})")
             if metric_value is None:
                 bug_reasons.append("Metric missing/invalid")
-            logger.info(f"Buggy reasons: {'; '.join(bug_reasons)}")
+            logger.info(f"Buggy reasons: {'; '.join(bug_reasons)}", extra={"verbose": True})
 
             node.metric = WorstMetricValue()
 
         else:
-            logger.info(f"Feedback results: Current Node is not buggy")
+            logger.info(f"Feedback results: Current Node not buggy, summary: {node.analysis}")
             node.metric = MetricValue(
                 metric_value,
                 maximize=not review_response.get(
                     "lower_is_better", True
-                ),  # Default lower is better
+                ),  
             )
 
         return node
 
-
-#############################################################################
 #############################################################################
 # -*- coding: utf-8 -*-
 

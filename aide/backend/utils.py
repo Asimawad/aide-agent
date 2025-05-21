@@ -19,7 +19,7 @@ logger = logging.getLogger("aide")
     max_value=60,
     factor=1.5,
 )
-# NEED TO UPDATE THE EXCEPTIONS, you can set them at the backed code
+
 def backoff_create(
     create_fn: Callable, retry_exceptions: list[Exception], *args, **kwargs
 ):
