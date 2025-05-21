@@ -941,7 +941,7 @@ class Agent:
                 )
                 if attempt == max_retries - 1:
                     logger.error("Feedback LLM query failed after multiple retries.")
-                    # Handle failure: maybe default to buggy?
+
                     review_response = {
                         "is_bug": True,
                         "has_csv_submission": False,
@@ -1005,9 +1005,6 @@ class Agent:
         return node
 
 
-#############################################################################
-#############################################################################
-#############################################################################
 #############################################################################
 #############################################################################
 # -*- coding: utf-8 -*-
@@ -1898,17 +1895,17 @@ class PlannerAgent:
         if not self.journal.nodes or self.data_preview is None:
             self.update_data_preview()
         # Consider if task summarization should happen only once or under certain conditions
-        if (
-            self.journal.task_summary is None and self.cfg.goal is None
-        ):  # Only summarize if not already done
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Task summary not found in journal, generating new one.",
-                extra={"verbose": True},
-            )
-            self.journal.task_summary = self.summarize_task(self.task_desc)
-            self.task_desc = (
-                self.journal.task_summary
-            )  # Update internal task_desc to summarized version
+        # if (
+        #     self.journal.task_summary is None and self.cfg.goal is None
+        # ):  # Only summarize if not already done
+        #     logger.info(
+        #         f"AGENT_STEP{current_step_number}: Task summary not found in journal, generating new one.",
+        #         extra={"verbose": True},
+        #     )
+        #     self.journal.task_summary = self.summarize_task(self.task_desc)
+        #     self.task_desc = (
+        #         self.journal.task_summary
+        #     )  # Update internal task_desc to summarized version
 
         logger.info(
             f"AGENT_STEP{current_step_number}: Calling search_policy.",

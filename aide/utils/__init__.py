@@ -119,6 +119,7 @@ def parse_model_id(model_name: str) -> tuple:
 
 
 def load_benchmarks(competition_name: str):
-    with open("aide/utils/competition_template.json", "r") as f:
+    json_path = Path(__file__).parent / "competition_template.json"
+    with open(json_path, "r") as f:
         benchmarks = json.load(f)
     return benchmarks[competition_name]
