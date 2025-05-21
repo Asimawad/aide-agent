@@ -15,10 +15,11 @@ setup(
     description="Open source Autonomous AI for Data Science and Machine Learning",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/Asimawad/aide-ds",
+    url="https://github.com/Asimawad/aide-agent",
     packages=find_packages(),
     package_data={
         "aide": [
+            "../utils/competition_template.json",
             "../requirements.txt",
             "utils/config.yaml",
             "utils/viz_templates/*",
