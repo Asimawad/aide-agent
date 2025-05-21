@@ -251,7 +251,7 @@ def run():
                 agent.step(exec_callback=exec_callback, current_step_number=i + 1)
                 t1 = time.time()
                 print(
-                    f"*****************Time taken for step {i+1}: {t1-t0} seconds***************"
+                    f"---------------> Time taken for step {i+1}: {t1-t0:.2f} seconds<---------------"
                 )
                 save_run(cfg, journal)  # Save progress locally
                 global_step += 1
