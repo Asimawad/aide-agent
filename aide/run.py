@@ -244,7 +244,6 @@ def run():
         )
 
     try:
-        # Wrap the loop with tqdm for a progress bar
         with tqdm(total=cfg.agent.steps, desc="Agent Steps", unit="step") as pbar:
             for i in range(cfg.agent.steps):
                 t0 = time.time()
@@ -253,7 +252,7 @@ def run():
                 print(
                     f"---------------> Time taken for step {i+1}: {t1-t0:.2f} seconds<---------------"
                 )
-                save_run(cfg, journal)  # Save progress locally
+                save_run(cfg, journal)  
                 global_step += 1
                 pbar.update(1)
 
@@ -264,10 +263,7 @@ def run():
 
     finally:  # Add finally block - This block runs no matter what.
         interpreter.cleanup_session()
-
-        # # Check if a W&B run was successfully started
         if wandb_run:
-
             logger.info("Finishing W&B Run...")
             try:
                 wo_step = None

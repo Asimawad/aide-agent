@@ -1,6 +1,5 @@
 from setuptools import find_packages, setup
 
-# import torch
 with open("README.md", "r") as f:
     long_description = f.read()
 
@@ -10,7 +9,7 @@ with open("requirements.txt", "r") as f:
 setup(
     name="aide-ds",
     version="0.1.4",
-    author="Asim Osmany",
+    author="Asim Osman",
     author_email="asim@aims.ac.za",
     description="Open source Autonomous AI for Data Science and Machine Learning",
     long_description=long_description,
@@ -33,7 +32,7 @@ setup(
         "Operating System :: OS Independent",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    python_requires=">=3.10",
+    python_requires=">=3.11",
     install_requires=requirements,
     entry_points={
         "console_scripts": [
