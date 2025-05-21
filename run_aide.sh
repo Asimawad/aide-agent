@@ -74,14 +74,14 @@ aide \
     data_dir="${data_dir}/" \
     goal="${GOAL}" \
     eval="${EVAL}" \
-    log_level="DEBUG" \
+    log_level="INFO" \
     competition_name="${competition_name}" \
     agent.steps=25 \
     agent.time_limit=7200 \
     agent.obfuscate=False \
     agent.ITS_Strategy="planner" \
-    agent.code.model="${DEEPSEEK_ID}" \
-    agent.code.planner_model="${PLANNER_MODEL}" \
+    agent.code.model="${FEEDBACK_MODEL}" \
+    agent.code.planner_model="${FEEDBACK_MODEL}" \
     agent.code.temp=0.6 \
     agent.code.max_new_tokens=2048 \
     agent.code.num_return_sequences=1 \
@@ -91,38 +91,3 @@ aide \
     wandb.enabled=True \
     wandb.project="MLE_BENCH_AIDE_VM" \
     wandb.entity=asim_awad 
-
-
-
-
-# eepSeek-Coder Series
-# DeepSeek-Coder:
-
-# deepseek-ai/DeepSeek-Coder-1.3B
-
-# deepseek-ai/DeepSeek-Coder-5.7B
-
-# deepseek-ai/DeepSeek-Coder-6.7B
-
-# deepseek-ai/DeepSeek-Coder-33B
-
-# DeepSeek-Coder-V2:
-
-# deepseek-ai/DeepSeek-Coder-V2-1.3B
-
-# deepseek-ai/DeepSeek-Coder-V2-6.7B
-
-# deepseek-ai/DeepSeek-Coder-V2-16B
-
-# deepseek-ai/DeepSeek-Coder-V2-236B
-
-# DeepSeek-Coder-V2-Instruct:
-
-# deepseek-ai/DeepSeek-Coder-V2-1.3B-Instruct
-
-# deepseek-ai/DeepSeek-Coder-V2-6.7B-Instruct
-
-# deepseek-ai/DeepSeek-Coder-V2-16B-Instruct
-
-# deepseek-ai/DeepSeek-Coder-V2-236B-Instruct
-

@@ -9,7 +9,7 @@ from rich.theme import Theme
 # 1) Root-logger: 2 handlers →   • run.log  (DEBUG, all noise)
 #                                • Rich TTY (INFO+, coloured)
 # ────────────────────────────────────────────────────────────
-LOG_PATH = pathlib.Path("run.log")  # flat file in CWD
+LOG_PATH = pathlib.Path("logs") / "run.log"  # flat file in CWD
 
 file_handler = logging.FileHandler(LOG_PATH, mode="w", encoding="utf-8")
 file_handler.setLevel(logging.INFO)
