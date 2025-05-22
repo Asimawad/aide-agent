@@ -21,7 +21,7 @@ from .utils.wandb_logger import WandbLogger # We will create this
 from . import backend
 from .agent import Agent, PlannerAgent
 from .interpreter import Interpreter
-from .journal import Journal, Node # Node might not be directly used here but good to have context
+from .journal import Journal, Node  # Node might not be directly used here but good to have context
 from omegaconf import OmegaConf
 from rich.columns import Columns
 from rich.console import Group
