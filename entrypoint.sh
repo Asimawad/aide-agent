@@ -28,14 +28,14 @@ export CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 echo "Starting vLLM server for coder model #1 with $CODER_MODEL on port 8000..."
 touch $first_model_log
 if [ -n "$CODER_MODEL" ]; then
-
+# 
     python -m vllm.entrypoints.openai.api_server \
         --model "$CODER_MODEL" \
         --port 8000 \
         --dtype bfloat16 \
         --device cuda \
-        --max-model-len 8192 \
-        --gpu-memory-utilization 0.9 \
+        --max-model-len 8196 \
+        --gpu-memory-utilization 0.95 \
         --max-num-batched-tokens 16384 \
         --max-num-seqs 50 \
         --trust-remote-code \
