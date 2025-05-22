@@ -58,3 +58,26 @@ torchtext
 torchinfo
 torch-geometric
 
+
+# --- Tabular Data Specific ---
+catboost
+timm # PyTorch Image Models
+opencv-python # OpenCV for image processing
+Pillow # PIL for image manipulation
+albumentations # Image augmentation
+
+# --- Text & NLP ---
+
+# --- Audio Specific ---
+librosa # Audio analysis
+
+# --- Optimization ---
+bayesian-optimization
+optuna # Hyperparameter optimization
+
+# --- Other Useful Utilities ---
+genson # For generating JSON schemas (used in data_preview.py)
+httpx # Often a dependency of API clients like openai, good to ensure it's there.
+igraph # For tree visualization (tree_export.py) - can be python-igraph or cairocffi for plotting
+cairocffi # Often needed for igraph plotting capabilities
+pandas-stubs # For type hinting with pandas (development) - optional

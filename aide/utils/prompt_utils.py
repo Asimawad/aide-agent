@@ -14,27 +14,21 @@ def wrap_code(code_str: str, lang: str = "python") -> str:
 # --- Data for competitions (from your codebase) ---
 COMPETITION_METADATA = {
     "aerial-cactus-identification": {"Task Type": "Image Classification", "Size (GB)": 0.0254},
-    "aptos2019-blindness-detection": {"Task Type": "Image Classification", "Size (GB)": 10.22},
     "denoising-dirty-documents": {"Task Type": "Image To Image", "Size (GB)": 0.06},
     "detecting-insults-in-social-commentary": {"Task Type": "Text Classification", "Size (GB)": 0.002},
     "dog-breed-identification": {"Task Type": "Image Classification", "Size (GB)": 0.75},
     "dogs-vs-cats-redux-kernels-edition": {"Task Type": "Image Classification", "Size (GB)": 0.85},
-    "histopathologic-cancer-detection": {"Task Type": "Image Regression", "Size (GB)": 7.76},
     "jigsaw-toxic-comment-classification-challenge": {"Task Type": "Text Classification", "Size (GB)": 0.06},
     "leaf-classification": {"Task Type": "Image Classification", "Size (GB)": 0.036},
     "mlsp-2013-birds": {"Task Type": "Audio Classification", "Size (GB)": 0.5851},
-    "new-york-city-taxi-fare-prediction": {"Task Type": "Tabular", "Size (GB)": 5.7},
     "nomad2018-predict-transparent-conductors": {"Task Type": "Tabular", "Size (GB)": 0.00624},
     "plant-pathology-2020-fgvc7": {"Task Type": "Image Classification", "Size (GB)": 0.8},
     "random-acts-of-pizza": {"Task Type": "Text Classification", "Size (GB)": 0.003},
-    "ranzcr-clip-catheter-line-classification": {"Task Type": "Image Classification", "Size (GB)": 13.13},
-    "siim-isic-melanoma-classification": {"Task Type": "Image Classification", "Size (GB)": 116.16},
     "spooky-author-identification": {"Task Type": "Text Classification", "Size (GB)": 0.0019},
     "tabular-playground-series-dec-2021": {"Task Type": "Tabular", "Size (GB)": 0.7},
     "tabular-playground-series-may-2022": {"Task Type": "Tabular", "Size (GB)": 0.57},
     "text-normalization-challenge-english-language": {"Task Type": "Seq->Seq", "Size (GB)": 0.01},
     "text-normalization-challenge-russian-language": {"Task Type": "Seq->Seq", "Size (GB)": 0.01},
-    "the-icml-2013-whale-challenge-right-whale-redux": {"Task Type": "Audio Classification", "Size (GB)": 0.29314},
 }
 
 PACKAGE_CATEGORIES = {
@@ -50,7 +44,7 @@ PACKAGE_CATEGORIES = {
 def get_competition_environment_text(competition_name: str) -> str:
     """Generates a text string describing the environment and suggested libraries."""
     # This function remains largely the same as provided in the original agent.py's _prompt_environment
-    # for PlannerAgent, but made more robust for unknown competitions and task types.
+
     if competition_name in COMPETITION_METADATA:
         current_comp_data = COMPETITION_METADATA[competition_name]
         task_type = current_comp_data["Task Type"]
@@ -104,8 +98,8 @@ def get_competition_environment_text(competition_name: str) -> str:
 
 # --- Static Prompt Components (from Agent) ---
 AGENT_IMPLEMENTATION_GUIDELINE_LIST: List[str] = [
-    "1. Write a complete, single-file Python script. ",
-    "2. starting with imports, and load necessary data from the './input/' directory.",
+    "1. Deliver a complete solution, composed of a plan and a code implementations t that successfully solves the kaggle competition and saves the submission.csv file ",
+    "2. the code should be complete, single-file Python script that successfully solves the kaggle competition and saves the submission.csv file ",
     "3. Implement the solution proposed in your plan.",
     "4. Calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
     "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. Ensure the file format matches the task description.",
@@ -127,13 +121,13 @@ AGENT_RESPONSE_FORMAT_TEXT: str = (
     "```"
 )
 
-AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
-    "SYSTEM": "You are a Kaggle Grandmaster. You can plan, implement, debug, and improve machine learning engineering code.",
+AGENT_draft_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+    "SYSTEM": "You are a Kaggle Grandmaster. You can plan and implement machine learning engineering code. You should help the used by plannig slutions and implementing the code",
     "user_instructions": {
-        "Possible Questions you will face": "You will be asked to either come up with a plan and code to solve a Kaggle competition, debug existing code, or improve working code to get better results.",
+        "Possible Questions you will face": "You will be asked to deliver a solution draft by coming up with a plan and code to solve a Kaggle competition.",
         "How to answer the user": (
             'Whenever you answer, always: '
-            '1. Write a "PLAN:" section in plain text with 3-5 concise, *highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
+            '1. Write a "PLAN:" section in plain text with 7-10 highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
             'Example plan step: "1. Load \'train.csv\' and \'test.csv\' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets."\n'
             '2. Then write a "CODE:" section containing exactly one fenced Python block: ```python. Within this code block, *before each major logical section of code*, include a comment explaining your immediate thought process, the specific purpose of that section, and how it relates to your PLAN step. '
             'Example CODE format: ```python\n'
@@ -143,7 +137,28 @@ AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             'test_df = pd.read_csv("./input/test.csv")\n'
             '# Thought: Now, preprocess the features. Based on preliminary analysis, fill missing numerical values with the mean, as mentioned in the plan.\n'
             'train_df["Feature"] = train_df["Feature"].fillna(train_df["Feature"].mean())\n'
-            # The empty string at the end `''` was removed, it's not necessary.
+        ),
+        "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed.",
+        "final instructions": "the user is asking for a draft, the main objective is for the draft to work without bugs, so the proposed solution should be simple in design and idea, and focused on correctness and avoidance of BUGS"
+    },
+}
+
+AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+    "SYSTEM": "You are a Kaggle Grandmaster. You can plan, implement, debug, and improve machine learning engineering code.",
+    "user_instructions": {
+        "Possible Questions you will face": "You will be asked to either come up with a plan and code to solve a Kaggle competition, debug existing code, or improve working code to get better results.",
+        "How to answer the user": (
+            'Whenever you answer, always: '
+            '1. Write a "PLAN:" section in plain text with 7-10*highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
+            'Example plan step: "1. Load \'train.csv\' and \'test.csv\' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets."\n'
+            '2. Then write a "CODE:" section containing exactly one fenced Python block: ```python. Within this code block, *before each major logical section of code*, include a comment explaining your immediate thought process, the specific purpose of that section, and how it relates to your PLAN step. '
+            'Example CODE format: ```python\n'
+            '# Thought: First, I need to load the data using pandas as per step 1 of the plan.\n'
+            'import pandas as pd\n'
+            'train_df = pd.read_csv("./input/train.csv")\n'
+            'test_df = pd.read_csv("./input/test.csv")\n'
+            '# Thought: Now, preprocess the features. Based on preliminary analysis, fill missing numerical values with the mean, as mentioned in the plan.\n'
+            'train_df["Feature"] = train_df["Feature"].fillna(train_df["Feature"].mean())\n'
         ),
         "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed."
     },
@@ -227,9 +242,14 @@ PLANNER_AGENT_CODE_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     },
 }
 
+
+
 # --- System Prompt Getters ---
 def get_agent_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(AGENT_SYSTEM_PROMPT_DICT)
+
+def get_agent_draft_system_prompt() -> Dict[str, Any]:
+    return copy.deepcopy(AGENT_draft_SYSTEM_PROMPT_DICT)
 
 def get_planner_agent_plan_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT)
@@ -247,24 +267,25 @@ def get_agent_draft_user_prompt(
     acfg_data_preview: bool,
     data_preview_content: str = None
 ) -> Dict[str, Any]:
-    introduction = "You are a Kaggle grandmaster. Your task is to develop a complete Python script to solve the described machine learning competition."
+    introduction = "You are a Kaggle grandmaster. Plan and develop a complete Python script to solve the described machine learning competition."
     if obfuscate:
         introduction = "You are an expert machine learning engineer. Your task is to develop a complete Python script to solve the described machine learning problem."
-
+    data_prev = " "
+    if acfg_data_preview and data_preview_content:
+        data_prev= data_preview_content
     # This structure matches the original _draft method's prompt_user_message
     prompt_user_message: Dict[str, Any] = {
         "Introduction": introduction,
         "Overall Task Description": task_desc,
+        "Data Overview" :data_preview_content,
         "Memory (Summary of Previous Attempts on this Task)": journal_summary,
         "Instructions": {
-            "Response format": AGENT_RESPONSE_FORMAT_TEXT,
-            "Solution sketch guideline": AGENT_DRAFT_SOLUTION_GUIDELINE_LIST,
             "Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST,
-            "Environment and Packages": get_competition_environment_text(competition_name)
-        },
+            "Environment and Packages": get_competition_environment_text(competition_name),
+            "Response format": AGENT_RESPONSE_FORMAT_TEXT,
+            "Solution sketch guideline": AGENT_DRAFT_SOLUTION_GUIDELINE_LIST,        },
     }
-    if acfg_data_preview and data_preview_content:
-        prompt_user_message["Data Overview"] = data_preview_content
+
     return prompt_user_message
 
 def get_agent_improve_user_prompt(
@@ -329,6 +350,7 @@ def get_agent_debug_user_prompt(
     return prompt_user_message
 
 
+
 # --- User Message Assemblers for PlannerAgent ---
 
 # For PlannerAgent's _draft stage (plan_query part)
@@ -363,7 +385,6 @@ def get_planner_agent_draft_plan_user_prompt(
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
 
-# For PlannerAgent's _draft stage (code_query part)
 def get_planner_agent_draft_code_user_prompt(
     task_summary_from_planner: str, # Summary generated by the planner model
     plan_from_planner: str,         # Plan generated by the planner model

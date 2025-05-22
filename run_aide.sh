@@ -7,13 +7,13 @@ DeepSeek_MODEL="deepseek-chat"
 CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
-competition_name="leaf-classification"
-data_dir="data/leaf-classification/"
+competition_name="random-acts-of-pizza"
+data_dir="data/random-acts-of-pizza/"
 GOAL="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley"
 EVAL="Use multi-class logarithmic loss between predicted author probabilities and the true label." 
 aide \
     data_dir="${data_dir}/" \
-    desc_file="/home/asim_aims_ac_za/workspace/aide-agent/data/leaf-classification/leaf-classification.md"
+    desc_file="./data/random-acts-of-pizza/description.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
     agent.steps=25 \
@@ -32,5 +32,4 @@ aide \
     wandb.project="MLE_BENCH_AIDE_VM" \
     wandb.entity=asim_awad
     
-#     \
-# 2>&1 | tee logs/run.log
+

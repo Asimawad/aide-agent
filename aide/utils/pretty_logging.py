@@ -1,46 +1,13 @@
-# utils/pretty_logging.py
+# aide/utils/pretty_logging.py
 from __future__ import annotations
-import logging, pathlib, time
-from rich.console import Console
-from rich.logging import RichHandler
-from rich.theme import Theme
+import logging
+import time
+from rich.console import Console # Console can be passed or obtained if needed
+from rich.logging import RichHandler # Not setting up handlers here anymore
+from rich.theme import Theme # Not setting up themes here
 
-# ────────────────────────────────────────────────────────────
-# 1) Root-logger: 2 handlers →   • run.log  (DEBUG, all noise)
-#                                • Rich TTY (INFO+, coloured)
-# ────────────────────────────────────────────────────────────
-LOG_PATH = pathlib.Path("logs") / "run.log"  # flat file in CWD
-
-file_handler = logging.FileHandler(LOG_PATH, mode="w", encoding="utf-8")
-file_handler.setLevel(logging.INFO)
-
-rich_handler = RichHandler(
-    # console=Console(theme=Theme({
-    #     "logging.level.info":  "cyan",
-    #     "logging.level.error": "bold red",
-    # })),
-    rich_tracebacks=True,
-    markup=True,
-    show_level=True,
-    show_time=False,  # we print our own time stamp in log_step
-    show_path=False,
-)
-rich_handler.setLevel(logging.INFO)
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    handlers=[file_handler, rich_handler],
-    format="%(message)s",
-    force=True,  # override any earlier basicConfig
-)
-
-logger = logging.getLogger("aide")
-
-# ────────────────────────────────────────────────────────────
-# 2) One-liner helper – call after every Agent.step()
-# ────────────────────────────────────────────────────────────
+logger = logging.getLogger("aide") # Get the 'aide' logger configured in run.py
 _T0 = time.time()
-
 
 def log_step(
     *,
@@ -52,18 +19,26 @@ def log_step(
     metric: float | None = None,
 ) -> None:
     """
-    Print a neat progress line to stdout **and** to the rich handler.
-    Example:
-        00:03  step 2/25  self-reflection  ✓  exec 1.07s  metric 0.8529
+    Formats a progress line for the console.
+    Uses the 'aide' logger, which is configured with RichHandler in run.py.
     """
     mm, ss = divmod(int(time.time() - _T0), 60)
-    status = "[red]✗[/]" if is_buggy else "[green]✓[/]"
+    status_icon = "[red]✗[/]" if is_buggy else "[green]✓[/]" # Rich markup
     exec_str = f"exec {exec_time:>.2f}s" if exec_time is not None else ""
     metric_str = f"metric {metric:>.4f}" if metric is not None else ""
-    logger.debug(
+    
+    # Log as INFO so it appears on console via RichHandler if configured for INFO
+    # The RichHandler in run.py uses "%(message)s" format, so markup works.
+    log_message = (
         f"[dim]{mm:02d}:{ss:02d}[/]  "
-        f"step {step}/{total:<2}  "
-        f"{stage:<15} "
-        f"{status}  "
+        f"Step {step}/{total:<2}  "
+        f"{stage:<15} " # Stage name
+        f"{status_icon}  " # Buggy status
         f"{exec_str}  {metric_str}".rstrip()
     )
+    logger.info(log_message) # Log as INFO to be caught by console RichHandler
+
+    # Also log a more detailed version to file logs if needed (e.g., with node ID)
+    # This depends on what information `log_step` has access to.
+    # For example, if it had node_id:
+    # logger.debug(f"STEP_SUMMARY: Step {step}/{total}, Node {node_id}, Stage {stage}, Buggy {is_buggy}, Exec {exec_time}, Metric {metric}", extra={"verbose":True})
