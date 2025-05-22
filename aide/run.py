@@ -7,7 +7,10 @@ import os
 from .utils import copytree, empirical_eval, advanced_metrics, load_benchmarks
 from tqdm import tqdm  # Import tqdm for progress bar
 import time
+from rich import print
+from rich.console import Console
 
+console = Console()
 os.environ["WANDB_API_KEY"] = "8ca0d241dd66f5a643d64a770d61ad066f937c48"
 
 try:
@@ -249,14 +252,37 @@ def run():
                 t0 = time.time()
                 agent.step(exec_callback=exec_callback, current_step_number=i + 1)
                 t1 = time.time()
-                print(
-                    f"---------------> Time taken for step {i+1}: {t1-t0:.2f} seconds<---------------"
-                )
-                save_run(cfg, journal)  
+                save_run(cfg, journal)
                 global_step += 1
                 pbar.update(1)
-
-            # on the last step, print the tree
+                print("\n")
+                console.print(generate_live())
+                console.print(
+                    f"[green]Step {i+1}/{cfg.agent.steps} completed in {t1 - t0:.2f}"
+                )
+                logger.info(
+                    f"Step {i+1}/{cfg.agent.steps} completed in {t1 - t0:.2f}",
+                    extra={"verbose": True},
+                )
+                # Log the step time
+                # Log the step time to W&B
+                if wandb_run:
+                    wandb.log(
+                        {
+                            "step_time": t1 - t0,
+                            "step": i + 1,
+                            "total_steps": cfg.agent.steps,
+                        }
+                    )
+                # Log the step time to W&B
+                if wandb_run:
+                    wandb.log(
+                        {
+                            "step_time": t1 - t0,
+                            "step": i + 1,
+                            "total_steps": cfg.agent.steps,
+                        }
+                    )
 
         logger.info(journal_to_string_tree(journal))
         save_run(cfg, journal)

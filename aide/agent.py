@@ -117,10 +117,16 @@ class Agent:
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
         search_cfg = self.acfg.search
-
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Search Policy")
         # initial drafting
         if len(self.journal.draft_nodes) < search_cfg.num_drafts:
-            logger.info("[search policy] drafting new node (not enough drafts)")
+            console.print(
+                f"[bold yellow]Drafting new node (drafts: {len(self.journal.draft_nodes)})[/bold yellow]"
+            )
+            logger.info(
+                "[search policy] drafting new node (not enough drafts)",
+                extra={"verbose": True},
+            )
             return None
 
         # debugging
@@ -133,18 +139,42 @@ class Agent:
             ]
             if debuggable_nodes:
                 node_to_debug = random.choice(debuggable_nodes)
-                logger.info(f"[search policy] debugging node {node_to_debug.id}")
+                console.print(
+                    f"[bold red]Debugging node {node_to_debug.id} (debug depth: {node_to_debug.debug_depth})[/bold red]"
+                )
+                logger.info(
+                    f"[search policy] debugging node {node_to_debug.id}",
+                    extra={"verbose": True},
+                )
                 return node_to_debug
 
         # back to drafting if no nodes to improve
         good_nodes = self.journal.good_nodes
         if not good_nodes:
-            logger.info("[search policy] drafting new node (no good nodes)")
+            console.print(
+                "[bold yellow]Drafting new node (no good nodes)[/bold yellow]"
+            )
+            logger.info(
+                "[search policy] drafting new node (no good nodes)",
+                extra={"verbose": True},
+            )
             return None
 
         # greedy
         greedy_node = self.journal.get_best_node()
-        logger.info(f"[search policy] greedy node selected: node {greedy_node.id}")
+        if greedy_node.is_buggy:
+            console.print(
+                f"[bold red]Debugging node {greedy_node.id} (buggy)[/bold red]"
+            )
+            logger.info(
+                f"[search policy] debugging node {greedy_node.id}",
+                extra={"verbose": True},
+            )
+            return greedy_node
+        logger.info(
+            f"[search policy] greedy node selected: node {greedy_node.id}",
+            extra={"verbose": True},
+        )
         return greedy_node
 
     @property
@@ -218,20 +248,18 @@ class Agent:
         for _ in range(retries):
             self.cfg.inference_engine == "HF" and self.acfg.code.model != "o3-mini"
             completion_text = query(
-                        system_message=system_prompt,
-                        user_message=prompt,
-                        model=self.acfg.code.model,
-                        temperature=self.acfg.code.temp,
-                        max_tokens=self.acfg.code.max_new_tokens,
-                        top_p=self.acfg.code.top_p,
-                        top_k=self.acfg.code.top_k,
-                        excute=excute,
-                        current_step=self.current_step,
-                        inference_engine=self.cfg.inference_engine,
-                        num_responses=self.acfg.code.num_return_sequences,
-                        convert_system_to_user=self.acfg.convert_system_to_user,
-                    )
-  
+                system_message=system_prompt,
+                user_message=prompt,
+                model=self.acfg.code.model,
+                temperature=self.acfg.code.temp,
+                max_tokens=self.acfg.code.max_new_tokens,
+                excute=excute,
+                current_step=self.current_step,
+                inference_engine=self.cfg.inference_engine,
+                num_responses=self.acfg.code.num_return_sequences,
+                convert_system_to_user=self.acfg.convert_system_to_user,
+            )
+
             code = extract_code(completion_text)
             nl_text = extract_text_up_to_code(completion_text)
 
@@ -243,14 +271,11 @@ class Agent:
         logger.info("Final plan + code extraction attempt failed, giving up...")
         return "", completion_text, "None"  # type: ignore
 
-    def _draft(
-        self, parent_node=None
-    ) -> (
-        Node
-    ):  
+    def _draft(self, parent_node=None) -> Node:
         console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
         logger.info(
-            f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})", extra={"verbose": True}
+            f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})",
+            extra={"verbose": True},
         )
         comp_data = self.competition_benchmarks
 
@@ -261,7 +286,7 @@ class Agent:
 
         prompt_user_message: Any = {
             "Introduction": introduction,
-            "Overall Task Description": self.task_desc, 
+            "Overall Task Description": self.task_desc,
             "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
             "Instructions": {},
         }
@@ -278,6 +303,7 @@ class Agent:
                 "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
             ],
         }
+
         prompt_user_message[
             "Instructions"
         ] |= self._prompt_impl_guideline  # Original implementation guidelines
@@ -295,17 +321,23 @@ class Agent:
 
         formatted_extracted_code = format_code(generated_code)
         if formatted_extracted_code:
-            console.print(f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]")
+            console.print(
+                f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]"
+            )
             # console.print(Syntax(formatted_extracted_code, "python", theme="default", line_numbers=True))
             logger.info(
                 "Plan and Code generated for drafting stage", extra={"verbose": True}
             )  # General log
             logger.debug(
                 f"Plan and Code generated for drafting stage:\n{agent_plan_for_step}",
-                extra={"verbose": True}
+                extra={"verbose": True},
             )
             logger.debug(
                 f"{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}",
+                extra={"verbose": True},
+            )
+            logger.debug(
+                f"code is \n:{formatted_extracted_code}",
                 extra={"verbose": True},
             )
             console.print("-" * 60)
@@ -313,14 +345,14 @@ class Agent:
         new_node = Node(
             plan=agent_plan_for_step,
             code=generated_code,
-            summary=execution_summary, 
+            summary=execution_summary,
         )
         # Parent will be set by the caller if this isn't a root draft
         if parent_node:
             new_node.parent = parent_node
 
         logger.info(
-            f"Drafted new node {new_node.id}, plan and code generated successfully",
+            f"Drafted new node, plan and code generated successfully",
         )
         return new_node
 
@@ -361,10 +393,13 @@ class Agent:
 
         plan, code, _ = self.plan_and_code_query(prompt, excute=False)
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        console.rule(f"[cyan]Improvement Done for step {self.current_step}")
+        # console.rule(f"[green]Improvement Done for step {self.current_step}")
 
         logger.info(f"Improvement Plan  {plan}", extra={"verbose": True})
-        logger.info(f"Improved node {parent_node.id} to create new Code {wrap_code(code)}", extra={"verbose": True})
+        logger.info(
+            f"Improved node {parent_node.id} to create new Code {wrap_code(code)}",
+            extra={"verbose": True},
+        )
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
@@ -432,7 +467,10 @@ class Agent:
             logger.debug(
                 f"Self-reflection plan: {reflection_plan}", extra={"verbose": True}
             )
-            logger.debug(f"Self-reflection code: {wrap_code(revised_code)}", extra={"verbose": True})
+            logger.debug(
+                f"Self-reflection code: {wrap_code(revised_code)}",
+                extra={"verbose": True},
+            )
         elif reflection_plan == "No specific errors found requiring changes.":
             logger.info("Self-reflection found no errors requiring changes.")
         else:
@@ -476,7 +514,9 @@ class Agent:
         self,
     ):
         self.data_preview = data_preview.generate(self.cfg.workspace_dir)
-        logger.info(f"Data preview updated to {self.data_preview}")
+        logger.info(
+            f"Data preview updated to {self.data_preview}", extra={"verbose": True}
+        )
 
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
 
@@ -509,17 +549,19 @@ class Agent:
             result_node = self._improve(parent_node)
 
         logger.info(
-            f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}"
+            f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage})"
         )
         exec_start_time = time.time()
 
         exec_result = exec_callback(result_node.code, reset_session=True)
         # Flag if execution threw any exception
         exec_duration = time.time() - exec_start_time
-
+        logger.info(
+            f"Execution time for node {result_node.id}: {format_time(exec_duration)}"
+        )
         # Parse execution result
         logger.info(
-            f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}"
+            f"Getting execution Feedback for {node_stage} node {result_node.id} "
         )
 
         result_node = self.parse_exec_result(
@@ -902,9 +944,12 @@ class Agent:
             or not has_csv_submission_reported  # Judge's report
             or not has_csv_submission_actual  # Actual file existence
         )
-
+        judgement = "Buggy" if node.is_buggy else "Not Buggy"
         if node.is_buggy:
-            logger.info(f"Feedback results: Current Node is buggy, summary: {node.analysis}")
+            console.print(f"[bold red]Result: {judgement}[/bold red]")
+            logger.info(
+                f"Feedback results: Current Node is buggy, summary: {node.analysis}"
+            )
             # Log reasons for being buggy
             bug_reasons = []
             if review_response.get("is_bug", True):
@@ -916,20 +961,24 @@ class Agent:
                 bug_reasons.append(f"Exception ({node.exc_type})")
             if metric_value is None:
                 bug_reasons.append("Metric missing/invalid")
-            logger.info(f"Buggy reasons: {'; '.join(bug_reasons)}", extra={"verbose": True})
+            logger.info(
+                f"Buggy reasons: {'; '.join(bug_reasons)}", extra={"verbose": True}
+            )
 
             node.metric = WorstMetricValue()
 
         else:
-            logger.info(f"Feedback results: Current Node not buggy, summary: {node.analysis}")
+            console.print(f"[bold green]Result: {judgement}[/bold green]")
+            logger.info(
+                f"Feedback results: Current Node not buggy, summary: {node.analysis}"
+            )
             node.metric = MetricValue(
                 metric_value,
-                maximize=not review_response.get(
-                    "lower_is_better", True
-                ),  
+                maximize=not review_response.get("lower_is_better", True),
             )
 
         return node
+
 
 #############################################################################
 # -*- coding: utf-8 -*-
@@ -1345,16 +1394,19 @@ class PlannerAgent:
             "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
             "Instructions": {},
         }
+        plan_prompt_user_message["Instructions"] |= (
+            "The summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan.",
+        )
         plan_prompt_user_message["Instructions"] |= self.plan_prompt_resp_fmt
         plan_prompt_user_message["Instructions"] |= {
-            "Solution plan guideline": [
-                "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization, as we are using this as a first draft for future improvements.",
-                "The summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan.",
+            "Instructions for generating the plan": [
+                "Every step of the plan should be very detailed and explicit, point exactly how is the steps going to be solved. e.g. 'Use XGBoost to train a model with the following parameters: ...'",
+                "The plan should be detailed in a step by step manner that is easy to follow.",
+                "for this particular first solution, propose a relatively simple approach in terms of method used for solving the problem, without ensembling or hyper-parameter optimization, as we are using this as a first draft for future improvements.",
                 "Take the Memory section into consideration when proposing the design.",
                 "The solution plan should be detailed and high quality bullet points that are easy to follow.",
-                "Propose an evaluation metric that is reasonable for this task.",
                 "Don't suggest to do EDA.",
-                "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
+                "The data is already prepared and available in the `./input` directory. There is no need to suggest any unzip for any files.",
             ],
         }
         plan_prompt_user_message["Instructions"] |= self._prompt_environment
@@ -1864,7 +1916,7 @@ class PlannerAgent:
             result_node = self._improve(parent_node)
 
         logger.info(
-            f"AGENT_STEP{current_step_number}: Executing code for node {result_node.id} (stage: {node_stage}). Code length: {len(result_node.code)}",
+            f"Executing  {node_stage} code, Code length: {len(result_node.code)}",
             extra={"verbose": True},
         )
         logger.debug(

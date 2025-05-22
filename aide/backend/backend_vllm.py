@@ -104,7 +104,7 @@ def query(
     Query a vLLM-hosted model using OpenAI-compatible API.
     Implements backoff retries and drops system_message after 2 retries.
     """
-    logger.info("activated vllm backend...")
+    logger.info("activated vllm backend...", extra={"verbose": True})
 
     # Prepare messages list for OpenAI API format
     def prepare_messages(sys_msg):
