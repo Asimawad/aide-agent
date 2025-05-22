@@ -180,7 +180,7 @@ def query(
 
     if func_spec:
         logger.debug(
-            f"{log_identifier}_FUNC_SPEC_START\n{json.dumps(func_spec.to_dict(), indent=2)}\n{log_identifier}_FUNC_SPEC_END",
+            f"{log_identifier}_FUNC_SPEC_START\n",
             extra={"verbose": True},
         )
 

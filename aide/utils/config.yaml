@@ -12,7 +12,7 @@ eval: null
 log_dir: logs
 log_level: DEBUG
 workspace_dir: workspaces
-competition_name: "MLE_BENCH_AIDE"
+competition_name: "leaf-classification"
 preprocess_data: true
 copy_data: true
 use_template: false

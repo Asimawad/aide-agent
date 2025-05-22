@@ -7,14 +7,13 @@ DeepSeek_MODEL="deepseek-chat"
 CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
-competition_name="spooky-author-identification"
-data_dir="aide/example_tasks/spooky-author-identification"
+competition_name="leaf-classification"
+data_dir="data/leaf-classification/"
 GOAL="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley"
 EVAL="Use multi-class logarithmic loss between predicted author probabilities and the true label." 
 aide \
     data_dir="${data_dir}/" \
-    goal="${GOAL}" \
-    eval="${EVAL}" \
+    desc_file="/home/asim_aims_ac_za/workspace/aide-agent/data/leaf-classification/leaf-classification.md"
     log_level="DEBUG" \
     competition_name="${competition_name}" \
     agent.steps=25 \

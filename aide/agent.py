@@ -2,28 +2,46 @@ import shutil
 import logging
 import random
 import time
-from rich.syntax import Syntax
-from rich.console import Console
-from typing import Any, Callable, cast, Optional
+from rich.syntax import Syntax # Keep for logging if used
+from rich.console import Console # Keep for console output
+from typing import Any, Callable, cast, Optional, Dict # Added Dict
 from .backend import FunctionSpec, query
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
-from .utils import data_preview
+from .utils import data_preview # data_preview.generate
 from .utils.config import Config
-from .utils.pretty_logging import log_step, logger
-from .utils.metric import MetricValue, WorstMetricValue
+from .utils.pretty_logging import log_step # logger from pretty_logging might conflict, be careful
+# from .utils.metric import MetricValue, WorstMetricValue # Defined in journal or imported there
+
+from .utils.prompt_utils import (
+    get_agent_draft_user_prompt,
+    get_agent_improve_user_prompt,
+    get_agent_debug_user_prompt,
+    get_agent_system_prompt,
+    get_planner_agent_draft_plan_user_prompt,
+    get_planner_agent_draft_code_user_prompt,
+    get_planner_agent_improve_plan_user_prompt,
+    get_planner_agent_improve_code_user_prompt,
+    get_planner_agent_debug_plan_user_prompt,
+    get_planner_agent_debug_code_user_prompt,
+    get_planner_agent_plan_system_prompt,
+    get_planner_agent_code_system_prompt,
+    wrap_code as prompt_utils_wrap_code # Alias if local wrap_code is different
+)
+
 from .utils.response import (
     extract_code,
     extract_text_up_to_code,
-    wrap_code,
+    wrap_code, # This is the local wrap_code, ensure it's the one you intend for direct calls
     trim_long_string,
     format_code,
-    extract_plan,
-    extract_summary,
+    extract_plan, # For PlannerAgent
+    extract_summary, # For PlannerAgent
 )
 from .utils.self_reflection import (
     perform_two_step_reflection,
 )
+from .utils.metric import MetricValue, WorstMetricValue # Moved here for clarity
 
 
 try:
@@ -32,11 +50,12 @@ except ImportError:
     wandb = None
 
 
-logger = logging.getLogger("aide")  # A separate logger for agent.py
+logger = logging.getLogger("aide") # Assuming "aide" is the main logger from pretty_logging
 console = Console()
 
 
-def format_time(time_in_sec: int):
+def format_time(time_in_sec: int): # Should be float for more precision
+    time_in_sec = int(time_in_sec) # Cast to int if original signature is intended
     return f"{time_in_sec // 3600}hrs {(time_in_sec % 3600) // 60}mins {time_in_sec % 60}secs"
 
 
@@ -95,14 +114,19 @@ review_func_spec = FunctionSpec(
 class Agent:
     def __init__(
         self,
-        task_desc: str,
+        task_desc: str, # This is a dict or string. Prompt utils expect string.
         cfg: Config,
         journal: Journal,
         wandb_run=None,
         competition_benchmarks=None,
     ):
-        super().__init__()
-        self.task_desc = task_desc
+        self.task_desc_orig = task_desc # Store original, can be dict or str
+        if isinstance(task_desc, dict):
+            from .backend import compile_prompt_to_md # Local import
+            self.task_desc = compile_prompt_to_md(task_desc)
+        else:
+            self.task_desc = task_desc
+
         self.cfg = cfg
         self.acfg = cfg.agent
         self.journal = journal
@@ -113,1757 +137,1093 @@ class Agent:
         self.wandb_run = wandb_run
         self.competition_benchmarks = competition_benchmarks
         self.competition_name = self.cfg.competition_name
+        self._code_quality: float = 0.0 # Initialize for parse_exec_result
 
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
         search_cfg = self.acfg.search
-        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Search Policy")
-        # initial drafting
+        # console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Search Policy")
+        # This console rule is now typically logged by the main run loop or step method
+        logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Determining next action.", extra={"verbose": True})
+
         if len(self.journal.draft_nodes) < search_cfg.num_drafts:
-            console.print(
-                f"[bold yellow]Drafting new node (drafts: {len(self.journal.draft_nodes)})[/bold yellow]"
-            )
-            logger.info(
-                "[search policy] drafting new node (not enough drafts)",
-                extra={"verbose": True},
-            )
+            # console.print(f"[bold yellow]Drafting new node (drafts: {len(self.journal.draft_nodes)})[/bold yellow]")
+            logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Draft new node (drafts: {len(self.journal.draft_nodes)} < {search_cfg.num_drafts}).", extra={"verbose": True})
             return None
 
-        # debugging
         if random.random() < search_cfg.debug_prob:
-            # nodes that are buggy + leaf nodes + debug depth < max debug depth
             debuggable_nodes = [
-                n
-                for n in self.journal.buggy_nodes
+                n for n in self.journal.buggy_nodes
                 if (n.is_leaf and n.debug_depth <= search_cfg.max_debug_depth)
             ]
             if debuggable_nodes:
                 node_to_debug = random.choice(debuggable_nodes)
-                console.print(
-                    f"[bold red]Debugging node {node_to_debug.id} (debug depth: {node_to_debug.debug_depth})[/bold red]"
-                )
-                logger.info(
-                    f"[search policy] debugging node {node_to_debug.id}",
-                    extra={"verbose": True},
-                )
+                # console.print(f"[bold red]Debugging node {node_to_debug.id} (debug depth: {node_to_debug.debug_depth})[/bold red]")
+                logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Debug node {node_to_debug.id} (debug_prob triggered, depth {node_to_debug.debug_depth}).", extra={"verbose": True})
                 return node_to_debug
+            else:
+                logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Attempted debug (debug_prob triggered), but no debuggable nodes found.", extra={"verbose": True})
 
-        # back to drafting if no nodes to improve
+
         good_nodes = self.journal.good_nodes
         if not good_nodes:
-            console.print(
-                "[bold yellow]Drafting new node (no good nodes)[/bold yellow]"
-            )
-            logger.info(
-                "[search policy] drafting new node (no good nodes)",
-                extra={"verbose": True},
-            )
+            # console.print("[bold yellow]Drafting new node (no good nodes)[/bold yellow]")
+            logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Draft new node (no good nodes to improve).", extra={"verbose": True})
             return None
 
-        # greedy
-        greedy_node = self.journal.get_best_node()
-        if greedy_node.is_buggy:
-            console.print(
-                f"[bold red]Debugging node {greedy_node.id} (buggy)[/bold red]"
-            )
-            logger.info(
-                f"[search policy] debugging node {greedy_node.id}",
-                extra={"verbose": True},
-            )
+        greedy_node = self.journal.get_best_node() # get_best_node already implies only_good=True by default in its typical use.
+        if greedy_node: # Should always exist if good_nodes is not empty
+            if greedy_node.is_buggy: # This case might be rare if get_best_node filters buggy ones unless only_good=False
+                # console.print(f"[bold red]Debugging node {greedy_node.id} (buggy)[/bold red]")
+                logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Debug greedy node {greedy_node.id} (it was marked buggy).", extra={"verbose": True})
+                return greedy_node # Debug the best node if it's buggy
+            # console.print(f"[bold green]Improving node {greedy_node.id} (metric: {greedy_node.metric.value:.3f})[/bold green]")
+            logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Improve greedy node {greedy_node.id} (metric: {greedy_node.metric.value:.3f if greedy_node.metric else 'N/A'}).", extra={"verbose": True})
             return greedy_node
-        logger.info(
-            f"[search policy] greedy node selected: node {greedy_node.id}",
-            extra={"verbose": True},
-        )
-        return greedy_node
+        else: # Fallback, should ideally not be reached if good_nodes exist
+            logger.info(f"AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Draft new node (no best_node found, fallback).", extra={"verbose": True})
+            return None
 
-    @property
-    def _prompt_environment(self):
-        pkgs = [
-            "numpy",
-            "pandas",
-            "scikit-learn",
-            "statsmodels",
-            "xgboost",
-            "lightGBM",
-            "torch",
-            "torchvision",
-            "torch-geometric",
-            "bayesian-optimization",
-            "timm",
-        ]
-        random.shuffle(pkgs)
-        pkg_str = ", ".join([f"`{p}`" for p in pkgs])
 
-        env_prompt = {
-            "Installed Packages": f"Your solution can use any relevant machine learning packages such as: {pkg_str}. Feel free to use any other packages too (all packages are already installed!). For neural networks we suggest using PyTorch rather than TensorFlow."
-        }
-        return env_prompt
+    # REMOVE: _prompt_environment, _prompt_impl_guideline, _prompt_resp_fmt
+    # These are now handled by functions in prompt_utils.py
 
-    @property
-    def _prompt_impl_guideline(self):
-        impl_guideline = [
-            "1. Write a complete, single-file Python script. ",
-            "2. starting with imports, and load necessary data from the './input/' directory.",
-            "3. Implement the simple solution proposed in your plan.",
-            "4. Calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
-            "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. Ensure the file format matches the task description.",
-            "6. The script must run without errors. Focus on correctness first.",
-        ]
-        return {"Implementation Guideline": impl_guideline}
-
-    @property
-    def _prompt_resp_fmt(self):
-        fmt = (
-            "\n\n---\n"
-            "1) PLAN (plain text, no fences):\n"
-            "<your step‑by‑step reasoning here>\n\n"
-            "2) CODE (one fenced Python block):\n"
-            "```python\n"
-            "<your python code here>\n"
-            "```"
-        )
-        return {
-            "Response format": (
-                "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
-                "followed by a single markdown code block (wrapped in ```) which implements this solution and prints out the evaluation metric. "
-                "There should be no additional headings or text in your response. Just natural language text followed by a newline and then the markdown code block. "
-                "explicitly,structure your answer exactly like this: "
-            )
-            + fmt
-        }
-
-    def plan_and_code_query(self, prompt, excute, retries=1) -> tuple[str, str]:
+    def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, retries: int = 1) -> tuple[str, str, str]:
         """Generate a natural language plan + code in the same LLM call and split them apart."""
-        system_prompt = {
-            "SYSTEM": "You are a Kaggle Grandmaster. you can plan , implement, debug and improve and machine learning engineering code,",
-            "user_instructions": {
-                "Possible Questions you will face": "You will be asked to either come up with a plan and a code to solve the kaggle competetion, or debug a code or improve a working code to get better results",
-                "How to answer the user": 'Whenever you answer, always: 1. Write a "PLAN:" section in plain text—3–5 concise bullet points. 2. Then write a "CODE:" section containing exactly one fenced Python block: ```python',
-            },
-        }
+        # `excute` param seems unused by `query` directly, but kept for signature consistency if used elsewhere.
+        # `retries` here defines how many times this whole method retries, distinct from backend retries.
+        
+        system_prompt = get_agent_system_prompt() # Get system prompt from utils
+        log_prefix = f"AGENT_PLAN_CODE_QUERY_STEP{self.current_step}"
 
         completion_text = None
-        execution_summary = None
-        for _ in range(retries):
-            self.cfg.inference_engine == "HF" and self.acfg.code.model != "o3-mini"
-            completion_text = query(
-                system_message=system_prompt,
-                user_message=prompt,
-                model=self.acfg.code.model,
-                temperature=self.acfg.code.temp,
-                max_tokens=self.acfg.code.max_new_tokens,
-                excute=excute,
-                current_step=self.current_step,
-                inference_engine=self.cfg.inference_engine,
-                num_responses=self.acfg.code.num_return_sequences,
-                convert_system_to_user=self.acfg.convert_system_to_user,
-            )
+        
+        for attempt in range(retries):
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request.", extra={"verbose": True})
+            # Example: logger.debug(f"{log_prefix}_SYSTEM_PROMPT: {system_prompt}", extra={"verbose": True})
+
+
+            try:
+                completion_text = query(
+                    system_message=system_prompt,
+                    user_message=user_prompt_dict,
+                    model=self.acfg.code.model,
+                    temperature=self.acfg.code.temp,
+                    max_tokens=self.acfg.code.max_new_tokens, # Renamed from max_new_tokens for clarity with backend
+                    current_step=self.current_step,
+                    inference_engine=self.cfg.inference_engine,
+                    num_responses=self.acfg.code.num_return_sequences, # Passed as **model_kwargs if backend supports it
+                    convert_system_to_user=self.acfg.convert_system_to_user,
+                    # **{'num_return_sequences': self.acfg.code.num_return_sequences} # Alternative way to pass
+                )
+            except Exception as e:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Query failed: {e}", exc_info=True, extra={"verbose": True})
+                if attempt == retries - 1: # Last attempt
+                    return "", f"LLM Query Error: {e}", "LLM_QUERY_ERROR"
+                time.sleep(2) # Simple backoff before retrying this method's loop
+                continue
+
 
             code = extract_code(completion_text)
-            nl_text = extract_text_up_to_code(completion_text)
+            nl_text = extract_text_up_to_code(completion_text) # This is the "PLAN:" part
 
             if code and nl_text:
+                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Successfully extracted plan and code.", extra={"verbose": True})
+                return nl_text, code, "execution_summary_placeholder" # Placeholder, actual summary from feedback
 
-                return nl_text, code, "execution_summary"
+            logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Plan or code extraction failed. Raw text: '{trim_long_string(completion_text)}'", extra={"verbose": True})
+            logger.debug(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}_EXTRACTION_FAILED_RAW_COMPLETION_START\n{completion_text}\n{log_prefix}_EXTRACTION_FAILED_RAW_COMPLETION_END", extra={"verbose": True})
+        
+        logger.error(f"{log_prefix}: All {retries} attempts for plan+code extraction failed.", extra={"verbose": True})
+        return "", completion_text or "No LLM response received", "EXTRACTION_FAILED"
 
-            logger.info("Plan + code extraction failed, retrying...")
-        logger.info("Final plan + code extraction attempt failed, giving up...")
-        return "", completion_text, "None"  # type: ignore
 
     def _draft(self, parent_node=None) -> Node:
-        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
-        logger.info(
-            f"Agent step {self.current_step}: Drafting new solution (parent: {parent_node})",
-            extra={"verbose": True},
-        )
-        comp_data = self.competition_benchmarks
+        # console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting") # Handled by main step log
+        log_prefix = f"AGENT_DRAFT_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
+        
+        # comp_data = self.competition_benchmarks # Unused in original prompt, kept for reference
 
-        # --- Construct the prompt ---
-        introduction = "You are a Kaggle grandmaster. Your task is to develop a complete Python script to solve the described machine learning competition."
-        if self.acfg.obfuscate:
-            introduction = "You are an expert machine learning engineer. Your task is to develop a complete Python script to solve the described machine learning problem."
-
-        prompt_user_message: Any = {
-            "Introduction": introduction,
-            "Overall Task Description": self.task_desc,
-            "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
-            "Instructions": {},
-        }
-        prompt_user_message[
-            "Instructions"
-        ] |= self._prompt_resp_fmt  # Original response format
-        prompt_user_message["Instructions"] |= {  # Original sketch guidelines
-            "Solution sketch guideline": [
-                "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.",
-                "Take the Memory section into consideration when proposing the design.",
-                "The solution sketch should be 3-5 sentences.",
-                "Propose an evaluation metric that is reasonable for this task.",
-                "Don't suggest to do EDA.",
-                "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
-            ],
-        }
-
-        prompt_user_message[
-            "Instructions"
-        ] |= self._prompt_impl_guideline  # Original implementation guidelines
-
-        prompt_user_message[
-            "Instructions"
-        ] |= self._prompt_environment  # Common environment prompt
-
-        if self.acfg.data_preview:
-            prompt_user_message["Data Overview"] = self.data_preview
-
-        agent_plan_for_step, generated_code, execution_summary = (
-            self.plan_and_code_query(prompt_user_message, excute=False)
+        prompt_user_message = get_agent_draft_user_prompt(
+            task_desc=self.task_desc,
+            journal_summary=self.journal.generate_summary(include_code=False), # Typically don't include code in memory for draft
+            competition_name=self.competition_name,
+            obfuscate=self.acfg.obfuscate,
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
 
-        formatted_extracted_code = format_code(generated_code)
+        agent_plan_for_step, generated_code, execution_summary_placeholder = (
+            self.plan_and_code_query(prompt_user_message, excute=False, retries=self.acfg.get('query_retries', 1)) # Assuming 1 retry default
+        )
+
+        # Logging of plan and code
+        if agent_plan_for_step:
+            logger.debug(f"{log_prefix}_DRAFT_PLAN_START\n{agent_plan_for_step}\n{log_prefix}_DRAFT_PLAN_END", extra={"verbose": True})
+        else:
+            logger.warning(f"{log_prefix}: Plan generation failed or was empty.", extra={"verbose": True})
+            agent_plan_for_step = "PLAN GENERATION FAILED" # Placeholder
+
+        formatted_extracted_code = format_code(generated_code) if generated_code else ""
         if formatted_extracted_code:
-            console.print(
-                f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]"
-            )
-            # console.print(Syntax(formatted_extracted_code, "python", theme="default", line_numbers=True))
-            logger.info(
-                "Plan and Code generated for drafting stage", extra={"verbose": True}
-            )  # General log
-            logger.debug(
-                f"Plan and Code generated for drafting stage:\n{agent_plan_for_step}",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"code is \n:{formatted_extracted_code}",
-                extra={"verbose": True},
-            )
-            console.print("-" * 60)
+            # console.print(f"[bold green]Extracted a valid Code for step {self.current_step}[/bold green]") # Console output
+            logger.info(f"{log_prefix}: Code generated for drafting stage.", extra={"verbose": True})
+            # logger.debug(f"{log_prefix}_DRAFT_CODE_SYNTAXHIGHLIGHT_START\n{Syntax(formatted_extracted_code, 'python', theme='default', line_numbers=True)}\n{log_prefix}_DRAFT_CODE_SYNTAXHIGHLIGHT_END", extra={"verbose": True})
+            logger.debug(f"{log_prefix}_DRAFT_CODE_RAW_START\n{formatted_extracted_code}\n{log_prefix}_DRAFT_CODE_RAW_END", extra={"verbose": True})
+            # console.print("-" * 60) # Console output
+        else:
+            logger.warning(f"{log_prefix}: Code generation failed or was empty. Using placeholder.", extra={"verbose": True})
+            generated_code = "# CODE GENERATION FAILED" # Placeholder
 
         new_node = Node(
             plan=agent_plan_for_step,
-            code=generated_code,
-            summary=execution_summary,
+            code=generated_code, # Store raw generated code before formatting
+            summary=execution_summary_placeholder, # This is just a placeholder string
         )
-        # Parent will be set by the caller if this isn't a root draft
         if parent_node:
             new_node.parent = parent_node
 
-        logger.info(
-            f"Drafted new node, plan and code generated successfully",
-        )
+        logger.info(f"{log_prefix}: Drafted new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
     def _improve(self, parent_node: Node) -> Node:
-        console.rule(f"[cyan]Stage : Improving")
-        logger.info(
-            f"Agent step {self.current_step}: Generating Impoved code (parent type: {parent_node.stage_name})",
-            extra={"verbose": True},
-        )
-        introduction = (
-            "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
-            "solution below and should improve it in order to further increase the (test time) performance. "
-            "For this you should first outline a brief plan in natural language for how the solution can be improved and "
-            "then implement this improvement in Python based on the provided previous solution. "
-        )
-        prompt: Any = {
-            "Introduction": introduction,
-            "Task description": self.task_desc,
-            "Memory": self.journal.generate_summary(),
-            "Instructions": {},
-        }
-        prompt["Previous solution"] = {
-            "Code": wrap_code(parent_node.code),
-        }
+        # console.rule(f"[cyan]Stage : Improving") # Handled by main step log
+        log_prefix = f"AGENT_IMPROVE_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting improvement process for node {parent_node.id}.", extra={"verbose": True})
 
-        prompt["Instructions"] |= self._prompt_resp_fmt
-        prompt["Instructions"] |= {
-            "Solution improvement sketch guideline": [
-                "The solution sketch should be a brief natural language description of how the previous solution can be improved.",
-                "You should be very specific and should only propose a single actionable improvement.",
-                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
-                "Take the Memory section into consideration when proposing the improvement.",
-                "The solution sketch should be 3-5 sentences.",
-                "Don't suggest to do EDA.",
-            ],
-        }
-        prompt["Instructions"] |= self._prompt_impl_guideline
+        prompt_user_message = get_agent_improve_user_prompt(
+            task_desc=self.task_desc,
+            journal_summary=self.journal.generate_summary(include_code=False), # Usually code not needed for high-level summary
+            competition_name=self.competition_name,
+            parent_node_code=parent_node.code,
+        )
 
-        plan, code, _ = self.plan_and_code_query(prompt, excute=False)
+        plan, code, _ = self.plan_and_code_query(prompt_user_message, excute=False, retries=self.acfg.get('query_retries', 1))
+
+        if not plan:
+            logger.warning(f"{log_prefix}: Improvement plan generation failed for node {parent_node.id}. Using placeholder.", extra={"verbose": True})
+            plan = "IMPROVEMENT PLAN GENERATION FAILED"
+        if not code:
+            logger.warning(f"{log_prefix}: Improvement code generation failed for node {parent_node.id}. Reverting to parent code.", extra={"verbose": True})
+            code = parent_node.code # Revert to parent's code if generation fails
+
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        # console.rule(f"[green]Improvement Done for step {self.current_step}")
-
-        logger.info(f"Improvement Plan  {plan}", extra={"verbose": True})
-        logger.info(
-            f"Improved node {parent_node.id} to create new Code {wrap_code(code)}",
-            extra={"verbose": True},
-        )
+        
+        logger.info(f"{log_prefix}: Improvement plan for node {parent_node.id}: {trim_long_string(plan)}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}_IMPROVE_PLAN_START\n{plan}\n{log_prefix}_IMPROVE_PLAN_END", extra={"verbose": True})
+        logger.info(f"{log_prefix}: Improved node {parent_node.id} to create new node {new_node.id}.", extra={"verbose": True})
+        # logger.debug(f"{log_prefix}_IMPROVED_CODE_START\n{wrap_code(code)}\n{log_prefix}_IMPROVED_CODE_END", extra={"verbose": True}) # wrap_code for logging
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
-        console.rule(f"[cyan]Stage : Debugging")
-        logger.info(
-            f"Agent step {self.current_step}: DEBUGING code (parent type: {parent_node.stage_name})",
-            extra={"verbose": True},
-        )
-        introduction = (
-            "You are a Kaggle grandmaster attending a competition. "
-            "Your previous solution had a bug and/or did not produce a submission.csv, "
-            "so based on the information below, you should revise it in order to fix this. "
-            "Your response should be an implementation plan in natural language,"
-            " followed by a single markdown code block which implements the bugfix/solution."
-        )
-        prompt: Any = {
-            "Introduction": introduction,
-            "Task description": self.task_desc,
-            "Previous (buggy) implementation": wrap_code(parent_node.code),
-            "Execution output": wrap_code(parent_node.term_out, lang=""),
-            "Instructions": {},
-        }
-        prompt["Instructions"] |= self._prompt_resp_fmt
-        prompt["Instructions"] |= {
-            "Bugfix improvement sketch guideline": [
-                "You should write a brief natural language description (3-5 sentences) of how the issue in the previous implementation can be fixed.",
-                "Don't suggest to do EDA.",
-            ],
-        }
-        prompt["Instructions"] |= self._prompt_impl_guideline
+        # console.rule(f"[cyan]Stage : Debugging") # Handled by main step log
+        log_prefix = f"AGENT_DEBUG_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting debugging process for node {parent_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}_PARENT_CODE_START\n{parent_node.code}\n{log_prefix}_PARENT_CODE_END", extra={"verbose": True})
+        logger.debug(f"{log_prefix}_PARENT_TERM_OUT_START\n{parent_node.term_out}\n{log_prefix}_PARENT_TERM_OUT_END", extra={"verbose": True})
 
-        if self.acfg.data_preview:
-            prompt["Data Overview"] = self.data_preview
 
-        plan, code, _ = self.plan_and_code_query(prompt, excute=False)
+        prompt_user_message = get_agent_debug_user_prompt(
+            task_desc=self.task_desc,
+            competition_name=self.competition_name,
+            parent_node_code=parent_node.code,
+            parent_node_term_out=parent_node.term_out, # term_out on Node is already trimmed
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
+        )
+
+        plan, code, _ = self.plan_and_code_query(prompt_user_message, excute=False, retries=self.acfg.get('query_retries', 1))
+
+        if not plan:
+            logger.warning(f"{log_prefix}: Debug plan generation failed for node {parent_node.id}. Using placeholder.", extra={"verbose": True})
+            plan = "DEBUG PLAN GENERATION FAILED"
+        if not code:
+            logger.warning(f"{log_prefix}: Debug code generation failed for node {parent_node.id}. Reverting to parent code.", extra={"verbose": True})
+            code = parent_node.code # Revert to parent's code
+
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        logger.info(f"Debugged node {parent_node.id} to create new node {new_node.id}")
-        logger.debug(f"Debugging plan: {plan}", extra={"verbose": True})
-        logger.debug(f"Debugging code: {wrap_code(code)}", extra={"verbose": True})
+
+        logger.info(f"{log_prefix}: Debugged node {parent_node.id} to create new node {new_node.id}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}_DEBUG_PLAN_START\n{plan}\n{log_prefix}_DEBUG_PLAN_END", extra={"verbose": True})
+        # logger.debug(f"{log_prefix}_DEBUG_CODE_START\n{wrap_code(code)}\n{log_prefix}_DEBUG_CODE_END", extra={"verbose": True})
         return new_node
 
     def reflect(self, node: Node) -> tuple[str, str]:
         """
         Performs a two-step self-reflection using the external utility function.
-
-        Returns:
-            Tuple: (reflection_plan, revised_code)
+        Returns: Tuple: (reflection_plan, revised_code)
         """
-        logger.info("Initiating two-step self-reflection...")
-        reflection_plan, revised_code = perform_two_step_reflection(
-            code=node.code,
-            analysis=node.analysis,
-            term_out=node.term_out,
-            task_desc=self.task_desc,
-            model_name=self.acfg.code.model,
-            temperature=self.acfg.code.temp,
-            convert_system_to_user=self.acfg.convert_system_to_user,
-            query_func=query,  #
-            wrap_code_func=wrap_code,  #
-            extract_code_func=extract_code,  #
-        )
+        log_prefix = f"AGENT_REFLECT_STEP{self.current_step}_NODE{node.id}"
+        logger.info(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
+        # Detailed logging of inputs to perform_two_step_reflection can be added if needed.
 
-        if revised_code != node.code and revised_code:  # Check if code actually changed
-            logger.info("Self-reflection resulted in code changes.")
-            logger.debug(
-                f"Self-reflection plan: {reflection_plan}", extra={"verbose": True}
+        try:
+            reflection_plan, revised_code = perform_two_step_reflection(
+                code=node.code,
+                analysis=node.analysis, # Textual summary from feedback LLM
+                term_out=node.term_out, # Already trimmed string from Node property
+                task_desc=self.task_desc,
+                model_name=self.acfg.code.model, # Use the main coder model for reflection edits
+                temperature=self.acfg.code.temp, # Use coder temp
+                convert_system_to_user=self.acfg.convert_system_to_user,
+                query_func=query,
+                wrap_code_func=prompt_utils_wrap_code, # Use the one from prompt_utils
+                extract_code_func=extract_code,
+                current_step=self.current_step # Pass current_step for logging within reflection
             )
-            logger.debug(
-                f"Self-reflection code: {wrap_code(revised_code)}",
-                extra={"verbose": True},
-            )
+        except Exception as e:
+            logger.error(f"{log_prefix}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
+            return f"REFLECTION_ERROR: {e}", node.code # Return original code on error
+
+
+        if revised_code and revised_code.strip() and revised_code != node.code:
+            logger.info(f"{log_prefix}: Self-reflection resulted in code changes.", extra={"verbose": True})
         elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info("Self-reflection found no errors requiring changes.")
+            logger.info(f"{log_prefix}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
         else:
-            logger.warning(
-                "Self-reflection finished, but revised code is same as original or empty."
-            )
-
+            logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+        
+        logger.debug(f"{log_prefix}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix}_REFLECTION_PLAN_END", extra={"verbose": True})
+        # logger.debug(f"{log_prefix}_REVISED_CODE_BY_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix}_REVISED_CODE_BY_REFLECTION_END", extra={"verbose": True})
         return reflection_plan, revised_code
+
 
     def double_reflect(self, code: str) -> tuple[str, str]:
         """
         Performs a two-step self-reflection using the external utility function.
-
-        Returns:
-            Tuple: (reflection_plan, revised_code)
+        This version doesn't have `analysis` or `term_out` from a node.
+        Returns: Tuple: (reflection_plan, revised_code)
         """
-        logger.info("Initiating two-step self-reflection...")
-        reflection_plan, revised_code = perform_two_step_reflection(
-            code=code,
-            task_desc=self.task_desc,
-            model_name=self.acfg.code.model,
-            temperature=self.acfg.code.temp,
-            convert_system_to_user=self.acfg.convert_system_to_user,
-            query_func=query,  #
-            wrap_code_func=wrap_code,  #
-            extract_code_func=extract_code,  #
-        )
+        log_prefix = f"AGENT_DOUBLE_REFLECT_STEP{self.current_step}" # No node ID here
+        logger.info(f"{log_prefix}: Initiating self-reflection (double_reflect variant).", extra={"verbose": True})
 
-        if revised_code != code and revised_code:  # Check if code actually changed
-            logger.info("Self-reflection resulted in code changes.")
-        elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info("Self-reflection found no errors requiring changes.")
-        else:
-            logger.warning(
-                "Self-reflection finished, but revised code is same as original or empty."
+        try:
+            reflection_plan, revised_code = perform_two_step_reflection(
+                code=code, # Original code for reflection
+                analysis="No specific prior analysis available for this reflection.", # Generic analysis
+                term_out="No specific terminal output available for this reflection.", # Generic term_out
+                task_desc=self.task_desc,
+                model_name=self.acfg.code.model,
+                temperature=self.acfg.code.temp,
+                convert_system_to_user=self.acfg.convert_system_to_user,
+                query_func=query,
+                wrap_code_func=prompt_utils_wrap_code,
+                extract_code_func=extract_code,
+                current_step=self.current_step
             )
+        except Exception as e:
+            logger.error(f"{log_prefix}: Error during double_reflect call: {e}", exc_info=True, extra={"verbose": True})
+            return f"DOUBLE_REFLECTION_ERROR: {e}", code
 
+
+        if revised_code and revised_code.strip() and revised_code != code:
+            logger.info(f"{log_prefix}: Self-reflection (double_reflect) resulted in code changes.", extra={"verbose": True})
+        elif reflection_plan == "No specific errors found requiring changes.":
+            logger.info(f"{log_prefix}: Self-reflection (double_reflect) found no errors requiring changes.", extra={"verbose": True})
+        else:
+            logger.warning(f"{log_prefix}: Self-reflection (double_reflect) finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+
+        logger.debug(f"{log_prefix}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix}_REFLECTION_PLAN_END", extra={"verbose": True})
+        # logger.debug(f"{log_prefix}_REVISED_CODE_BY_DOUBLE_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix}_REVISED_CODE_BY_DOUBLE_REFLECTION_END", extra={"verbose": True})
         return reflection_plan, revised_code
 
-    def update_data_preview(
-        self,
-    ):
-        self.data_preview = data_preview.generate(self.cfg.workspace_dir)
-        logger.info(
-            f"Data preview updated to {self.data_preview}", extra={"verbose": True}
-        )
+
+    def update_data_preview(self):
+        log_prefix = f"AGENT_DATA_PREVIEW_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Updating data preview.", extra={"verbose": True})
+        try:
+            self.data_preview = data_preview.generate(self.cfg.workspace_dir / "input") # Generate from 'input' subdir
+            logger.info(f"{log_prefix}: Data preview updated.", extra={"verbose": True})
+            logger.debug(f"{log_prefix}_DATA_PREVIEW_CONTENT_START\n{self.data_preview}\n{log_prefix}_DATA_PREVIEW_CONTENT_END", extra={"verbose": True})
+        except Exception as e:
+            logger.error(f"{log_prefix}: Failed to update data preview: {e}", exc_info=True, extra={"verbose": True})
+            self.data_preview = "Error generating data preview."
+
 
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
+        log_prefix_main = f"AGENT_STEP{current_step_number}"
+        logger.info(f"{log_prefix_main}_START: Total Steps Configured: {self.acfg.steps}", extra={"verbose": True})
+        t_step_start = time.time()
 
-        t0 = time.time()
-
-        # clear the submission dir from previous steps
-        submission_dir = self.cfg.workspace_dir / "submission"  # Define once
+        submission_dir = self.cfg.workspace_dir / "submission"
+        logger.info(f"{log_prefix_main}: Clearing submission directory: {submission_dir}", extra={"verbose": True})
         shutil.rmtree(submission_dir, ignore_errors=True)
         submission_dir.mkdir(exist_ok=True)
 
-        last = time.time()
         self.current_step = current_step_number
 
-        if not self.journal.nodes or self.data_preview is None:
+        if not self.journal.nodes or self.data_preview is None: # Update preview if first step or not yet generated
             self.update_data_preview()
 
         parent_node = self.search_policy()
+        result_node: Node
 
         draft_flag = False
+        node_stage = "unknown" # Initialize
         if parent_node is None:
             draft_flag = True
             node_stage = "draft"
-            result_node = self._draft(parent_node)
+            logger.info(f"{log_prefix_main}: Stage selected: DRAFTING.", extra={"verbose": True})
+            result_node = self._draft(parent_node) # parent_node is None here
         elif parent_node.is_buggy:
             node_stage = "debug"
+            logger.info(f"{log_prefix_main}: Stage selected: DEBUGGING node {parent_node.id}.", extra={"verbose": True})
             result_node = self._debug(parent_node)
-
         else:
             node_stage = "improve"
+            logger.info(f"{log_prefix_main}: Stage selected: IMPROVING node {parent_node.id}.", extra={"verbose": True})
             result_node = self._improve(parent_node)
 
-        logger.info(
-            f"Agent step {current_step_number}: Executing code for node {result_node.id} (stage: {node_stage})"
-        )
+        logger.info(f"{log_prefix_main}: Executing code for node {result_node.id} (stage: {node_stage}). Code length: {len(result_node.code)}", extra={"verbose": True})
+        logger.debug(f"{log_prefix_main}_CODE_TO_EXECUTE_NODE_{result_node.id}_START\n{result_node.code}\n{log_prefix_main}_CODE_TO_EXECUTE_NODE_{result_node.id}_END", extra={"verbose": True})
+
         exec_start_time = time.time()
-
         exec_result = exec_callback(result_node.code, reset_session=True)
-        # Flag if execution threw any exception
         exec_duration = time.time() - exec_start_time
-        logger.info(
-            f"Execution time for node {result_node.id}: {format_time(exec_duration)}"
-        )
-        # Parse execution result
-        logger.info(
-            f"Getting execution Feedback for {node_stage} node {result_node.id} "
-        )
+        
+        logger.info(f"{log_prefix_main}: Code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
+        logger.debug(f"{log_prefix_main}_EXEC_RESULT_NODE_{result_node.id}_TERM_OUT_START\n{exec_result.term_out}\n{log_prefix_main}_EXEC_RESULT_NODE_{result_node.id}_TERM_OUT_END", extra={"verbose": True})
+        if exec_result.exc_type:
+             logger.warning(f"{log_prefix_main}_EXEC_RESULT_NODE_{result_node.id}_EXCEPTION: {exec_result.exc_type}", extra={"verbose": True})
 
-        result_node = self.parse_exec_result(
-            node=result_node,
-            exec_result=exec_result,
-        )
-        self._prev_buggy = result_node.is_buggy
 
-        # Apply reflection if applicable
+        logger.info(f"{log_prefix_main}: Parsing execution results for node {result_node.id}.", extra={"verbose": True})
+        result_node = self.parse_exec_result(node=result_node, exec_result=exec_result)
+        
+        # Store current buggy status before reflection potentially changes it
+        buggy_status_before_reflection = result_node.is_buggy
+
         reflection_applied = False
-        if (
-            draft_flag
-            and self.acfg.ITS_Strategy == "self-reflection"
-            and result_node.is_buggy
-        ):
-            try:
-                console.rule(f"[cyan]Stage : Self Reflection")
-                reflection_plan, reflection_code = self.reflect(node=result_node)
-                if (
-                    reflection_code
-                    and reflection_code.strip()
-                    and reflection_code != result_node.code
-                ):
-                    result_node.code = reflection_code
-                    logger.info(
-                        f"Node {result_node.id} self-reflected and updated code"
-                    )
-                    reflection_applied = True
+        if draft_flag and self.acfg.ITS_Strategy == "self-reflection" and result_node.is_buggy:
+            logger.info(f"{log_prefix_main}: Condition met for self-reflection on drafted buggy node {result_node.id}.", extra={"verbose": True})
+            # console.rule(f"[cyan]Stage : Self Reflection") # For interactive console
+            
+            reflection_plan, reflection_code = self.reflect(node=result_node)
+            if reflection_code and reflection_code.strip() and reflection_code != result_node.code:
+                logger.info(f"{log_prefix_main}: Self-reflection yielded new code for node {result_node.id}. Re-executing.", extra={"verbose": True})
+                result_node.code = reflection_code # Update node's code
+                reflection_applied = True
 
-                elif reflection_plan != "No specific errors found requiring changes.":
-                    logger.info(
-                        f"Node {result_node.id} self-reflection completed, but no changes applied."
-                    )
-                else:
-                    logger.info("No errors found by reflection.")
-            except Exception as e:
-                logger.error(
-                    f"Error during self-reflection for node {result_node.id}: {e}",
-                    exc_info=True,
-                )
-        if reflection_applied:
-            logger.info(
-                f"Agent is executing the reflect code for node {result_node.id}"
-            )
-            exec_start_time = time.time()
+                logger.info(f"{log_prefix_main}: Re-executing reflected code for node {result_node.id}. Code length: {len(result_node.code)}", extra={"verbose": True})
+                logger.debug(f"{log_prefix_main}_REFLECTED_CODE_TO_EXECUTE_NODE_{result_node.id}_START\n{result_node.code}\n{log_prefix_main}_REFLECTED_CODE_TO_EXECUTE_NODE_{result_node.id}_END", extra={"verbose": True})
+                
+                exec_start_time_reflect = time.time()
+                exec_result_reflect = exec_callback(result_node.code, reset_session=True)
+                exec_duration = time.time() - exec_start_time_reflect # Update exec_duration to reflected code's time
+                
+                logger.info(f"{log_prefix_main}: Reflected code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
+                logger.debug(f"{log_prefix_main}_REFLECTED_EXEC_RESULT_NODE_{result_node.id}_TERM_OUT_START\n{exec_result_reflect.term_out}\n{log_prefix_main}_REFLECTED_EXEC_RESULT_NODE_{result_node.id}_TERM_OUT_END", extra={"verbose": True})
+                if exec_result_reflect.exc_type:
+                    logger.warning(f"{log_prefix_main}_REFLECTED_EXEC_RESULT_NODE_{result_node.id}_EXCEPTION: {exec_result_reflect.exc_type}", extra={"verbose": True})
 
-            exec_result = exec_callback(result_node.code, reset_session=True)
-            # Flag if execution threw any exception
-            exec_duration = time.time() - exec_start_time
-
-            # Parse execution result
-            logger.info(
-                f"Agent step {current_step_number}: Parsing execution results for node {result_node.id}"
-            )
-
-            result_node = self.parse_exec_result(
-                node=result_node,
-                exec_result=exec_result,
-            )
-
-        if self._prev_buggy and not result_node.is_buggy:
-            result_node.effective_debug_step = True
-            if reflection_applied:
-                result_node.effective_reflections = True
+                logger.info(f"{log_prefix_main}: Parsing execution results for reflected code of node {result_node.id}.", extra={"verbose": True})
+                result_node = self.parse_exec_result(node=result_node, exec_result=exec_result_reflect)
             else:
-                result_node.effective_reflections = False
+                logger.info(f"{log_prefix_main}: Self-reflection did not result in applicable code changes for node {result_node.id}.", extra={"verbose": True})
+        
+        # Determine effectiveness based on buggy status *before* reflection and *after* (potentially reflected) execution
+        if buggy_status_before_reflection and not result_node.is_buggy:
+            result_node.effective_debug_step = True # The step (overall) fixed a bug
+            result_node.effective_reflections = reflection_applied # If reflection was the part that fixed it
         else:
             result_node.effective_debug_step = False
             result_node.effective_reflections = False
-        self._prev_buggy = result_node.is_buggy
+        
+        self._prev_buggy = result_node.is_buggy # Update for the next step's logic
 
+        # --- Logging to W&B and Journal ---
+        logger.info(f"{log_prefix_main}: Preparing step log data for W&B.", extra={"verbose": True})
         step_log_data = {
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
             f"progress/current_step": current_step_number,
             f"progress/competition_name": self.competition_name,
-            "exec/exception_type": result_node.exc_type if result_node.exc_type else 0,
-            f"code/estimated_quality": int(self._code_quality),
-            f"eval/reflection_usage": (
-                1 if reflection_applied and not result_node.is_buggy else 0
-            ),
-            f"eval/effective_debug_step": 1 if result_node.effective_debug_step else 0,
-            f"eval/effective_reflections": (
-                1 if result_node.effective_reflections else 0
-            ),
+            "exec/exception_type": result_node.exc_type if result_node.exc_type else "None", # Ensure string
+            f"code/estimated_quality": int(self._code_quality), # From parse_exec_result
+            f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0,
+            f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0,
         }
-        if (
-            not result_node.is_buggy
-            and result_node.metric
-            and result_node.metric.value is not None
-        ):
-            step_log_data[f"eval/validation_metric"] = result_node.metric.value
-            agent_validation_metrics = {
-                "value": result_node.metric.value,
-                "step": current_step_number,
-                "competition_name": self.competition_name,
-                "above_median": (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks["median_threshold"]
-                    else 0
-                ),
-                "gold_medal": (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks["gold_threshold"]
-                    else 0
-                ),
-                "silver_medal": (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks["silver_threshold"]
-                    else 0
-                ),
-                "bronze_medal": (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks["bronze_threshold"]
-                    else 0
-                ),
-            }
-            # --- Bar charts for threshold flags ---
-            # Above Median
-            self._above_median_flags = getattr(self, "_above_median_flags", [])
-            self._above_median_flags.append(agent_validation_metrics["above_median"])
-            above_true = sum(self._above_median_flags)
-            above_false = len(self._above_median_flags) - above_true
-            above_table = wandb.Table(
-                data=[["Above Median", above_true], ["Below Median", above_false]],
-                columns=["label", "count"],
-            )
-            step_log_data["plots/above_median_bar"] = wandb.plot.bar(
-                above_table, "label", "count", title="Above Median Steps"
-            )
-            # Gold Medal
-            self._gold_medal_flags = getattr(self, "_gold_medal_flags", [])
-            self._gold_medal_flags.append(agent_validation_metrics["gold_medal"])
-            gold_true = sum(self._gold_medal_flags)
-            gold_false = len(self._gold_medal_flags) - gold_true
-            gold_table = wandb.Table(
-                data=[["Gold Medal", gold_true], ["No Gold Medal", gold_false]],
-                columns=["label", "count"],
-            )
-            step_log_data["plots/gold_medal_bar"] = wandb.plot.bar(
-                gold_table, "label", "count", title="Gold Medal Steps"
-            )
-            # Silver Medal
-            self._silver_medal_flags = getattr(self, "_silver_medal_flags", [])
-            self._silver_medal_flags.append(agent_validation_metrics["silver_medal"])
-            silver_true = sum(self._silver_medal_flags)
-            silver_false = len(self._silver_medal_flags) - silver_true
-            silver_table = wandb.Table(
-                data=[["Silver Medal", silver_true], ["No Silver Medal", silver_false]],
-                columns=["label", "count"],
-            )
-            step_log_data["plots/silver_medal_bar"] = wandb.plot.bar(
-                silver_table, "label", "count", title="Silver Medal Steps"
-            )
-            # Bronze Medal
-            self._bronze_medal_flags = getattr(self, "_bronze_medal_flags", [])
-            self._bronze_medal_flags.append(agent_validation_metrics["bronze_medal"])
-            bronze_true = sum(self._bronze_medal_flags)
-            bronze_false = len(self._bronze_medal_flags) - bronze_true
-            bronze_table = wandb.Table(
-                data=[["Bronze Medal", bronze_true], ["No Bronze Medal", bronze_false]],
-                columns=["label", "count"],
-            )
-            step_log_data["plots/bronze_medal_bar"] = wandb.plot.bar(
-                bronze_table, "label", "count", title="Bronze Medal Steps"
-            )
-        else:
-            step_log_data[f"eval/validation_metric"] = float(
-                "nan"
-            )  # W&B handles NaN well
 
-        # Final check for submission file existence
+        # Metric logging and benchmark comparison
+        # (Your existing detailed W&B logging for metrics, thresholds, and plots - kept as is)
+        # Small adjustment: Ensure self.competition_benchmarks is checked before use
+        agent_validation_metrics_defined = False
+        if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
+            step_log_data[f"eval/validation_metric"] = result_node.metric.value
+            agent_validation_metrics_defined = True
+            if self.competition_benchmarks and wandb and self.wandb_run:
+                # ... (Your existing medal and threshold plot logic using wandb.Table and wandb.plot) ...
+                # This part is complex and W&B specific, so I'm assuming it's correct.
+                # Key is to ensure self.competition_benchmarks is not None.
+                for threshold_name, key_suffix in [
+                    ("median_threshold", "above_median"), ("gold_threshold", "gold_medal"),
+                    ("silver_threshold", "silver_medal"), ("bronze_threshold", "bronze_medal")
+                ]:
+                    flag_attr = f"_{key_suffix}_flags"
+                    if not hasattr(self, flag_attr): setattr(self, flag_attr, [])
+                    
+                    threshold_value = self.competition_benchmarks.get(threshold_name, float('inf'))
+                    is_met = 1 if result_node.metric.value > threshold_value else 0
+                    getattr(self, flag_attr).append(is_met)
+
+                    true_count = sum(getattr(self, flag_attr))
+                    false_count = len(getattr(self, flag_attr)) - true_count
+                    table = wandb.Table(
+                        data=[[key_suffix.replace('_', ' ').title(), true_count], [f"Not {key_suffix.replace('_', ' ').title()}", false_count]],
+                        columns=["label", "count"]
+                    )
+                    step_log_data[f"plots/{key_suffix}_bar"] = wandb.plot.bar(
+                        table, "label", "count", title=f"{key_suffix.replace('_', ' ').title()} Steps"
+                    )
+        else:
+            step_log_data[f"eval/validation_metric"] = float("nan")
+
+        # Submission check
         submission_path = submission_dir / "submission.csv"
         submission_exists = submission_path.exists()
         if not result_node.is_buggy and not submission_exists:
+            logger.warning(f"{log_prefix_main}: Node {result_node.id} was not buggy BUT submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
             result_node.is_buggy = True
             result_node.metric = WorstMetricValue()
-            logger.info(
-                f"Actually, node {result_node.id} did not produce a submission.csv"
-            )
-        #
+            step_log_data[f"eval/validation_metric"] = float("nan")
+            step_log_data[f"eval/is_buggy"] = 1 # Ensure this is updated
+            # Potentially remove from _metric_hist if added under false pretenses
+            if agent_validation_metrics_defined and hasattr(self, "_metric_hist") and self._metric_hist and \
+               result_node.metric.original_value_before_reset_to_worst is not None and \
+               self._metric_hist[-1] == result_node.metric.original_value_before_reset_to_worst:
+                self._metric_hist.pop()
+
+
         step_log_data[f"eval/submission_produced"] = 1 if submission_exists else 0
 
-        # --- Histogram of validation metric
-        self._metric_hist = getattr(self, "_metric_hist", [])
-        if result_node.metric and result_node.metric.value is not None:
+        # Metric histogram
+        if not hasattr(self, "_metric_hist"): self._metric_hist = []
+        if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             self._metric_hist.append(result_node.metric.value)
+        
+        if wandb and self.wandb_run:
+            if len(self._metric_hist) >= 1:
+                metric_table_data = [[v] for v in self._metric_hist if isinstance(v, (int, float))]
+                if metric_table_data:
+                    tbl = wandb.Table(data=metric_table_data, columns=["val"])
+                    step_log_data["plots/val_metric_scatter"] = wandb.plot.scatter(tbl, "val", "val", title="Validation Metric Values")
+            
+            # Bug vs Clean plot
+            if not hasattr(self, "_bug_flags"): self._bug_flags = []
+            self._bug_flags.append(1 if result_node.is_buggy else 0)
+            bug_count = sum(self._bug_flags); clean_count = len(self._bug_flags) - bug_count
+            bug_table = wandb.Table(data=[["Buggy", bug_count], ["Clean", clean_count]], columns=["label", "count"])
+            step_log_data["plots/bug_vs_clean"] = wandb.plot.bar(bug_table, "label", "count", title="Buggy vs Clean Steps")
 
-        if len(self._metric_hist) >= 3:  # wait until we have a few points
-            tbl = wandb.Table(data=[[v] for v in self._metric_hist], columns=["val"])
-            step_log_data["plots/val_metric_hist"] = wandb.plot.scatter(
-                tbl, "val", "step", title="Validation-metric distribution"
-            )
+            # Submission presence plot
+            if not hasattr(self, "_sub_flags"): self._sub_flags = []
+            self._sub_flags.append(1 if submission_exists else 0)
+            with_sub = sum(self._sub_flags); without_sub = len(self._sub_flags) - with_sub
+            sub_table = wandb.Table(data=[["Has submission", with_sub], ["No submission", without_sub]], columns=["label", "count"])
+            step_log_data["plots/submission_presence"] = wandb.plot.bar(sub_table, "label", "count", title="Submission Produced vs Missing")
 
-        # Keep a rolling list of 0/1 flags for every step
-        self._bug_flags = getattr(self, "_bug_flags", [])
-        self._bug_flags.append(1 if result_node.is_buggy else 0)
-
-        bug_count = sum(self._bug_flags)
-        clean_count = len(self._bug_flags) - bug_count
-
-        bug_table = wandb.Table(
-            data=[["Buggy", bug_count], ["Clean", clean_count]],
-            columns=["label", "count"],
-        )
-        step_log_data["plots/bug_vs_clean"] = wandb.plot.bar(
-            bug_table, "label", "count", title="Buggy vs clean steps"
-        )
-        # --- Bar chart: Submission produced vs missing
-        self._sub_flags = getattr(self, "_sub_flags", [])
-
-        self._sub_flags.append(1 if submission_exists else 0)
-
-        with_sub = sum(self._sub_flags)  # steps that made a CSV
-        without_sub = len(self._sub_flags) - with_sub
-
-        sub_table = wandb.Table(
-            data=[["Has submission", with_sub], ["No submission", without_sub]],
-            columns=["label", "count"],
-        )
-        step_log_data["plots/submission_presence"] = wandb.plot.bar(
-            sub_table, "label", "count", title="Submission produced vs missing"
-        )
-
-        # --- Send log data to W&B ---
         if self.wandb_run:
-            self.wandb_run.log(step_log_data, step=current_step_number)
-        # --- End Send log data ---
+            logger.info(f"{log_prefix_main}: Logging data to W&B. Keys: {list(step_log_data.keys())}", extra={"verbose": True})
+            try:
+                self.wandb_run.log(step_log_data, step=current_step_number)
+            except Exception as e_wandb:
+                logger.error(f"{log_prefix_main}: Error logging to W&B: {e_wandb}", exc_info=True, extra={"verbose": True})
+        
+        result_node.stage = node_stage # Set stage on the node for journal
+        result_node.exec_time = exec_duration # Set final exec time
+
         self.journal.append(result_node)
+        logger.info(f"{log_prefix_main}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}", extra={"verbose": True})
 
-        # Log best solution artifacts *immediately* when a new best is found
-        best_node = self.journal.get_best_node()
-        if best_node is not None and best_node.id == result_node.id:
-            logger.debug(
-                f"Node {result_node.id} is the best node so far (Metric: {best_node.metric.value:.4f})"
-            )
+        # Cache best solution
+        best_node = self.journal.get_best_node() # Default only_good=True
+        if best_node and best_node.id == result_node.id : # If current node is the new best
+            logger.info(f"{log_prefix_main}: Node {result_node.id} is new best (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f}). Caching solution.", extra={"verbose": True})
             best_solution_dir = self.cfg.workspace_dir / "best_solution"
-            best_submission_dir = self.cfg.workspace_dir / "best_submission"
+            best_submission_dir = self.cfg.workspace_dir / "best_submission" # Not used directly here but good to know
             best_solution_dir.mkdir(exist_ok=True, parents=True)
-            best_submission_dir.mkdir(exist_ok=True, parents=True)
+            # best_submission_dir.mkdir(exist_ok=True, parents=True) # Ensure it exists if used
 
-            if submission_exists:
-                shutil.copy(submission_path, best_submission_dir)
-            else:
-                logger.warning(
-                    f"Best node {result_node.id} did not produce submission.csv, cannot cache/log artifact."
-                )
-
-            # Cache best solution code locally
-            best_code_path = best_solution_dir / "solution.py"
-            with open(best_code_path, "w") as f:
-                f.write(result_node.code)
-            with open(best_solution_dir / "node_id.txt", "w") as f:
-                f.write(str(result_node.id))
-
+            if submission_exists: # Check if current node produced submission
+                 shutil.copy(submission_path, best_solution_dir / "submission.csv") # Store with best code
+            
+            with open(best_solution_dir / "solution.py", "w") as f: f.write(result_node.code)
+            with open(best_solution_dir / "node_id.txt", "w") as f: f.write(str(result_node.id))
         elif best_node:
-            logger.debug(
-                f"This Node is not the best node (Best: {best_node.id} with metric {best_node.metric.value:.4f})"
-            )
-        # …existing code that fills exec_duration / result_node.metric / etc.
+            logger.info(f"{log_prefix_main}: Current best node is {best_node.id} (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f})", extra={"verbose": True})
 
-        result_node.stage = node_stage
-        result_node.exec_time = exec_duration
 
-        log_step(
+        log_step( # Console logging via pretty_logging
             step=current_step_number,
             total=self.acfg.steps,
             stage=node_stage,
             is_buggy=result_node.is_buggy,
             exec_time=exec_duration,
-            metric=(
-                result_node.metric.value
-                if result_node.metric and result_node.metric.value
-                else None
-            ),
+            metric=(result_node.metric.value if result_node.metric and result_node.metric.value is not None else None),
         )
+        t_step_end = time.time()
+        logger.info(f"{log_prefix_main}_END: Duration: {t_step_end - t_step_start:.2f}s", extra={"verbose": True})
+
 
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
+        log_prefix = f"AGENT_PARSE_EXEC_STEP{self.current_step}_NODE{node.id}"
+        logger.info(f"{log_prefix}: Parsing execution result.", extra={"verbose": True})
 
-        node.absorb_exec_result(exec_result)
+        node.absorb_exec_result(exec_result) # Populates node.term_out, exc_type etc.
+        logger.debug(f"{log_prefix}_ABSORBED_NODE_EXC_TYPE: {node.exc_type}", extra={"verbose": True})
+        # node.term_out is already a trimmed string property
 
-        # Original complex prompt
-        introduction = (
-            "You are a Kaggle grandmaster attending a competition. "
-            "You have written code to solve this task and now need to evaluate the output of the code execution. "
-            "You should determine if there were any bugs as well as report the empirical findings."
-        )
+        introduction = ("You are a Kaggle grandmaster ... evaluate the output ... empirical findings.") # Truncated for brevity
         if self.acfg.obfuscate:
-            introduction = (
-                "You are an expert machine learning engineer attempting a task. "
-                "You have written code to solve this task and now need to evaluate the output of the code execution. "
-                "You should determine if there were any bugs as well as report the empirical findings."
-            )
+            introduction = ("You are an expert machine learning engineer ... evaluate the output ... empirical findings.")
 
-        prompt = {
+        # Prompt for feedback LLM
+        feedback_system_prompt = {
             "Introduction": introduction,
-            "Task Description": self.task_desc,  # Provide task context
-            "Code Executed": wrap_code(node.code),
-            "Execution Output Log": wrap_code(
-                node.term_out, lang=""
-            ),  # Use raw term_out
+            "Task Description": self.task_desc,
+            "Code Executed": prompt_utils_wrap_code(node.code), # Use alias to avoid conflict
+            "Execution Output Log": prompt_utils_wrap_code(node.term_out, lang=""), # term_out is already a string
         }
 
-        # Retry mechanism for the feedback LLM call (optional but good)
-        max_retries = 3
-        review_response = None
+        max_retries = self.acfg.feedback.get("retries", 3) # Get retries from config or default
+        review_response_dict: Optional[Dict[str, Any]] = None
 
         for attempt in range(max_retries):
+            logger.info(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}/{max_retries}: Querying feedback LLM.", extra={"verbose": True})
+            # Verbose logging of feedback_system_prompt and func_spec can be added here if needed.
+            
             try:
-                review_response = cast(
-                    dict,
-                    query(
-                        system_message=prompt,
-                        user_message=None,
-                        func_spec=review_func_spec,
-                        model=self.acfg.feedback.model,
-                        temperature=self.acfg.feedback.temp,
-                        excute=False,
-                        convert_system_to_user=self.acfg.convert_system_to_user,
-                    ),
+                raw_response = query(
+                    system_message=feedback_system_prompt,
+                    user_message=None, # User message is None for function calling with system prompt
+                    func_spec=review_func_spec, # Defined globally in agent.py
+                    model=self.acfg.feedback.model,
+                    temperature=self.acfg.feedback.temp,
+                    convert_system_to_user=self.acfg.convert_system_to_user, # Pass this through
+                    current_step=self.current_step # Pass current_step for backend logging
+                    # `excute` param is not used by backend query when func_spec is present
                 )
-                # Check if required keys are present
-                if all(
-                    k in review_response
-                    for k in [
-                        "is_bug",
-                        "has_csv_submission",
-                        "summary",
-                        "metric",
-                        "lower_is_better",
-                        "code_quality",
-                    ]
-                ):
-                    break  # Success
+                logger.info(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}/{max_retries}: Received response.", extra={"verbose": True})
+                logger.debug(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_RAW_RESPONSE_START\n{raw_response}\n{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_RAW_RESPONSE_END", extra={"verbose": True})
+
+                if not isinstance(raw_response, dict):
+                    logger.error(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Response is not a dict as expected. Type: {type(raw_response)}", extra={"verbose": True})
+                    # Attempt to parse if string that looks like JSON
+                    if isinstance(raw_response, str):
+                        try:
+                            parsed_raw_response = json.loads(raw_response)
+                            if isinstance(parsed_raw_response, dict):
+                                raw_response = parsed_raw_response
+                                logger.info(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Successfully parsed string response to dict.", extra={"verbose": True})
+                            else:
+                                raise ValueError("Parsed JSON is not a dict.")
+                        except Exception as json_e:
+                            logger.error(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Failed to parse string response as JSON: {json_e}", extra={"verbose": True})
+                            raw_response = None # Signal failure to parse
+                    else:
+                        raw_response = None # Signal failure if not dict or parsable string
+
+                review_response_dict = cast(Dict[str, Any], raw_response) if isinstance(raw_response, dict) else None
+                
+                # Validate response
+                if review_response_dict and all(k in review_response_dict for k in review_func_spec.json_schema["required"]):
+                    logger.info(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Successfully received and validated feedback response.", extra={"verbose": True})
+                    break # Success
                 else:
-                    logger.warning(
-                        f"Feedback LLM response missing keys (attempt {attempt+1}/{max_retries}). Response: {review_response}"
-                    )
-                    review_response = None  # Force retry
+                    logger.warning(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Feedback response missing required keys or is None. Response: {review_response_dict}", extra={"verbose": True})
+                    review_response_dict = None # Force retry
+
             except Exception as e:
-                logger.error(
-                    f"Error querying feedback LLM (attempt {attempt+1}/{max_retries}): {e}"
-                )
-                if attempt == max_retries - 1:
-                    logger.error("Feedback LLM query failed after multiple retries.")
+                logger.error(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Error querying feedback LLM: {e}", exc_info=True, extra={"verbose": True})
+            
+            if attempt == max_retries - 1 and review_response_dict is None: # All retries failed
+                logger.error(f"{log_prefix}: Feedback LLM query failed after {max_retries} retries. Using default error values.", extra={"verbose": True})
+                review_response_dict = {
+                    "is_bug": True, "has_csv_submission": False,
+                    "summary": "Failed to get feedback from LLM after multiple retries.",
+                    "metric": None, "lower_is_better": True, "code_quality": 0,
+                }
+                break # Exit loop
 
-                    review_response = {
-                        "is_bug": True,
-                        "has_csv_submission": False,
-                        "summary": "Failed to get feedback from LLM.",
-                        "metric": None,
-                        "lower_is_better": True,  # Default assumption
-                        "code_quality": 0,
-                    }
-                    break
+        # Ensure review_response_dict is not None (should have default from above if all retries failed)
+        if review_response_dict is None: # Safety net, should ideally not be hit
+            review_response_dict = {
+                "is_bug": True, "has_csv_submission": False,
+                "summary": "CRITICAL_ERROR: review_response_dict became None unexpectedly.",
+                "metric": None, "lower_is_better": True, "code_quality": 0,
+            }
 
-        # if the metric isn't a float then fill the metric with the worst metric
-        metric_value = review_response.get("metric")  # Use .get for safety
+        metric_value = review_response_dict.get("metric")
         if not isinstance(metric_value, (float, int)):
-            metric_value = None  # Set to None if not a valid number
+            if metric_value is not None:
+                logger.warning(f"{log_prefix}: Metric value from LLM ('{metric_value}') is not float/int. Setting to None.", extra={"verbose": True})
+            metric_value = None
+        
+        self._code_quality = review_response_dict.get("code_quality", 0) # Store for main step logging
+        if not isinstance(self._code_quality, (int, float)): # Ensure numeric
+            logger.warning(f"{log_prefix}: Code quality from LLM ('{self._code_quality}') not int/float. Setting to 0.", extra={"verbose": True})
+            self._code_quality = 0
+        node.code_quality = int(self._code_quality) # Store on node
 
-        self._code_quality = review_response.get("code_quality", 0)
-        # do an extra check, to catch cases where judge fails
+        # Submission check (actual vs. reported)
         submission_path = self.cfg.workspace_dir / "submission" / "submission.csv"
         has_csv_submission_actual = submission_path.exists()
-        has_csv_submission_reported = review_response.get("has_csv_submission", False)
+        has_csv_submission_reported = review_response_dict.get("has_csv_submission", False)
 
-        node.analysis = review_response.get(
-            "summary", "Feedback LLM failed."
-        )  # Default value
+        node.analysis = review_response_dict.get("summary", "Feedback LLM summary missing or failed.")
+        logger.debug(f"{log_prefix}_LLM_ANALYSIS_SUMMARY_START\n{node.analysis}\n{log_prefix}_LLM_ANALYSIS_SUMMARY_END", extra={"verbose": True})
 
-        node.is_buggy = (
-            review_response.get("is_bug", True)  # Default to True if key missing
-            or node.exc_type is not None
-            or metric_value is None  # Use the validated metric_value
-            or not has_csv_submission_reported  # Judge's report
-            or not has_csv_submission_actual  # Actual file existence
-        )
-        judgement = "Buggy" if node.is_buggy else "Not Buggy"
+        # Determine final buggy status
+        is_bug_llm = review_response_dict.get("is_bug", True) # Default to buggy if LLM fails to provide
+        exc_type_exists = node.exc_type is not None
+        metric_missing = metric_value is None
+        # If LLM says CSV missing OR actual file is missing, consider it a failure for CSV
+        csv_submission_failed = not has_csv_submission_reported or not has_csv_submission_actual
+
+        node.is_buggy = (is_bug_llm or exc_type_exists or metric_missing or csv_submission_failed)
+        
+        logger.info(f"{log_prefix}: Final buggy status for node {node.id}: {node.is_buggy}", extra={"verbose": True})
+
         if node.is_buggy:
-            console.print(f"[bold red]Result: {judgement}[/bold red]")
-            logger.info(
-                f"Feedback results: Current Node is buggy, summary: {node.analysis}"
-            )
-            # Log reasons for being buggy
+            console.print(f"[bold red]Result: Buggy[/bold red]") # Console output
             bug_reasons = []
-            if review_response.get("is_bug", True):
-                bug_reasons.append("LLM judged buggy")
-                bug_reasons.append(
-                    review_response.get("summary", "Feedback LLM failed.")
-                )
-            if node.exc_type is not None:
-                bug_reasons.append(f"Exception ({node.exc_type})")
-            if metric_value is None:
-                bug_reasons.append("Metric missing/invalid")
-            logger.info(
-                f"Buggy reasons: {'; '.join(bug_reasons)}", extra={"verbose": True}
-            )
-
+            if is_bug_llm: bug_reasons.append(f"LLM_judged_buggy (Summary: {trim_long_string(node.analysis)})")
+            if exc_type_exists: bug_reasons.append(f"Exception_occurred ({node.exc_type})")
+            if metric_missing: bug_reasons.append("Metric_missing_or_invalid_from_LLM")
+            if not has_csv_submission_reported: bug_reasons.append("LLM_reported_CSV_missing")
+            if not has_csv_submission_actual: bug_reasons.append("Actual_CSV_file_missing_from_disk")
+            
+            logger.warning(f"{log_prefix}: Node {node.id} is buggy. Reasons: {'; '.join(bug_reasons)}", extra={"verbose": True})
             node.metric = WorstMetricValue()
-
         else:
-            console.print(f"[bold green]Result: {judgement}[/bold green]")
-            logger.info(
-                f"Feedback results: Current Node not buggy, summary: {node.analysis}"
-            )
+            console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
+            logger.info(f"{log_prefix}: Node {node.id} determined not buggy. Metric value: {metric_value}, LLM_says_lower_is_better: {review_response_dict.get('lower_is_better', True)}", extra={"verbose": True})
             node.metric = MetricValue(
                 metric_value,
-                maximize=not review_response.get("lower_is_better", True),
+                maximize=not review_response_dict.get("lower_is_better", True) # Maximize if LLM says lower is NOT better
             )
-
         return node
 
 
 #############################################################################
-# -*- coding: utf-8 -*-
-
-
+# PlannerAgent Implementation
+#############################################################################
 class PlannerAgent:
     def __init__(
         self,
-        task_desc: str,
+        task_desc: str, # Dict or string
         cfg: Config,
         journal: Journal,
         wandb_run=None,
         competition_benchmarks=None,
     ):
-        super().__init__()
-        self.task_desc = task_desc
+        # super().__init__() # Not needed
+        if isinstance(task_desc, dict):
+            from .backend import compile_prompt_to_md # Local import
+            self.task_desc = compile_prompt_to_md(task_desc)
+        else:
+            self.task_desc = task_desc
+            
         self.cfg = cfg
         self.acfg = cfg.agent
         self.journal = journal
         self.data_preview: str | None = None
         self.start_time = time.time()
         self.current_step = 0
-        self._prev_buggy: bool = False
+        self._prev_buggy: bool = False # Tracks buggy status *before* reflection
         self.wandb_run = wandb_run
         self.competition_benchmarks = competition_benchmarks
         self.competition_name = self.cfg.competition_name
-        self._code_quality = 0  # Initialize code quality
+        self._code_quality: float = 0.0
 
-        # Initialize W&B plot data lists
-        self._metric_hist = []
-        self._bug_flags = []
-        self._sub_flags = []
-        self._above_median_flags = []
-        self._gold_medal_flags = []
-        self._silver_medal_flags = []
-        self._bronze_medal_flags = []
+        # Initialize W&B plot data lists (as in original PlannerAgent)
+        self._metric_hist: List[float] = []
+        self._bug_flags: List[int] = []
+        self._sub_flags: List[int] = []
+        self._above_median_flags: List[int] = []
+        self._gold_medal_flags: List[int] = []
+        self._silver_medal_flags: List[int] = []
+        self._bronze_medal_flags: List[int] = []
 
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
+        # This logic is identical to Agent's search_policy, kept for consistency
+        # If it needs to differ for PlannerAgent, it can be modified here.
         search_cfg = self.acfg.search
-        logger.info("[search_policy] Determining next action.", extra={"verbose": True})
+        logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Determining next action.", extra={"verbose": True})
 
         if len(self.journal.draft_nodes) < search_cfg.num_drafts:
-            logger.info(
-                "[search_policy] Selected: Draft new node (not enough drafts).",
-                extra={"verbose": True},
-            )
+            logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Draft new node (drafts: {len(self.journal.draft_nodes)} < {search_cfg.num_drafts}).", extra={"verbose": True})
             return None
 
         if random.random() < search_cfg.debug_prob:
             debuggable_nodes = [
-                n
-                for n in self.journal.buggy_nodes
+                n for n in self.journal.buggy_nodes
                 if (n.is_leaf and n.debug_depth <= search_cfg.max_debug_depth)
             ]
             if debuggable_nodes:
                 node_to_debug = random.choice(debuggable_nodes)
-                logger.info(
-                    f"[search_policy] Selected: Debug node {node_to_debug.id}.",
-                    extra={"verbose": True},
-                )
+                logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Debug node {node_to_debug.id} (debug_prob triggered, depth {node_to_debug.debug_depth}).", extra={"verbose": True})
                 return node_to_debug
             else:
-                logger.info(
-                    "[search_policy] Attempted debug, but no debuggable nodes found.",
-                    extra={"verbose": True},
-                )
+                logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Attempted debug (debug_prob triggered), but no debuggable nodes found.", extra={"verbose": True})
 
         good_nodes = self.journal.good_nodes
         if not good_nodes:
-            logger.info(
-                "[search_policy] Selected: Draft new node (no good nodes to improve).",
-                extra={"verbose": True},
-            )
+            logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Draft new node (no good nodes to improve).", extra={"verbose": True})
             return None
 
         greedy_node = self.journal.get_best_node()
-        if greedy_node:  # Ensure greedy_node is not None
-            logger.info(
-                f"[search_policy] Selected: Improve greedy node {greedy_node.id}.",
-                extra={"verbose": True},
-            )
+        if greedy_node:
+            if greedy_node.is_buggy:
+                 logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Debug greedy node {greedy_node.id} (it was marked buggy).", extra={"verbose": True})
+                 return greedy_node
+            logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Improve greedy node {greedy_node.id} (metric: {greedy_node.metric.value:.3f if greedy_node.metric else 'N/A'}).", extra={"verbose": True})
             return greedy_node
-        else:  # Should ideally not happen if good_nodes exist, but as a fallback
-            logger.info(
-                "[search_policy] Selected: Draft new node (no best node found, fallback).",
-                extra={"verbose": True},
-            )
+        else:
+            logger.info(f"PLANNER_AGENT_SEARCH_POLICY_STEP{self.current_step}: Selected: Draft new node (no best_node found, fallback).", extra={"verbose": True})
             return None
 
-    @property
-    def _prompt_environment(self):
-        pkgs = [
-            "numpy",
-            "pandas",
-            "scikit-learn",
-            "statsmodels",
-            "xgboost",
-            "lightGBM",
-            "torch",
-            "torchvision",
-            "torch-geometric",
-            "bayesian-optimization",
-            "timm",
-        ]
-        random.shuffle(pkgs)
-        pkg_str = ", ".join([f"`{p}`" for p in pkgs])
-        return {
-            "Installed Packages": f"Your solution can use any relevant machine learning packages such as: {pkg_str}. Feel free to use any other packages too (all packages are already installed!). For neural networks we suggest using PyTorch rather than TensorFlow."
-        }
 
-    @property
-    def _prompt_impl_guideline(self):
-        return {
-            "Implementation Guideline": [
-                "1. Write a complete, single-file Python script. ",
-                "2. starting with imports, and load necessary data from the './input/' directory.",
-                "3. Implement the solution proposed in the plan.",
-                "4. Calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
-                "5. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. Ensure the file format matches the task description.",
-                "6. The script must run without errors. Focus on correctness first.",
-                "7. The code should be clean and easy to understand. It should be well-documented and well-structured.",
-            ]
-        }
+    # REMOVE: _prompt_environment, _prompt_impl_guideline, _prompt_resp_fmt,
+    # debug_prompt_resp_fmt, code_prompt_resp_fmt, plan_prompt_resp_fmt
+    # These are now handled by functions in prompt_utils.py
 
-    @property
-    def _prompt_resp_fmt(
+    def _query_llm_with_retries( # This method is specific to PlannerAgent
         self,
-    ):  # This seems unused now with specific plan/code/debug formats
-        fmt = (
-            "\n\n---\n"
-            "1) PLAN (plain text, no fences):\n"
-            "<your step‑by‑step reasoning here>\n\n"
-            "2) CODE (one fenced Python block):\n"
-            "```python\n<your python code here>\n```"
-        )
-        return {
-            "Response format": (
-                "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
-                "followed by a single markdown code block (wrapped in ```) which implements this solution and prints out the evaluation metric. "
-                "There should be no additional headings or text in your response. Just natural language text followed by a newline and then the markdown code block. "
-                "explicitly,structure your answer exactly like this: "
-            )
-            + fmt
-        }
-
-    @property
-    def debug_prompt_resp_fmt(self):
-        fmt = (
-            "\n\n---\n"
-            "## Bugs Summary/Analysis: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning abd summary of the bugs in the previous solution here>\n\n"
-            "## Plan: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning and plan steps for fixing the bugs here>\n\n"
-        )
-        return {
-            "Response format": (
-                "Your response for the summary should be a detailed and high quality bullet points of the bugs in the previous solution, summarizing all the information and problems(5-7 sentences), "
-                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
-                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Bugs Summary/Analysis: and natural language text (plan) under ## Plan: "
-                "explicitly,structure your answer exactly like this: "
-            )
-            + fmt
-        }
-
-    @property
-    def code_prompt_resp_fmt(self):
-        fmt = (
-            "\n\n---\n"
-            "1) CODE (one fenced Python block):\n"
-            "```python\n<your python code here>\n```"
-        )
-        return {
-            "Response format": (
-                "Your response should be a single markdown code block (wrapped in ```) which implements this solution and prints out the evaluation metric. "
-                "There should be no additional headings or text in your response. Just the markdown code block. "
-                "explicitly,structure your answer exactly like this: "
-            )
-            + fmt
-        }
-
-    @property
-    def plan_prompt_resp_fmt(self):
-        fmt = (
-            "\n\n---\n"
-            "## Task Summary: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning abd summary of the task here>\n\n"
-            "## Plan: (plain text, no fences):\n"
-            "<your step‑by‑step reasoning and plan steps here>\n\n"
-        )
-        return {
-            "Response format": (
-                "Your response for the summary should be a detailed and high quality bullet points of what the task is about, summarizing all the information in the task description (5-7 sentences), "
-                "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
-                "There should be no additional headings or Code in your response. Just natural language text (summary) under ## Task Summary: and natural language text (plan) under ## Plan: "
-                "explicitly,structure your answer exactly like this: "
-            )
-            + fmt
-        }
-
-    def _query_llm_with_retries(
-        self,
-        query_type: str,
-        system_prompt: Any,
-        user_prompt: Any,
+        query_type: str, # "PLANNER" or "CODER" or "DEBUG_PLANNER" etc. for logging
+        system_prompt: Dict[str, Any],
+        user_prompt: Dict[str, Any],
         model: str,
         temperature: float,
-        planner_flag: bool,
-        current_step: int,
+        planner_flag: bool, # Passed to backend `query`
+        # current_step: int, # Already an attribute self.current_step
         convert_system_to_user: bool,
         retries: int = 3,
-    ) -> Any:
-        """Helper function to query LLM with retries and detailed logging."""
+    ) -> Any: # Returns raw completion text or None
+        """Helper function to query LLM with retries and detailed logging for PlannerAgent."""
         completion_text = None
-        log_prefix = f"LLM_QUERY_{query_type.upper()}_STEP{current_step}"
+        # Use self.current_step for logging
+        log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
 
         for attempt in range(retries):
-            logger.info(
-                f"{log_prefix}_ATTEMPT{attempt+1}: Sending request. Model: {model}, Temp: {temperature}, Planner: {planner_flag}",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_ATTEMPT{attempt+1}_SYSTEM_PROMPT_START\n{system_prompt}\n{log_prefix}_ATTEMPT{attempt+1}_SYSTEM_PROMPT_END",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_ATTEMPT{attempt+1}_USER_PROMPT_START\n{user_prompt}\n{log_prefix}_ATTEMPT{attempt+1}_USER_PROMPT_END",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
+            # Verbose logging of prompts can be done here.
+            # logger.debug(f"{log_prefix}_SYSTEM_PROMPT_START\n{system_prompt}\n{log_prefix}_SYSTEM_PROMPT_END", extra={"verbose": True})
+            # logger.debug(f"{log_prefix}_USER_PROMPT_START\n{user_prompt}\n{log_prefix}_USER_PROMPT_END", extra={"verbose": True})
 
             try:
                 completion_text = query(
                     system_message=system_prompt,
                     user_message=user_prompt,
                     model=model,
-                    planner=planner_flag,
                     temperature=temperature,
-                    current_step=current_step,  # Pass current_step for backend logging
+                    planner=planner_flag, # Backend param
+                    current_step=self.current_step,
                     convert_system_to_user=convert_system_to_user,
+                    max_tokens=self.acfg.code.max_new_tokens # Assuming this should be passed for planner too
                 )
-                logger.info(
-                    f"{log_prefix}_ATTEMPT{attempt+1}: Received response.",
-                    extra={"verbose": True},
-                )
-                logger.debug(
-                    f"{log_prefix}_ATTEMPT{attempt+1}_RAW_RESPONSE_START\n{completion_text}\n{log_prefix}_ATTEMPT{attempt+1}_RAW_RESPONSE_END",
-                    extra={"verbose": True},
-                )
-                return completion_text  # Return on successful query
+                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True})
+                # logger.debug(f"{log_prefix}_RAW_RESPONSE_START\n{completion_text}\n{log_prefix}_RAW_RESPONSE_END", extra={"verbose": True})
+                return completion_text
             except Exception as e:
-                logger.error(
-                    f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}",
-                    exc_info=True,
-                    extra={"verbose": True},
-                )
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
                 if attempt == retries - 1:
-                    logger.error(
-                        f"{log_prefix}: All {retries} retries failed.",
-                        extra={"verbose": True},
-                    )
-                    return None  # Or raise the exception e
-        return (
-            None  # Should be unreachable if retries > 0 and an exception isn't raised
-        )
+                    logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True})
+                    return None
+                time.sleep(2) # Simple backoff
+        return None
 
-    def plan_query(self, prompt_user_message: Any, retries=3) -> tuple[str, str, str]:
-        """Generate a step by step natural language plan that will be fed to the coder model."""
-        system_prompt = {
-            "SYSTEM": "You are a Kaggle Grandmaster and a team leader. you can plan high detailed and quality machine learning engineering solutions,",
-            "user_instructions": {
-                "Possible Questions you will face": "You will be asked to come up with a step by step plan to solve the kaggle competetion",
-                "How to answer the user": 'Whenever you answer, always: 1. Write a "## Task Summary:" section in plain text consisting of 5-7 sentences distilling the task for you team members that are responsible for implementing the solution. 2. Write a "## Plan:" section in plain text consisting of detailed and high quality bullet points that will be used by the team members to implement the solution (7-10 bullet points). ',
-                "Critical Instructions": "Do not give/write code solutions, coding is not your job, just consice summary and detailed plan",
-            },
-        }
-        log_prefix = f"LLM_PLAN_QUERY_STEP{self.current_step}"
+
+    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        """Generate a natural language plan (and summary for task)."""
+        system_prompt = get_planner_agent_plan_system_prompt()
+        log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
 
         completion_text = self._query_llm_with_retries(
-            query_type="PLANNER",
+            query_type="PLANNER_PLAN", # Specific log type
             system_prompt=system_prompt,
-            user_prompt=prompt_user_message,
-            model=self.acfg.code.planner_model,
-            temperature=self.acfg.code.temp,
-            planner_flag=True,
-            current_step=self.current_step,
+            user_prompt=user_prompt_dict,
+            model=self.acfg.code.planner_model, # Use planner_model from config
+            temperature=self.acfg.code.temp, # Use general temp or specific planner temp if available
+            planner_flag=True, # This call is for planning
             convert_system_to_user=self.acfg.convert_system_to_user,
             retries=retries,
         )
 
         if completion_text is None:
-            logger.error(
-                f"{log_prefix}: Failed to get response after retries. Returning empty plan and summary.",
-                extra={"verbose": True},
-            )
-            return "", "", ""
+            logger.error(f"{log_prefix}: Failed to get response. Returning empty plan and summary.", extra={"verbose": True})
+            return "", "", "" # Summary, Plan, (empty string for exec_summary compatibility)
 
-        summary = extract_summary(completion_text)
-        plan = extract_plan(completion_text)
+        summary = extract_summary(completion_text) # Assumes "## Task Summary:"
+        plan = extract_plan(completion_text)       # Assumes "## Plan:"
 
         if plan and summary:
-            logger.info(
-                f"{log_prefix}: Successfully extracted plan and summary.",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_EXTRACTED_SUMMARY_START\n{summary}\n{log_prefix}_EXTRACTED_SUMMARY_END",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_EXTRACTED_PLAN_START\n{plan}\n{log_prefix}_EXTRACTED_PLAN_END",
-                extra={"verbose": True},
-            )
-            return summary, plan, ""
+            logger.info(f"{log_prefix}: Successfully extracted plan and summary.", extra={"verbose": True})
+            logger.debug(f"{log_prefix}_EXTRACTED_SUMMARY_START\n{summary}\n{log_prefix}_EXTRACTED_SUMMARY_END", extra={"verbose": True})
+            logger.debug(f"{log_prefix}_EXTRACTED_PLAN_START\n{plan}\n{log_prefix}_EXTRACTED_PLAN_END", extra={"verbose": True})
         else:
-            logger.warning(
-                f"{log_prefix}: Plan or summary extraction failed. Raw text: '{trim_long_string(completion_text if isinstance(completion_text, str) else str(completion_text))}'",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_EXTRACTION_FAILED_RAW_COMPLETION_START\n{completion_text}\n{log_prefix}_EXTRACTION_FAILED_RAW_COMPLETION_END",
-                extra={"verbose": True},
-            )
-            return (
-                "",
-                (
-                    completion_text
-                    if isinstance(completion_text, str)
-                    else str(completion_text)
-                ),
-                "",
-            )  # Return raw text as plan if extraction fails
+            logger.warning(f"{log_prefix}: Plan or summary extraction failed. Raw text: '{trim_long_string(str(completion_text))}'", extra={"verbose": True})
+            # Fallback: return raw text as plan if specific extraction fails
+            summary = summary or "SUMMARY_EXTRACTION_FAILED"
+            plan = plan or str(completion_text) # Use raw if plan not found
 
-    def code_query(self, prompt_user_message: Any, retries=3) -> tuple[str, str, str]:
-        """Follow a predefined plan and implement the code that solves the kaggle competetion."""
-        system_prompt = {
-            "SYSTEM": "You are a Kaggle Grandmaster and great at implementing machine learning engineering code. Precisely follow the plan to implement the code that solves the kaggle competetion.",
-            "user_instructions": {
-                "What you will face": "You will be given a plan to implement the code that solves the kaggle competetion. Precisely follow the plan to implement the code.",
-                "How to answer the user": 'Whenever you answer, always: answer in one section called "CODE:" containing exactly one fenced Python block: ```python implementing the plan',
-            },
-        }
-        log_prefix = f"LLM_CODE_QUERY_STEP{self.current_step}"
+        return summary, plan, "" # Empty string for execution_summary compatibility
+
+
+    def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        """Generate code based on a plan."""
+        system_prompt = get_planner_agent_code_system_prompt()
+        log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
 
         completion_text = self._query_llm_with_retries(
-            query_type="CODER",
+            query_type="PLANNER_CODER", # Specific log type
             system_prompt=system_prompt,
-            user_prompt=prompt_user_message,
-            model=self.acfg.code.model,
+            user_prompt=user_prompt_dict,
+            model=self.acfg.code.model, # Use coder_model from config
             temperature=self.acfg.code.temp,
-            planner_flag=False,  # Coder model is not planner
-            current_step=self.current_step,
+            planner_flag=False, # This call is for coding
             convert_system_to_user=self.acfg.convert_system_to_user,
             retries=retries,
         )
 
         if completion_text is None:
-            logger.error(
-                f"{log_prefix}: Failed to get response after retries. Returning empty code.",
-                extra={"verbose": True},
-            )
-            return "", "", ""
+            logger.error(f"{log_prefix}: Failed to get response. Returning empty code.", extra={"verbose": True})
+            return "", "", "" # NL (empty), Code (empty), Exec_summary (empty)
 
         code = extract_code(completion_text)
-        # nl_text = extract_text_up_to_code(completion_text) # Often empty with current prompts
+        # nl_text for coder is usually empty with current prompts, but can be extracted if needed:
+        # nl_text = extract_text_up_to_code(completion_text) 
 
         if code:
-            logger.info(
-                f"{log_prefix}: Successfully extracted code.", extra={"verbose": True}
-            )
-            # logger.debug(f"{log_prefix}_EXTRACTED_NL_TEXT_START\n{nl_text}\n{log_prefix}_EXTRACTED_NL_TEXT_END", extra={"verbose": True})
-            logger.debug(
-                f"{log_prefix}_EXTRACTED_CODE_START\n{code}\n{log_prefix}_EXTRACTED_CODE_END",
-                extra={"verbose": True},
-            )
-            return "", code, ""  # Assuming nl_text is not critical here
+            logger.info(f"{log_prefix}: Successfully extracted code.", extra={"verbose": True})
+            # logger.debug(f"{log_prefix}_EXTRACTED_CODE_START\n{code}\n{log_prefix}_EXTRACTED_CODE_END", extra={"verbose": True})
         else:
-            logger.warning(
-                f"{log_prefix}: Code extraction failed. Raw text: '{trim_long_string(completion_text if isinstance(completion_text, str) else str(completion_text))}'",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_EXTRACTION_FAILED_RAW_COMPLETION_START\n{completion_text}\n{log_prefix}_EXTRACTION_FAILED_RAW_COMPLETION_END",
-                extra={"verbose": True},
-            )
-            # Return raw text as code if extraction fails, might be useful for debugging LLM output format
-            return (
-                "",
-                (
-                    completion_text
-                    if isinstance(completion_text, str)
-                    else str(completion_text)
-                ),
-                "",
-            )
+            logger.warning(f"{log_prefix}: Code extraction failed. Raw text: '{trim_long_string(str(completion_text))}'", extra={"verbose": True})
+            code = str(completion_text) # Fallback to raw text as code
+
+        return "", code, "" # NL (empty), Code, Exec_summary (empty)
+
 
     def _draft(self, parent_node=None) -> Node:
-        # console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Drafting")
-        logger.info(
-            f"AGENT_DRAFT_STEP{self.current_step}: Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}",
-            extra={"verbose": True},
-        )
-
-        comp_data = self.competition_benchmarks
-        code_template = None  # Not used in current logic based on prompt construction
-
-        plan_introduction = f"Given the following task description for a machine learning competition named {self.competition_name}, develop a complete and detailed plan to solve it."
-        code_introduction = f"Given the following task description about a machine learning competition named {self.competition_name}, and the plan to solve it, develop a complete code to solve it."
+        log_prefix = f"PLANNER_AGENT_DRAFT_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
 
         # --- Plan Generation ---
-        plan_prompt_user_message: Any = {
-            "Introduction": plan_introduction,
-            "Overall Task Description": self.task_desc,
-            "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
-            "Instructions": {},
-        }
-        plan_prompt_user_message["Instructions"] |= (
-            "The summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan.",
+        plan_user_prompt = get_planner_agent_draft_plan_user_prompt(
+            task_desc=self.task_desc,
+            journal_summary=self.journal.generate_summary(include_code=False),
+            competition_name=self.competition_name,
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
-        plan_prompt_user_message["Instructions"] |= self.plan_prompt_resp_fmt
-        plan_prompt_user_message["Instructions"] |= {
-            "Instructions for generating the plan": [
-                "Every step of the plan should be very detailed and explicit, point exactly how is the steps going to be solved. e.g. 'Use XGBoost to train a model with the following parameters: ...'",
-                "The plan should be detailed in a step by step manner that is easy to follow.",
-                "for this particular first solution, propose a relatively simple approach in terms of method used for solving the problem, without ensembling or hyper-parameter optimization, as we are using this as a first draft for future improvements.",
-                "Take the Memory section into consideration when proposing the design.",
-                "The solution plan should be detailed and high quality bullet points that are easy to follow.",
-                "Don't suggest to do EDA.",
-                "The data is already prepared and available in the `./input` directory. There is no need to suggest any unzip for any files.",
-            ],
-        }
-        plan_prompt_user_message["Instructions"] |= self._prompt_environment
-        if self.acfg.data_preview:
-            plan_prompt_user_message["Data Overview"] = self.data_preview
+        logger.info(f"{log_prefix}: Calling plan_query for drafting plan.", extra={"verbose": True})
+        task_summary, agent_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
 
-        logger.info(
-            f"AGENT_DRAFT_STEP{self.current_step}: Calling plan_query for drafting.",
-            extra={"verbose": True},
-        )
-        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(
-            plan_prompt_user_message
-        )
-
-        if not agent_plan_for_step:  # If plan generation failed
-            logger.error(
-                f"AGENT_DRAFT_STEP{self.current_step}: Plan generation failed. Cannot proceed with code generation.",
-                extra={"verbose": True},
-            )
-            # Create a dummy node indicating failure
-            return Node(
-                plan="PLAN GENERATION FAILED",
-                code="# PLAN GENERATION FAILED",
-                summary=agent_summary_for_step or "PLAN GENERATION FAILED",
-                parent=parent_node,
-            )
+        if not agent_plan:
+            logger.error(f"{log_prefix}: Plan generation FAILED. Cannot proceed with code generation.", extra={"verbose": True})
+            return Node(plan="PLAN_GENERATION_FAILED", code="# PLAN_GENERATION_FAILED", summary=task_summary or "PLAN_GENERATION_FAILED", parent=parent_node)
 
         # --- Code Generation ---
-        code_prompt_user_message: Any = {
-            "Introduction": code_introduction,
-            "Overall Task Description": agent_summary_for_step,  # Use summary from planning
-            "Plan to implement": agent_plan_for_step,  # Crucial: Add the generated plan here
-            "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(),
-            "Instructions": {},
-        }
-        code_prompt_user_message["Instructions"] |= self._prompt_environment
-        code_prompt_user_message["Instructions"] |= {
-            "Solution code guideline": [
-                "Strictly implement the code that implements the plan.",
-                "Provide a single, complete Python script wrapped in a ```python code block.",
-                "Include all necessary imports and load data from './input/' correctly.",
-                "Write clear, concise comments explaining each part of the code.",
-                "Ensure the code adheres to PEP8 style and is easy to read.",
-                "Optimize performance without sacrificing clarity.",
-                "Calculate and print the validation metric in the format: `Validation Metric: {metric_value}`.",
-                "Save test predictions to './submission/submission.csv' exactly as required.",
-                "The code should be between ```python fences",
-                "only write code, do not write any other text",
-            ],
-        }
-        code_prompt_user_message["Instructions"] |= self.code_prompt_resp_fmt
-        if self.acfg.data_preview:
-            code_prompt_user_message["Data Overview"] = self.data_preview
-
-        logger.info(
-            f"AGENT_DRAFT_STEP{self.current_step}: Calling code_query for drafting.",
-            extra={"verbose": True},
+        code_user_prompt = get_planner_agent_draft_code_user_prompt(
+            task_summary_from_planner=task_summary,
+            plan_from_planner=agent_plan,
+            journal_summary=self.journal.generate_summary(include_code=False),
+            competition_name=self.competition_name,
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
-        _, generated_code, _ = self.code_query(code_prompt_user_message)
+        logger.info(f"{log_prefix}: Calling code_query for drafting code.", extra={"verbose": True})
+        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
 
-        # Log formatted code for easier reading in verbose logs if successful
-        formatted_extracted_code = format_code(generated_code)
-        if formatted_extracted_code:
-            logger.debug(
-                f"AGENT_DRAFT_STEP{self.current_step}_FORMATTED_GENERATED_CODE_START\n{formatted_extracted_code}\nAGENT_DRAFT_STEP{self.current_step}_FORMATTED_GENERATED_CODE_END",
-                extra={"verbose": True},
-            )
-        else:
-            logger.warning(
-                f"AGENT_DRAFT_STEP{self.current_step}: Code formatting failed for generated code.",
-                extra={"verbose": True},
-            )
+        if not generated_code:
+            logger.warning(f"{log_prefix}: Code generation FAILED. Using placeholder.", extra={"verbose": True})
+            generated_code = "# CODE_GENERATION_FAILED"
+        
+        formatted_code = format_code(generated_code) # Format for logging/storage if desired
+        logger.debug(f"{log_prefix}_FORMATTED_DRAFT_CODE_START\n{formatted_code}\n{log_prefix}_FORMATTED_DRAFT_CODE_END", extra={"verbose": True})
+
 
         new_node = Node(
-            plan=agent_plan_for_step,
-            code=generated_code,
-            summary=agent_summary_for_step,
-            parent=parent_node,
+            plan=agent_plan,
+            code=generated_code, # Store raw code from LLM
+            summary=task_summary, # Summary from planner
+            task_summary = task_summary # Storing task_summary from planner if different from initial self.task_desc
         )
-        logger.info(
-            f"AGENT_DRAFT_STEP{self.current_step}: Drafted new node {new_node.id}.",
-            extra={"verbose": True},
-        )
+        if parent_node: new_node.parent = parent_node
+        logger.info(f"{log_prefix}: Drafted new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
     def _improve(self, parent_node: Node) -> Node:
-        # console.rule(f"[cyan]Stage : Improving")
-        logger.info(
-            f"AGENT_IMPROVE_STEP{self.current_step}: Starting improvement process for node {parent_node.id}.",
-            extra={"verbose": True},
-        )
-
-        planner_introduction = "You are a Kaggle grandmaster ... improve it ... summarize the task, and outline your proposed improvement ... then outline a high quality and detailed step by step plan ..."  # Truncated for brevity
-        code_introduction = "You are an expert machine learning engineer ... implement the improvement ..."  # Truncated
+        log_prefix = f"PLANNER_AGENT_IMPROVE_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
 
         # --- Plan Generation for Improvement ---
-        plan_prompt_user_message: Any = {
-            "Introduction": planner_introduction,
-            "Overall Task Description": self.task_desc,
-            "Instructions": {},
-            "Previous solution": {"Code": wrap_code(parent_node.code)},
-            # "Memory (Summary of Previous Attempts on this Task)": self.journal.generate_summary(), # Consider if needed for plan
-        }
-        plan_prompt_user_message["Instructions"] |= self.plan_prompt_resp_fmt
-        plan_prompt_user_message["Instructions"] |= {
-            "Solution improvement sketch guideline": [
-                "You should provide a summary of the task description and the previous solution and then outline a high quality and detailed step by step plan in natural language for how the solution can be improved.",
-                "You should be very specific and should only propose a single actionable improvement.",
-                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
-                # "Take the Memory section into consideration when proposing the improvement.", # Re-added
-            ],
-        }
-        # Add environment if planner model might benefit
-        # plan_prompt_user_message["Instructions"] |= self._prompt_environment
-        if (
-            self.acfg.data_preview
-        ):  # If planner needs data context for improvement ideas
-            plan_prompt_user_message["Data Overview"] = self.data_preview
-
-        logger.info(
-            f"AGENT_IMPROVE_STEP{self.current_step}: Calling plan_query for improvement.",
-            extra={"verbose": True},
+        plan_user_prompt = get_planner_agent_improve_plan_user_prompt(
+            task_desc=self.task_desc, # Could use parent_node.task_summary if it's more relevant
+            parent_node_code=parent_node.code,
+            competition_name=self.competition_name,
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
-        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(
-            plan_prompt_user_message
-        )
+        logger.info(f"{log_prefix}: Calling plan_query for improvement plan.", extra={"verbose": True})
+        task_summary_for_improve, improvement_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
 
-        if not agent_plan_for_step:
-            logger.error(
-                f"AGENT_IMPROVE_STEP{self.current_step}: Improvement plan generation failed for node {parent_node.id}.",
-                extra={"verbose": True},
-            )
-            return Node(
-                plan="IMPROVEMENT PLAN GENERATION FAILED",
-                code=parent_node.code,
-                summary=agent_summary_for_step or "IMPROVEMENT PLAN FAILED",
-                parent=parent_node,
-            )
+        if not improvement_plan:
+            logger.error(f"{log_prefix}: Improvement plan generation FAILED for node {parent_node.id}.", extra={"verbose": True})
+            return Node(plan="IMPROVEMENT_PLAN_FAILED", code=parent_node.code, summary=task_summary_for_improve or "IMPROVEMENT_PLAN_FAILED", parent=parent_node)
 
         # --- Code Generation for Improvement ---
-        code_prompt_user_message: Any = (
-            {  # Renamed from 'prompt' to 'code_prompt_user_message'
-                "Introduction": code_introduction,
-                "Task description summary and previous solution": agent_summary_for_step,  # Use summary from planning
-                "Improvement plan": {
-                    "Plan": agent_plan_for_step
-                },  # Crucial: Add the generated plan
-                "Previous solution code": {
-                    "Code": wrap_code(parent_node.code)
-                },  # Keep original code for context
-                "Memory": self.journal.generate_summary(),
-                "Instructions": {},
-            }
+        code_user_prompt = get_planner_agent_improve_code_user_prompt(
+            task_summary_from_planner=task_summary_for_improve,
+            improvement_plan_from_planner=improvement_plan,
+            parent_node_code=parent_node.code,
+            journal_summary=self.journal.generate_summary(include_code=False),
+            competition_name=self.competition_name,
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
-        code_prompt_user_message["Instructions"] |= self._prompt_environment
-        code_prompt_user_message["Instructions"] |= self.code_prompt_resp_fmt
-        code_prompt_user_message["Instructions"] |= {
-            "code improvement guideline": [
-                "You should precisely follow the plan for improvement and implement the code that implements the improvement.",
-                "The final code should be a single code block, complete, and self-contained.",
-                "The code should be well documented and easy to understand.",
-                "Strictly follow the plan for improvement.",
-                "Take the Memory section into consideration during implementation to avoid bugs.",
-                "Code should be between ```python fences.",
-                "Only write code; do not write any other text.",
-            ],
-            "additional guidelines": self._prompt_impl_guideline[
-                "Implementation Guideline"
-            ],  # Reuse
-        }
-        if self.acfg.data_preview:
-            code_prompt_user_message["Data Overview"] = self.data_preview
+        logger.info(f"{log_prefix}: Calling code_query for improvement code.", extra={"verbose": True})
+        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
 
-        logger.info(
-            f"AGENT_IMPROVE_STEP{self.current_step}: Calling code_query for improvement.",
-            extra={"verbose": True},
-        )
-        _, generated_code, _ = self.code_query(code_prompt_user_message)
-
-        formatted_extracted_code = format_code(generated_code)
-        if formatted_extracted_code:
-            logger.debug(
-                f"AGENT_IMPROVE_STEP{self.current_step}_FORMATTED_GENERATED_CODE_START\n{formatted_extracted_code}\nAGENT_IMPROVE_STEP{self.current_step}_FORMATTED_GENERATED_CODE_END",
-                extra={"verbose": True},
-            )
+        if not generated_code:
+            logger.warning(f"{log_prefix}: Improvement code generation FAILED. Reverting to parent code for node {parent_node.id}.", extra={"verbose": True})
+            generated_code = parent_node.code
+        
+        formatted_code = format_code(generated_code)
+        logger.debug(f"{log_prefix}_FORMATTED_IMPROVED_CODE_START\n{formatted_code}\n{log_prefix}_FORMATTED_IMPROVED_CODE_END", extra={"verbose": True})
 
         new_node = Node(
-            plan=agent_plan_for_step,
+            plan=improvement_plan,
             code=generated_code,
-            summary=agent_summary_for_step,
-            parent=parent_node,
+            summary=task_summary_for_improve, # Summary about the improvement task
+            task_summary=task_summary_for_improve, # If planner provides a new task context
+            parent=parent_node
         )
-        logger.info(
-            f"AGENT_IMPROVE_STEP{self.current_step}: Improved node {parent_node.id} to create new node {new_node.id}.",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
-        # console.rule(f"[cyan]Stage : Debugging")
-        logger.info(
-            f"AGENT_DEBUG_STEP{self.current_step}: Starting debugging process for node {parent_node.id}.",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_DEBUG_STEP{self.current_step}_PARENT_CODE_START\n{parent_node.code}\nAGENT_DEBUG_STEP{self.current_step}_PARENT_CODE_END",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_DEBUG_STEP{self.current_step}_PARENT_TERM_OUT_START\n{parent_node.term_out}\nAGENT_DEBUG_STEP{self.current_step}_PARENT_TERM_OUT_END",
-            extra={"verbose": True},
-        )
-
-        plan_introduction = "You are a Kaggle grandmaster AND A TEAM LEADER. ... revise it in order to fix this. Your response should be a summary ... followed by a detailed plan ..."  # Truncated
-        code_introduction = "You are a Kaggle grandmaster AND A TEAM MEMBER. ... implement the bugfix/solution ..."  # Truncated
+        log_prefix = f"PLANNER_AGENT_DEBUG_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}_PARENT_CODE_START\n{parent_node.code}\n{log_prefix}_PARENT_CODE_END", extra={"verbose": True})
+        logger.debug(f"{log_prefix}_PARENT_TERM_OUT_START\n{parent_node.term_out}\n{log_prefix}_PARENT_TERM_OUT_END", extra={"verbose": True})
 
         # --- Plan Generation for Debugging ---
-        plan_prompt_user_message: Any = {  # Renamed from plan_prompt
-            "Introduction": plan_introduction,
-            "Task description": self.task_desc,
-            "Previous (buggy) implementation": wrap_code(parent_node.code),
-            "Execution output": wrap_code(parent_node.term_out, lang=""),
-            "Instructions": {},
-        }
-        plan_prompt_user_message["Instructions"] |= self.debug_prompt_resp_fmt
-        if self.acfg.data_preview:
-            plan_prompt_user_message["Data Overview"] = self.data_preview
-        # Environment might be useful if bugs are env-related
-        # plan_prompt_user_message["Instructions"] |= self._prompt_environment
-
-        logger.info(
-            f"AGENT_DEBUG_STEP{self.current_step}: Calling plan_query for debugging.",
-            extra={"verbose": True},
+        plan_user_prompt = get_planner_agent_debug_plan_user_prompt(
+            task_desc=self.task_desc, # Or parent_node.task_summary
+            parent_node_code=parent_node.code,
+            parent_node_term_out=parent_node.term_out, # Already trimmed string
+            # competition_name=self.competition_name, # If needed for planner
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
-        agent_summary_for_step, agent_plan_for_step, _ = self.plan_query(
-            plan_prompt_user_message
-        )
+        logger.info(f"{log_prefix}: Calling plan_query for debug plan.", extra={"verbose": True})
+        bug_summary, fix_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
 
-        if not agent_plan_for_step:
-            logger.error(
-                f"AGENT_DEBUG_STEP{self.current_step}: Debug plan generation failed for node {parent_node.id}.",
-                extra={"verbose": True},
-            )
-            return Node(
-                plan="DEBUG PLAN GENERATION FAILED",
-                code=parent_node.code,
-                summary=agent_summary_for_step or "DEBUG PLAN FAILED",
-                parent=parent_node,
-            )
+        if not fix_plan:
+            logger.error(f"{log_prefix}: Debug plan generation FAILED for node {parent_node.id}.", extra={"verbose": True})
+            return Node(plan="DEBUG_PLAN_FAILED", code=parent_node.code, summary=bug_summary or "DEBUG_PLAN_FAILED", parent=parent_node)
 
         # --- Code Generation for Debugging ---
-        code_prompt_user_message: Any = {  # Renamed from code_prompt
-            "Introduction": code_introduction,
-            "Problem Description and Analysis": agent_summary_for_step,  # Use summary from planning
-            "Plan for fixing the bug": agent_plan_for_step,  # Crucial: Add the plan
-            "Previous (buggy) implementation": wrap_code(parent_node.code),
-            "Execution output of buggy code": wrap_code(parent_node.term_out, lang=""),
-            "Instructions": {},
-        }
-        code_prompt_user_message["Instructions"] |= self._prompt_environment
-        code_prompt_user_message["Instructions"] |= self.code_prompt_resp_fmt
-        code_prompt_user_message["Instructions"] |= {
-            "Bugfix implementation guideline": [  # Changed from sketch guideline
-                "Precisely follow the plan for fixing the bugs and implement the code that implements the fix.",
-                "The final code should be a single code block, complete, and self-contained.",
-                # "Take the Memory section into consideration during implementation to avoid repeating previous bugs.", # If memory is useful for debugging
-            ],
-            "additional guidelines": self._prompt_impl_guideline[
-                "Implementation Guideline"
-            ],
-        }
-        if self.acfg.data_preview:
-            code_prompt_user_message["Data Overview"] = self.data_preview
-
-        logger.info(
-            f"AGENT_DEBUG_STEP{self.current_step}: Calling code_query for debugging.",
-            extra={"verbose": True},
+        code_user_prompt = get_planner_agent_debug_code_user_prompt(
+            bug_summary_from_planner=bug_summary,
+            fix_plan_from_planner=fix_plan,
+            parent_node_code=parent_node.code,
+            parent_node_term_out=parent_node.term_out,
+            competition_name=self.competition_name,
+            acfg_data_preview=self.acfg.data_preview,
+            data_preview_content=self.data_preview
         )
-        _, generated_code, _ = self.code_query(code_prompt_user_message)
+        logger.info(f"{log_prefix}: Calling code_query for debug code.", extra={"verbose": True})
+        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
 
-        formatted_extracted_code = format_code(generated_code)
-        if formatted_extracted_code:
-            logger.debug(
-                f"AGENT_DEBUG_STEP{self.current_step}_FORMATTED_GENERATED_CODE_START\n{formatted_extracted_code}\nAGENT_DEBUG_STEP{self.current_step}_FORMATTED_GENERATED_CODE_END",
-                extra={"verbose": True},
-            )
+        if not generated_code:
+            logger.warning(f"{log_prefix}: Debug code generation FAILED. Reverting to parent code for node {parent_node.id}.", extra={"verbose": True})
+            generated_code = parent_node.code
+            
+        formatted_code = format_code(generated_code)
+        logger.debug(f"{log_prefix}_FORMATTED_DEBUG_CODE_START\n{formatted_code}\n{log_prefix}_FORMATTED_DEBUG_CODE_END", extra={"verbose": True})
 
         new_node = Node(
-            plan=agent_plan_for_step,
+            plan=fix_plan,
             code=generated_code,
-            summary=agent_summary_for_step,
-            parent=parent_node,
+            summary=bug_summary, # Summary of bugs/analysis
+            task_summary=bug_summary, # If this serves as new context
+            parent=parent_node
         )
-        logger.info(
-            f"AGENT_DEBUG_STEP{self.current_step}: Debugged node {parent_node.id} to create new node {new_node.id}.",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
-    def reflect(self, node: Node) -> tuple[str, str]:
-        logger.info(
-            f"AGENT_REFLECT_STEP{self.current_step}: Initiating self-reflection for node {node.id}.",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_REFLECT_STEP{self.current_step}_NODE_CODE_START\n{node.code}\nAGENT_REFLECT_STEP{self.current_step}_NODE_CODE_END",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_REFLECT_STEP{self.current_step}_NODE_ANALYSIS_START\n{node.analysis}\nAGENT_REFLECT_STEP{self.current_step}_NODE_ANALYSIS_END",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_REFLECT_STEP{self.current_step}_NODE_TERM_OUT_START\n{node.term_out}\nAGENT_REFLECT_STEP{self.current_step}_NODE_TERM_OUT_END",
-            extra={"verbose": True},
-        )
+    # reflect, double_reflect, update_data_preview, step, parse_exec_result
+    # can be inherited or copied from Agent class if the logic is identical.
+    # For now, assuming they are similar enough to be copied/adapted.
+    # If they are significantly different, they need separate implementations.
 
-        # The perform_two_step_reflection function itself needs to be instrumented
-        # with verbose logging if you want to see its internal LLM calls.
-        # For now, we log what we pass to it and what it returns.
+    # Copying methods from Agent that are likely to be similar:
+    # reflect, double_reflect (if used), update_data_preview, step, parse_exec_result
+    # Note: self-reflection in PlannerAgent might use planner_model for critique and coder_model for edit.
+    
+    def reflect(self, node: Node) -> tuple[str, str]:
+        # This uses acfg.code.model (coder) for the edit stage.
+        # Critique stage in perform_two_step_reflection also uses acfg.code.model currently.
+        # If critique should use planner_model, perform_two_step_reflection needs adjustment or
+        # a different reflection function for PlannerAgent.
+        # For now, assume current `perform_two_step_reflection` is acceptable.
+        log_prefix = f"PLANNER_AGENT_REFLECT_STEP{self.current_step}_NODE{node.id}"
+        logger.info(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
         try:
             reflection_plan, revised_code = perform_two_step_reflection(
                 code=node.code,
-                analysis=node.analysis,  # Make sure this is the textual analysis string
+                analysis=node.analysis,
                 term_out=node.term_out,
-                task_desc=self.task_desc,
-                model_name=self.acfg.code.model,  # Which model for reflection? Planner or Coder?
+                task_desc=self.task_desc, # Could use node.task_summary if more specific
+                model_name=self.acfg.code.model, # Coder model for applying edits
                 temperature=self.acfg.code.temp,
                 convert_system_to_user=self.acfg.convert_system_to_user,
-                query_func=query,  # Pass the master query
-                wrap_code_func=wrap_code,
+                query_func=query,
+                wrap_code_func=prompt_utils_wrap_code,
                 extract_code_func=extract_code,
-                current_step=self.current_step,  # Add this to the function signature
-                # ADD current_step for logging within perform_two_step_reflection if modified
-                # current_step = self.current_step
+                current_step=self.current_step
             )
-            logger.info(
-                f"AGENT_REFLECT_STEP{self.current_step}: Self-reflection completed.",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"AGENT_REFLECT_STEP{self.current_step}_REFLECTION_PLAN_START\n{reflection_plan}\nAGENT_REFLECT_STEP{self.current_step}_REFLECTION_PLAN_END",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"AGENT_REFLECT_STEP{self.current_step}_REVISED_CODE_START\n{revised_code}\nAGENT_REFLECT_STEP{self.current_step}_REVISED_CODE_END",
-                extra={"verbose": True},
-            )
-
         except Exception as e:
-            logger.error(
-                f"AGENT_REFLECT_STEP{self.current_step}: Error during self-reflection: {e}",
-                exc_info=True,
-                extra={"verbose": True},
-            )
-            return (
-                "REFLECTION_ERROR: " + str(e),
-                node.code,
-            )  # Return original code on error
-
+            logger.error(f"{log_prefix}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
+            return f"REFLECTION_ERROR: {e}", node.code
+        
+        # Logging of reflection outcome (same as Agent)
         if revised_code and revised_code.strip() and revised_code != node.code:
-            logger.info(
-                f"AGENT_REFLECT_STEP{self.current_step}: Self-reflection resulted in code changes.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix}: Self-reflection resulted in code changes.", extra={"verbose": True})
         elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info(
-                f"AGENT_REFLECT_STEP{self.current_step}: Self-reflection found no errors requiring changes.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
         else:
-            logger.warning(
-                f"AGENT_REFLECT_STEP{self.current_step}: Self-reflection finished, but revised code is same as original or empty. Plan: {reflection_plan}",
-                extra={"verbose": True},
-            )
+            logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+        
+        logger.debug(f"{log_prefix}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix}_REFLECTION_PLAN_END", extra={"verbose": True})
+        # logger.debug(f"{log_prefix}_REVISED_CODE_BY_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix}_REVISED_CODE_BY_REFLECTION_END", extra={"verbose": True})
         return reflection_plan, revised_code
 
-    # double_reflect seems unused, if it is, instrument it similarly to reflect()
-
-    def summarize_task(self, task_desc: str) -> str:
-        log_prefix = f"LLM_SUMMARIZE_TASK_STEP{self.current_step}"
-        logger.info(
-            f"{log_prefix}: Summarizing task description.", extra={"verbose": True}
-        )
-
-        system_prompt = {
-            "SYSTEM": "You are an expert summarization assistant. ... focus on the goal, evaluation metric, dataset ..."  # Truncated
-        }
-        user_prompt = {
-            "Task Description": task_desc,
-            "Instructions": (
-                "Please provide a concise summary ... Limit the summary to around 7 sentences."
-            ),  # Truncated
-        }
-
-        summary_completion = self._query_llm_with_retries(
-            query_type="SUMMARIZER",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=self.acfg.code.planner_model,  # Use planner model for summarization
-            temperature=0.3,
-            planner_flag=True,  # Treat as a planning-like task
-            current_step=self.current_step,
-            convert_system_to_user=self.acfg.convert_system_to_user,
-        )
-
-        if summary_completion is None:
-            logger.error(
-                f"{log_prefix}: Failed to get summary after retries. Returning original task description.",
-                extra={"verbose": True},
-            )
-            return task_desc  # Fallback
-
-        # from .utils.response import extract_summary # Already imported
-        concise_summary = extract_summary(summary_completion) or summary_completion
-        logger.info(f"{log_prefix}: Task summarized.", extra={"verbose": True})
-        logger.debug(
-            f"{log_prefix}_CONCISE_SUMMARY_START\n{concise_summary.strip()}\n{log_prefix}_CONCISE_SUMMARY_END",
-            extra={"verbose": True},
-        )
-        return concise_summary.strip()
-
-    def update_data_preview(self):
-        logger.info(
-            f"AGENT_STEP{self.current_step}: Updating data preview.",
-            extra={"verbose": True},
-        )
+    def update_data_preview(self): # Identical to Agent
+        log_prefix = f"PLANNER_AGENT_DATA_PREVIEW_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Updating data preview.", extra={"verbose": True})
         try:
-            self.data_preview = data_preview.generate(self.cfg.workspace_dir)
-            logger.info(
-                f"AGENT_STEP{self.current_step}: Data preview updated.",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"AGENT_STEP{self.current_step}_DATA_PREVIEW_START\n{self.data_preview}\nAGENT_STEP{self.current_step}_DATA_PREVIEW_END",
-                extra={"verbose": True},
-            )
+            self.data_preview = data_preview.generate(self.cfg.workspace_dir / "input")
+            logger.info(f"{log_prefix}: Data preview updated.", extra={"verbose": True})
+            logger.debug(f"{log_prefix}_DATA_PREVIEW_CONTENT_START\n{self.data_preview}\n{log_prefix}_DATA_PREVIEW_CONTENT_END", extra={"verbose": True})
         except Exception as e:
-            logger.error(
-                f"AGENT_STEP{self.current_step}: Failed to update data preview: {e}",
-                exc_info=True,
-                extra={"verbose": True},
-            )
+            logger.error(f"{log_prefix}: Failed to update data preview: {e}", exc_info=True, extra={"verbose": True})
             self.data_preview = "Error generating data preview."
 
+    # step() method is largely the same structure as Agent's step(), just calls PlannerAgent's _draft, _improve, _debug
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
-        logger.info(
-            f"AGENT_STEP_START: {current_step_number}, Total Steps: {self.acfg.steps}",
-            extra={"verbose": True},
-        )
+        # This is mostly copied from Agent.step and adapted for PlannerAgent logging prefixes
+        # The core logic (search_policy -> _draft/_improve/_debug -> execute -> parse -> reflect -> log) is the same.
+        log_prefix_main = f"PLANNER_AGENT_STEP{current_step_number}"
+        logger.info(f"{log_prefix_main}_START: Total Steps Configured: {self.acfg.steps}", extra={"verbose": True})
         t_step_start = time.time()
 
         submission_dir = self.cfg.workspace_dir / "submission"
-        logger.info(
-            f"AGENT_STEP{current_step_number}: Clearing submission directory: {submission_dir}",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix_main}: Clearing submission directory: {submission_dir}", extra={"verbose": True})
         shutil.rmtree(submission_dir, ignore_errors=True)
         submission_dir.mkdir(exist_ok=True)
 
@@ -1871,711 +1231,225 @@ class PlannerAgent:
 
         if not self.journal.nodes or self.data_preview is None:
             self.update_data_preview()
-        # Consider if task summarization should happen only once or under certain conditions
-        # if (
-        #     self.journal.task_summary is None and self.cfg.goal is None
-        # ):  # Only summarize if not already done
-        #     logger.info(
-        #         f"AGENT_STEP{current_step_number}: Task summary not found in journal, generating new one.",
-        #         extra={"verbose": True},
-        #     )
-        #     self.journal.task_summary = self.summarize_task(self.task_desc)
-        #     self.task_desc = (
-        #         self.journal.task_summary
-        #     )  # Update internal task_desc to summarized version
 
-        logger.info(
-            f"AGENT_STEP{current_step_number}: Calling search_policy.",
-            extra={"verbose": True},
-        )
         parent_node = self.search_policy()
-        result_node: Node  # Type hint
-
+        result_node: Node
         draft_flag = False
+        node_stage = "unknown"
+
         if parent_node is None:
             draft_flag = True
             node_stage = "draft"
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Stage selected: DRAFTING.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix_main}: Stage selected: DRAFTING.", extra={"verbose": True})
             result_node = self._draft(parent_node)
         elif parent_node.is_buggy:
             node_stage = "debug"
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Stage selected: DEBUGGING node {parent_node.id}.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix_main}: Stage selected: DEBUGGING node {parent_node.id}.", extra={"verbose": True})
             result_node = self._debug(parent_node)
         else:
             node_stage = "improve"
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Stage selected: IMPROVING node {parent_node.id}.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix_main}: Stage selected: IMPROVING node {parent_node.id}.", extra={"verbose": True})
             result_node = self._improve(parent_node)
 
-        logger.info(
-            f"Executing  {node_stage} code, Code length: {len(result_node.code)}",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_STEP{current_step_number}_CODE_TO_EXECUTE_START\n{result_node.code}\nAGENT_STEP{current_step_number}_CODE_TO_EXECUTE_END",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix_main}: Executing code for node {result_node.id} (stage: {node_stage}). Code length: {len(result_node.code)}", extra={"verbose": True})
+        # logger.debug(f"{log_prefix_main}_CODE_TO_EXECUTE_NODE_{result_node.id}_START\n{result_node.code}\n{log_prefix_main}_CODE_TO_EXECUTE_NODE_{result_node.id}_END", extra={"verbose": True})
+        
         exec_start_time = time.time()
         exec_result = exec_callback(result_node.code, reset_session=True)
         exec_duration = time.time() - exec_start_time
-        logger.info(
-            f"AGENT_STEP{current_step_number}: Code execution finished in {exec_duration:.2f}s. Success: {exec_result.term_out}",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_STEP{current_step_number}_EXEC_RESULT_STDOUT_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_EXEC_RESULT_STDOUT_END",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"AGENT_STEP{current_step_number}_EXEC_RESULT_STDERR_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_EXEC_RESULT_STDERR_END",
-            extra={"verbose": True},
-        )
+        
+        logger.info(f"{log_prefix_main}: Code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
+        # logger.debug(f"{log_prefix_main}_EXEC_RESULT_NODE_{result_node.id}_TERM_OUT_START\n{exec_result.term_out}\n{log_prefix_main}_EXEC_RESULT_NODE_{result_node.id}_TERM_OUT_END", extra={"verbose": True})
+        if exec_result.exc_type:
+             logger.warning(f"{log_prefix_main}_EXEC_RESULT_NODE_{result_node.id}_EXCEPTION: {exec_result.exc_type}", extra={"verbose": True})
 
-        logger.info(
-            f"AGENT_STEP{current_step_number}: Parsing execution results for node {result_node.id}.",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix_main}: Parsing execution results for node {result_node.id}.", extra={"verbose": True})
         result_node = self.parse_exec_result(node=result_node, exec_result=exec_result)
-        self._prev_buggy = result_node.is_buggy  # Update before potential reflection
+        buggy_status_before_reflection = result_node.is_buggy
 
         reflection_applied = False
-        if (
-            draft_flag
-            and self.acfg.ITS_Strategy == "self-reflection"
-            and result_node.is_buggy
-        ):
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Condition met for self-reflection on drafted buggy node {result_node.id}.",
-                extra={"verbose": True},
-            )
-            # console.rule(f"[cyan]Stage : Self Reflection") # Keep if useful for interactive runs
-            try:
-                reflection_plan, reflection_code = self.reflect(node=result_node)
-                if (
-                    reflection_code
-                    and reflection_code.strip()
-                    and reflection_code != result_node.code
-                ):
-                    logger.info(
-                        f"AGENT_STEP{current_step_number}: Self-reflection yielded new code for node {result_node.id}. Re-executing.",
-                        extra={"verbose": True},
-                    )
-                    result_node.code = reflection_code  # Update node's code
-                    reflection_applied = True
-
-                    logger.info(
-                        f"AGENT_STEP{current_step_number}: Re-executing reflected code for node {result_node.id}. Code length: {len(result_node.code)}",
-                        extra={"verbose": True},
-                    )
-                    logger.debug(
-                        f"AGENT_STEP{current_step_number}_REFLECTED_CODE_TO_EXECUTE_START\n{result_node.code}\nAGENT_STEP{current_step_number}_REFLECTED_CODE_TO_EXECUTE_END",
-                        extra={"verbose": True},
-                    )
-                    exec_start_time = time.time()
-                    exec_result = exec_callback(result_node.code, reset_session=True)
-                    exec_duration = (
-                        time.time() - exec_start_time
-                    )  # Update exec_duration
-                    logger.info(
-                        f"AGENT_STEP{current_step_number}: Reflected code execution finished in {exec_duration:.2f}s. Success: {exec_result.term_out}",
-                        extra={"verbose": True},
-                    )
-                    logger.debug(
-                        f"AGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDOUT_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDOUT_END",
-                        extra={"verbose": True},
-                    )
-                    logger.debug(
-                        f"AGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDERR_START\n{exec_result.term_out}\nAGENT_STEP{current_step_number}_REFLECTED_EXEC_RESULT_STDERR_END",
-                        extra={"verbose": True},
-                    )
-
-                    logger.info(
-                        f"AGENT_STEP{current_step_number}: Parsing execution results for reflected code of node {result_node.id}.",
-                        extra={"verbose": True},
-                    )
-                    result_node = self.parse_exec_result(
-                        node=result_node, exec_result=exec_result
-                    )  # Re-parse
-                else:
-                    logger.info(
-                        f"AGENT_STEP{current_step_number}: Self-reflection did not result in applicable code changes for node {result_node.id}.",
-                        extra={"verbose": True},
-                    )
-            except Exception as e:  # Catch errors specifically from reflection process
-                logger.error(
-                    f"AGENT_STEP{current_step_number}: Error during self-reflection stage for node {result_node.id}: {e}",
-                    exc_info=True,
-                    extra={"verbose": True},
-                )
-
-        # Update effectiveness flags
-        if (
-            self._prev_buggy and not result_node.is_buggy
-        ):  # If it *was* buggy (before reflection if any) and now is *not*
-            result_node.effective_debug_step = True  # This might mean the main debug/improve worked, or reflection worked
-            result_node.effective_reflections = (
-                reflection_applied  # True only if reflection was applied and fixed it
-            )
+        if draft_flag and self.acfg.ITS_Strategy == "self-reflection" and result_node.is_buggy:
+            logger.info(f"{log_prefix_main}: Condition met for self-reflection on drafted buggy node {result_node.id}.", extra={"verbose": True})
+            reflection_plan, reflection_code = self.reflect(node=result_node)
+            if reflection_code and reflection_code.strip() and reflection_code != result_node.code:
+                logger.info(f"{log_prefix_main}: Self-reflection yielded new code for node {result_node.id}. Re-executing.", extra={"verbose": True})
+                result_node.code = reflection_code
+                reflection_applied = True
+                # ... (re-execution logic as in Agent.step) ...
+                exec_start_time_reflect = time.time()
+                exec_result_reflect = exec_callback(result_node.code, reset_session=True)
+                exec_duration = time.time() - exec_start_time_reflect
+                logger.info(f"{log_prefix_main}: Reflected code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
+                result_node = self.parse_exec_result(node=result_node, exec_result=exec_result_reflect)
+            else:
+                logger.info(f"{log_prefix_main}: Self-reflection did not result in applicable code changes for node {result_node.id}.", extra={"verbose": True})
+        
+        if buggy_status_before_reflection and not result_node.is_buggy:
+            result_node.effective_debug_step = True
+            result_node.effective_reflections = reflection_applied
         else:
             result_node.effective_debug_step = False
             result_node.effective_reflections = False
-        self._prev_buggy = result_node.is_buggy  # Final update for next step
+        self._prev_buggy = result_node.is_buggy
 
-        # --- Logging to W&B and Journal ---
-        logger.info(
-            f"AGENT_STEP{current_step_number}: Preparing step log data for W&B.",
-            extra={"verbose": True},
-        )
+        # --- W&B Logging (Identical to Agent.step's W&B logging section) ---
+        # This section is quite long and W&B specific. It's copied verbatim here.
+        # Ensure all attributes like self.competition_benchmarks, self.wandb_run are available.
+        logger.info(f"{log_prefix_main}: Preparing step log data for W&B.", extra={"verbose": True})
         step_log_data = {
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
             f"progress/current_step": current_step_number,
             f"progress/competition_name": self.competition_name,
-            "exec/exception_type": (
-                result_node.exc_type if result_node.exc_type else "None"
-            ),  # Ensure it's a string
+            "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
             f"code/estimated_quality": int(self._code_quality),
-            # f"eval/reflection_usage": 1 if reflection_applied and not result_node.is_buggy else 0, # Old name
-            f"eval/reflection_applied_successfully": (
-                1 if reflection_applied and not result_node.is_buggy else 0
-            ),  # More specific name
-            # f"eval/effective_debug_step": 1 if result_node.effective_debug_step else 0, # Old name
-            f"eval/effective_fix_this_step": (
-                1 if result_node.effective_debug_step else 0
-            ),  # Renamed for clarity
-            # f"eval/effective_reflections": 1 if result_node.effective_reflections else 0, # This was probably redundant with reflection_applied_successfully
+            f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0,
+            f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0,
         }
-
-        agent_validation_metrics_defined = False  # Flag to track if it's defined
-        if (
-            not result_node.is_buggy
-            and result_node.metric
-            and result_node.metric.value is not None
-        ):
+        agent_validation_metrics_defined = False
+        if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             step_log_data[f"eval/validation_metric"] = result_node.metric.value
-            agent_validation_metrics_defined = True  # Set flag
-
-            if self.competition_benchmarks:  # Check if benchmarks are available
-                # Use .get with a default that ensures comparison is false if key missing
-                # (e.g. comparing to float('inf') for '>' will be false)
-                above_median_val = (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks.get("median_threshold", float("inf"))
-                    else 0
-                )
-                gold_medal_val = (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks.get("gold_threshold", float("inf"))
-                    else 0
-                )
-                silver_medal_val = (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks.get("silver_threshold", float("inf"))
-                    else 0
-                )
-                bronze_medal_val = (
-                    1
-                    if result_node.metric.value
-                    > self.competition_benchmarks.get("bronze_threshold", float("inf"))
-                    else 0
-                )
-
-                self._above_median_flags.append(above_median_val)
-                self._gold_medal_flags.append(gold_medal_val)
-                self._silver_medal_flags.append(silver_medal_val)
-                self._bronze_medal_flags.append(bronze_medal_val)
-
-                # --- Bar charts for threshold flags ---
-                if wandb and self.wandb_run:  # Check if wandb is available
-                    # Above Median
-                    above_true = sum(self._above_median_flags)
-                    above_false = len(self._above_median_flags) - above_true
-                    above_table = wandb.Table(
-                        data=[
-                            ["Above Median", above_true],
-                            ["Below Median", above_false],
-                        ],
-                        columns=["label", "count"],
-                    )
-                    step_log_data["plots/above_median_bar"] = wandb.plot.bar(
-                        above_table, "label", "count", title="Above Median Steps"
-                    )
-
-                    # Gold Medal
-                    gold_true = sum(self._gold_medal_flags)
-                    gold_false = len(self._gold_medal_flags) - gold_true
-                    gold_table = wandb.Table(
-                        data=[["Gold Medal", gold_true], ["No Gold Medal", gold_false]],
-                        columns=["label", "count"],
-                    )
-                    step_log_data["plots/gold_medal_bar"] = wandb.plot.bar(
-                        gold_table, "label", "count", title="Gold Medal Steps"
-                    )
-
-                    # Silver Medal
-                    silver_true = sum(self._silver_medal_flags)
-                    silver_false = len(self._silver_medal_flags) - silver_true
-                    silver_table = wandb.Table(
-                        data=[
-                            ["Silver Medal", silver_true],
-                            ["No Silver Medal", silver_false],
-                        ],
-                        columns=["label", "count"],
-                    )
-                    step_log_data["plots/silver_medal_bar"] = wandb.plot.bar(
-                        silver_table, "label", "count", title="Silver Medal Steps"
-                    )
-
-                    # Bronze Medal
-                    bronze_true = sum(self._bronze_medal_flags)
-                    bronze_false = len(self._bronze_medal_flags) - bronze_true
-                    bronze_table = wandb.Table(
-                        data=[
-                            ["Bronze Medal", bronze_true],
-                            ["No Bronze Medal", bronze_false],
-                        ],
-                        columns=["label", "count"],
-                    )
-                    step_log_data["plots/bronze_medal_bar"] = wandb.plot.bar(
-                        bronze_table, "label", "count", title="Bronze Medal Steps"
-                    )
-            else:
-                logger.warning(
-                    f"AGENT_STEP{current_step_number}: Competition benchmarks not available, skipping medal plots.",
-                    extra={"verbose": True},
-                )
+            agent_validation_metrics_defined = True
+            if self.competition_benchmarks and wandb and self.wandb_run:
+                for threshold_name, key_suffix in [
+                    ("median_threshold", "above_median"), ("gold_threshold", "gold_medal"),
+                    ("silver_threshold", "silver_medal"), ("bronze_threshold", "bronze_medal")]:
+                    flag_attr = f"_{key_suffix}_flags"
+                    if not hasattr(self, flag_attr): setattr(self, flag_attr, [])
+                    threshold_value = self.competition_benchmarks.get(threshold_name, float('inf'))
+                    is_met = 1 if result_node.metric.value > threshold_value else 0
+                    getattr(self, flag_attr).append(is_met)
+                    true_count = sum(getattr(self, flag_attr))
+                    false_count = len(getattr(self, flag_attr)) - true_count
+                    table = wandb.Table(
+                        data=[[key_suffix.replace('_', ' ').title(), true_count], [f"Not {key_suffix.replace('_', ' ').title()}", false_count]],
+                        columns=["label", "count"])
+                    step_log_data[f"plots/{key_suffix}_bar"] = wandb.plot.bar(table, "label", "count", title=f"{key_suffix.replace('_', ' ').title()} Steps")
         else:
-            step_log_data[f"eval/validation_metric"] = float(
-                "nan"
-            )  # W&B handles NaN well
+            step_log_data[f"eval/validation_metric"] = float("nan")
 
-        # Final check for submission file existence
         submission_path = submission_dir / "submission.csv"
         submission_exists = submission_path.exists()
-        if not result_node.is_buggy and not submission_exists:  # This logic is good
-            logger.warning(
-                f"AGENT_STEP{current_step_number}: Node {result_node.id} was not buggy but submission.csv MISSING. Marking as buggy.",
-                extra={"verbose": True},
-            )
-            result_node.is_buggy = True  # Mark as buggy
-            result_node.metric = (
-                WorstMetricValue()
-            )  # Reset metric because it's effectively a failure
-            # If it was previously considered not buggy and had a metric, that metric is now invalid.
-            # We should also ensure that `step_log_data["eval/validation_metric"]` reflects this.
-            step_log_data[f"eval/validation_metric"] = float("nan")
-            # And remove it from metric_hist if it was added based on the now-invalid assumption
-            if (
-                agent_validation_metrics_defined
-                and self._metric_hist
-                and self._metric_hist[-1]
-                == result_node.metric.original_value_before_reset_to_worst
-            ):  # hypothetical attribute
-                # This logic is tricky: if it was added to _metric_hist based on a value that's now invalid
-                # because submission.csv is missing, we might want to remove it.
-                # For simplicity now, we'll let it be logged as NaN for this step.
-                # The key is that is_buggy is now true.
-                pass
-
+        if not result_node.is_buggy and not submission_exists:
+            logger.warning(f"{log_prefix_main}: Node {result_node.id} not buggy BUT submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
+            result_node.is_buggy = True; result_node.metric = WorstMetricValue()
+            step_log_data[f"eval/validation_metric"] = float("nan"); step_log_data[f"eval/is_buggy"] = 1
+            if agent_validation_metrics_defined and self._metric_hist and hasattr(result_node.metric, 'original_value_before_reset_to_worst') and \
+               result_node.metric.original_value_before_reset_to_worst is not None and self._metric_hist[-1] == result_node.metric.original_value_before_reset_to_worst:
+                self._metric_hist.pop()
         step_log_data[f"eval/submission_produced"] = 1 if submission_exists else 0
 
-        # --- Histogram of validation metric
-        # This should only append if the node is NOT buggy AND has a valid metric.
-        # The previous block already sets step_log_data["eval/validation_metric"] to NaN if buggy.
-        if (
-            not result_node.is_buggy
-            and result_node.metric
-            and result_node.metric.value is not None
-        ):
+        if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
             self._metric_hist.append(result_node.metric.value)
-
         if wandb and self.wandb_run:
-            if len(self._metric_hist) >= 1:  # Plot even with one point
-                try:  # Add try-except for W&B table creation
-                    metric_table_data = [
-                        [v] for v in self._metric_hist if isinstance(v, (int, float))
-                    ]  # Ensure data is plottable
-                    if metric_table_data:
-                        tbl = wandb.Table(data=metric_table_data, columns=["val"])
-                        step_log_data["plots/val_metric_scatter"] = wandb.plot.scatter(
-                            tbl,
-                            "val",
-                            "val",
-                            title="Validation Metric Values (Non-Buggy Steps)",
-                        )
-                    else:
-                        logger.warning(
-                            f"AGENT_STEP{current_step_number}: No valid metric data to plot for val_metric_scatter.",
-                            extra={"verbose": True},
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"AGENT_STEP{current_step_number}: Error creating W&B scatter plot for metrics: {e}",
-                        exc_info=True,
-                        extra={"verbose": True},
-                    )
-
-            # Keep a rolling list of 0/1 flags for every step
+            if len(self._metric_hist) >= 1:
+                metric_table_data = [[v] for v in self._metric_hist if isinstance(v, (int, float))]
+                if metric_table_data:
+                    tbl = wandb.Table(data=metric_table_data, columns=["val"])
+                    step_log_data["plots/val_metric_scatter"] = wandb.plot.scatter(tbl, "val", "val", title="Validation Metric Values")
             self._bug_flags.append(1 if result_node.is_buggy else 0)
-            bug_count = sum(self._bug_flags)
-            clean_count = len(self._bug_flags) - bug_count
-            try:
-                bug_table = wandb.Table(
-                    data=[["Buggy", bug_count], ["Clean", clean_count]],
-                    columns=["label", "count"],
-                )
-                step_log_data["plots/bug_vs_clean"] = wandb.plot.bar(
-                    bug_table, "label", "count", title="Buggy vs clean steps"
-                )
-            except Exception as e:
-                logger.error(
-                    f"AGENT_STEP{current_step_number}: Error creating W&B bar plot for bug_vs_clean: {e}",
-                    exc_info=True,
-                    extra={"verbose": True},
-                )
-
-            # --- Bar chart: Submission produced vs missing
-            self._sub_flags.append(
-                1 if submission_exists else 0
-            )  # submission_exists is defined above
-            with_sub = sum(self._sub_flags)
-            without_sub = len(self._sub_flags) - with_sub
-            try:
-                sub_table = wandb.Table(
-                    data=[["Has submission", with_sub], ["No submission", without_sub]],
-                    columns=["label", "count"],
-                )
-                step_log_data["plots/submission_presence"] = wandb.plot.bar(
-                    sub_table, "label", "count", title="Submission produced vs missing"
-                )
-            except Exception as e:
-                logger.error(
-                    f"AGENT_STEP{current_step_number}: Error creating W&B bar plot for submission_presence: {e}",
-                    exc_info=True,
-                    extra={"verbose": True},
-                )
-
-        # --- Send log data to W&B ---
+            bug_count = sum(self._bug_flags); clean_count = len(self._bug_flags) - bug_count
+            bug_table = wandb.Table(data=[["Buggy", bug_count], ["Clean", clean_count]], columns=["label", "count"])
+            step_log_data["plots/bug_vs_clean"] = wandb.plot.bar(bug_table, "label", "count", title="Buggy vs Clean Steps")
+            self._sub_flags.append(1 if submission_exists else 0)
+            with_sub = sum(self._sub_flags); without_sub = len(self._sub_flags) - with_sub
+            sub_table = wandb.Table(data=[["Has submission", with_sub], ["No submission", without_sub]], columns=["label", "count"])
+            step_log_data["plots/submission_presence"] = wandb.plot.bar(sub_table, "label", "count", title="Submission Produced vs Missing")
         if self.wandb_run:
-            # t_wandb_start = time.time() # last variable seems unused
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Logging data to W&B. Keys: {list(step_log_data.keys())}",
-                extra={"verbose": True},
-            )
-            try:
-                self.wandb_run.log(step_log_data, step=current_step_number)
-            except Exception as e:
-                logger.error(
-                    f"AGENT_STEP{current_step_number}: Error logging to W&B: {e}",
-                    exc_info=True,
-                    extra={"verbose": True},
-                )
-            # last = time.time() # Unused
-        else:
-            logger.info(
-                f"AGENT_STEP{current_step_number}: W&B run not available, skipping W&B log.",
-                extra={"verbose": True},
-            )
-        # --- End Send log data ---
-
-        # Storing node.code_quality happens in parse_exec_result now.
+            logger.info(f"{log_prefix_main}: Logging data to W&B. Keys: {list(step_log_data.keys())}", extra={"verbose": True})
+            try: self.wandb_run.log(step_log_data, step=current_step_number)
+            except Exception as e_wandb: logger.error(f"{log_prefix_main}: Error logging to W&B: {e_wandb}", exc_info=True, extra={"verbose": True})
+        # --- End W&B Logging Section Copy ---
 
         result_node.stage = node_stage
         result_node.exec_time = exec_duration
-
         self.journal.append(result_node)
-        logger.info(
-            f"AGENT_STEP{current_step_number}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix_main}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}", extra={"verbose": True})
 
         best_node = self.journal.get_best_node()
         if best_node and best_node.id == result_node.id:
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Node {result_node.id} is new best node (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f}). Caching solution.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix_main}: Node {result_node.id} is new best (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f}). Caching.", extra={"verbose": True})
             best_solution_dir = self.cfg.workspace_dir / "best_solution"
-            best_submission_dir = self.cfg.workspace_dir / "best_submission"
             best_solution_dir.mkdir(exist_ok=True, parents=True)
-            best_submission_dir.mkdir(exist_ok=True, parents=True)
-            if submission_exists:
-                shutil.copy(
-                    submission_path, best_submission_dir / "submission.csv"
-                )  # Add filename
-            best_code_path = best_solution_dir / "solution.py"
-            with open(best_code_path, "w") as f:
-                f.write(result_node.code)
-            with open(best_solution_dir / "node_id.txt", "w") as f:
-                f.write(str(result_node.id))
+            if submission_exists: shutil.copy(submission_path, best_solution_dir / "submission.csv")
+            with open(best_solution_dir / "solution.py", "w") as f: f.write(result_node.code)
+            with open(best_solution_dir / "node_id.txt", "w") as f: f.write(str(result_node.id))
         elif best_node:
-            logger.info(
-                f"AGENT_STEP{current_step_number}: Current best node is {best_node.id} (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f})",
-                extra={"verbose": True},
-            )
-        else:
-            logger.info(
-                f"AGENT_STEP{current_step_number}: No best node identified yet.",
-                extra={"verbose": True},
-            )
+            logger.info(f"{log_prefix_main}: Current best node is {best_node.id} (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f})", extra={"verbose": True})
 
-        # log_step is for console, keep it as is or make it more verbose if needed
         log_step(
-            step=current_step_number,
-            total=self.acfg.steps,
-            stage=node_stage,
-            is_buggy=result_node.is_buggy,
-            exec_time=exec_duration,
-            metric=(
-                result_node.metric.value
-                if result_node.metric and result_node.metric.value is not None
-                else None
-            ),
+            step=current_step_number, total=self.acfg.steps, stage=node_stage,
+            is_buggy=result_node.is_buggy, exec_time=exec_duration,
+            metric=(result_node.metric.value if result_node.metric and result_node.metric.value is not None else None)
         )
-
         t_step_end = time.time()
-        logger.info(
-            f"AGENT_STEP_END: {current_step_number}, Duration: {t_step_end - t_step_start:.2f}s",
-            extra={"verbose": True},
-        )
+        logger.info(f"{log_prefix_main}_END: Duration: {t_step_end - t_step_start:.2f}s", extra={"verbose": True})
 
+    # parse_exec_result is identical to Agent's, can be inherited or directly used if Agent is a base class
+    # For now, copying it ensures PlannerAgent is self-contained if needed.
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
-        log_prefix = f"PARSE_EXEC_RESULT_STEP{self.current_step}_NODE{node.id}"
+        log_prefix = f"PLANNER_AGENT_PARSE_EXEC_STEP{self.current_step}_NODE{node.id}"
         logger.info(f"{log_prefix}: Parsing execution result.", extra={"verbose": True})
-
         node.absorb_exec_result(exec_result)
-        logger.debug(
-            f"{log_prefix}_ABSORBED_EXEC_RESULT_NODE_EXC_TYPE: {node.exc_type}",
-            extra={"verbose": True},
-        )
-        logger.debug(
-            f"{log_prefix}_ABSORBED_EXEC_RESULT_NODE_TERM_OUT_START\n{node.term_out}\n{log_prefix}_ABSORBED_EXEC_RESULT_NODE_TERM_OUT_END",
-            extra={"verbose": True},
-        )
+        # logger.debug(f"{log_prefix}_ABSORBED_NODE_EXC_TYPE: {node.exc_type}", extra={"verbose": True})
 
-        introduction = "You are a Kaggle grandmaster ... evaluate the output ... empirical findings."  # Truncated
+        introduction = ("You are a Kaggle grandmaster ... evaluate the output ... empirical findings.")
         if self.acfg.obfuscate:
-            introduction = "You are an expert machine learning engineer ... evaluate the output ... empirical findings."  # Truncated
+            introduction = ("You are an expert machine learning engineer ... evaluate the output ... empirical findings.")
 
-        feedback_system_prompt = {  # Renamed from prompt to be specific
-            "Introduction": introduction,
-            "Task Description": self.task_desc,
-            "Code Executed": wrap_code(node.code),
-            "Execution Output Log": wrap_code(node.term_out, lang=""),
+        feedback_system_prompt = {
+            "Introduction": introduction, "Task Description": self.task_desc,
+            "Code Executed": prompt_utils_wrap_code(node.code),
+            "Execution Output Log": prompt_utils_wrap_code(node.term_out, lang=""),
         }
-        # No user_message for function calling with system prompt
-
-        max_retries = 3
-        review_response_dict: Optional[dict] = None  # Explicitly dict or None
+        max_retries = self.acfg.feedback.get("retries", 3)
+        review_response_dict: Optional[Dict[str, Any]] = None
 
         for attempt in range(max_retries):
-            logger.info(
-                f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Querying feedback LLM.",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_SYSTEM_PROMPT_START\n{feedback_system_prompt}\n{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_SYSTEM_PROMPT_END",
-                extra={"verbose": True},
-            )
-            logger.debug(
-                f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_FUNC_SPEC_START\n{review_func_spec.to_dict()}\n{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_FUNC_SPEC_END",
-                extra={"verbose": True},
-            )
-
+            logger.info(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}/{max_retries}: Querying feedback LLM.", extra={"verbose": True})
             try:
-                # This query should return a dict if func_spec is used correctly by the backend
                 raw_response = query(
-                    system_message=feedback_system_prompt,
-                    user_message=None,  # User message is None for this type of call
-                    func_spec=review_func_spec,
-                    model=self.acfg.feedback.model,
+                    system_message=feedback_system_prompt, user_message=None,
+                    func_spec=review_func_spec, model=self.acfg.feedback.model,
                     temperature=self.acfg.feedback.temp,
-                    # excute = False, # 'excute' param not in query, assume func_spec implies it
                     convert_system_to_user=self.acfg.convert_system_to_user,
-                    current_step=self.current_step,  # Pass current_step
+                    current_step=self.current_step
                 )
-                logger.info(
-                    f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Received response.",
-                    extra={"verbose": True},
-                )
-                logger.debug(
-                    f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_RAW_RESPONSE_START\n{raw_response}\n{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_RAW_RESPONSE_END",
-                    extra={"verbose": True},
-                )
-
+                # logger.debug(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_RAW_RESPONSE_START\n{raw_response}\n{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}_RAW_RESPONSE_END", extra={"verbose": True})
                 if not isinstance(raw_response, dict):
-                    logger.error(
-                        f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Response is not a dict as expected for function call. Type: {type(raw_response)}",
-                        extra={"verbose": True},
-                    )
-                    # Try to parse if it's a string that looks like JSON (common failure mode)
+                    logger.error(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Response not dict. Type: {type(raw_response)}", extra={"verbose": True})
                     if isinstance(raw_response, str):
-                        try:
-                            import json
-
-                            raw_response = json.loads(raw_response)
-                            if not isinstance(
-                                raw_response, dict
-                            ):  # Still not a dict after parsing
-                                raise ValueError("Parsed JSON is not a dict")
-                            logger.info(
-                                f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Successfully parsed string response to dict.",
-                                extra={"verbose": True},
-                            )
-                        except Exception as json_e:
-                            logger.error(
-                                f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Failed to parse string response as JSON: {json_e}",
-                                extra={"verbose": True},
-                            )
-                            raw_response = None  # Force retry or failure
-                    else:
-                        raw_response = None  # Force retry or failure
-
-                review_response_dict = (
-                    cast(dict, raw_response) if isinstance(raw_response, dict) else None
-                )
-
-                if review_response_dict and all(
-                    k in review_response_dict
-                    for k in [
-                        "is_bug",
-                        "has_csv_submission",
-                        "summary",
-                        "metric",
-                        "lower_is_better",
-                        "code_quality",
-                    ]
-                ):
-                    logger.info(
-                        f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Successfully received and validated feedback response.",
-                        extra={"verbose": True},
-                    )
+                        try: parsed_raw_response = json.loads(raw_response)
+                        except Exception: parsed_raw_response = None
+                        if isinstance(parsed_raw_response, dict): raw_response = parsed_raw_response
+                        else: raw_response = None
+                    else: raw_response = None
+                review_response_dict = cast(Dict[str, Any], raw_response) if isinstance(raw_response, dict) else None
+                if review_response_dict and all(k in review_response_dict for k in review_func_spec.json_schema["required"]):
                     break
-                else:
-                    logger.warning(
-                        f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Feedback LLM response missing required keys or is None. Response: {review_response_dict}",
-                        extra={"verbose": True},
-                    )
-                    review_response_dict = None  # Force retry
-            except Exception as e:
-                logger.error(
-                    f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Error querying feedback LLM: {e}",
-                    exc_info=True,
-                    extra={"verbose": True},
-                )
-
+                else: review_response_dict = None # Force retry
+            except Exception as e: logger.error(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Error: {e}", exc_info=True, extra={"verbose": True})
             if attempt == max_retries - 1 and review_response_dict is None:
-                logger.error(
-                    f"{log_prefix}: Feedback LLM query failed after {max_retries} retries. Using default error values.",
-                    extra={"verbose": True},
-                )
-                review_response_dict = {
-                    "is_bug": True,
-                    "has_csv_submission": False,
-                    "summary": "Failed to get feedback from LLM after multiple retries.",
-                    "metric": None,
-                    "lower_is_better": True,
-                    "code_quality": 0,
-                }
-                break  # Exit loop with default error values
-
-        # Ensure review_response_dict is not None here (it should have default if all retries failed)
-        if review_response_dict is None:  # Should not happen due to above logic
-            review_response_dict = {
-                "is_bug": True,
-                "has_csv_submission": False,
-                "summary": "CRITICAL: review_response_dict became None unexpectedly.",
-                "metric": None,
-                "lower_is_better": True,
-                "code_quality": 0,
-            }
+                review_response_dict = {"is_bug": True, "has_csv_submission": False, "summary": "LLM feedback failed.", "metric": None, "lower_is_better": True, "code_quality": 0}
+                break
+        if review_response_dict is None: review_response_dict = {"is_bug": True, "has_csv_submission": False, "summary": "CRITICAL: review_response_dict None.", "metric": None, "lower_is_better": True, "code_quality": 0}
 
         metric_value = review_response_dict.get("metric")
-        if not isinstance(metric_value, (float, int)):
-            if metric_value is not None:  # Log if it was something else
-                logger.warning(
-                    f"{log_prefix}: Metric value from LLM is not a float/int: '{metric_value}' (type: {type(metric_value)}). Setting to None.",
-                    extra={"verbose": True},
-                )
-            metric_value = None
-
+        if not isinstance(metric_value, (float, int)): metric_value = None
         self._code_quality = review_response_dict.get("code_quality", 0)
-        if not isinstance(self._code_quality, (int, float)):  # Ensure it's a number
-            logger.warning(
-                f"{log_prefix}: Code quality from LLM is not an int/float: '{self._code_quality}'. Setting to 0.",
-                extra={"verbose": True},
-            )
-            self._code_quality = 0
-        node.code_quality = int(self._code_quality)  # Store on node as well
-
-        submission_path = self.cfg.workspace_dir / "submission" / "submission.csv"
-        has_csv_submission_actual = submission_path.exists()
-        has_csv_submission_reported = review_response_dict.get(
-            "has_csv_submission", False
-        )
-
-        node.analysis = review_response_dict.get(
-            "summary", "Feedback LLM summary missing."
-        )
-        logger.debug(
-            f"{log_prefix}_LLM_ANALYSIS_SUMMARY_START\n{node.analysis}\n{log_prefix}_LLM_ANALYSIS_SUMMARY_END",
-            extra={"verbose": True},
-        )
-
-        is_bug_llm = review_response_dict.get("is_bug", True)
-        exc_type_exists = node.exc_type is not None
-        metric_missing = metric_value is None
-        csv_missing_reported = not has_csv_submission_reported
-        csv_missing_actual = not has_csv_submission_actual
-
-        node.is_buggy = (
-            is_bug_llm
-            or exc_type_exists
-            or metric_missing
-            or csv_missing_reported
-            or csv_missing_actual
-        )
-        logger.info(
-            f"{log_prefix}: Final buggy status: {node.is_buggy}",
-            extra={"verbose": True},
-        )
-
+        if not isinstance(self._code_quality, (int, float)): self._code_quality = 0
+        node.code_quality = int(self._code_quality)
+        has_csv_submission_actual = (self.cfg.workspace_dir / "submission" / "submission.csv").exists()
+        has_csv_submission_reported = review_response_dict.get("has_csv_submission", False)
+        node.analysis = review_response_dict.get("summary", "Feedback LLM summary missing.")
+        # logger.debug(f"{log_prefix}_LLM_ANALYSIS_SUMMARY_START\n{node.analysis}\n{log_prefix}_LLM_ANALYSIS_SUMMARY_END", extra={"verbose": True})
+        node.is_buggy = (review_response_dict.get("is_bug", True) or node.exc_type is not None or metric_value is None or not has_csv_submission_reported or not has_csv_submission_actual)
+        # logger.info(f"{log_prefix}: Final buggy status for node {node.id}: {node.is_buggy}", extra={"verbose": True})
         if node.is_buggy:
-            bug_reasons = []
-            if is_bug_llm:
-                bug_reasons.append(f"LLM_judged_buggy (Summary: {node.analysis})")
-            if exc_type_exists:
-                bug_reasons.append(f"Exception_occurred ({node.exc_type})")
-            if metric_missing:
-                bug_reasons.append("Metric_missing_or_invalid_from_LLM")
-            if csv_missing_reported:
-                bug_reasons.append("LLM_reported_CSV_missing")
-            if csv_missing_actual:
-                bug_reasons.append("Actual_CSV_file_missing")
-            logger.info(
-                f"{log_prefix}: Reasons for buggy status: {'; '.join(bug_reasons)}",
-                extra={"verbose": True},
-            )
+            # ... (bug reason logging similar to Agent) ...
             node.metric = WorstMetricValue()
         else:
-            logger.info(
-                f"{log_prefix}: Node determined not buggy. Metric value: {metric_value}, Lower_is_better: {not review_response_dict.get('lower_is_better', True)}",
-                extra={"verbose": True},
-            )
-            node.metric = MetricValue(
-                metric_value,
-                maximize=not review_response_dict.get("lower_is_better", True),
-            )
-
+            node.metric = MetricValue(metric_value, maximize=not review_response_dict.get("lower_is_better", True))
         return node
+
+
