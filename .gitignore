@@ -13,6 +13,7 @@ arrk.py
 pyproject.toml
 uv.lock
 info/
+scratch
 build/
 develop-eggs/
 dist/
@@ -81,11 +82,11 @@ instance/
 bfg-1.14.0.jar
 # Sphinx documentation
 docs/_build/
-
+FULL_CODEBASE.md
 # PyBuilder
 .pybuilder/
 target/
-
+code_scraper.py
 # Jupyter Notebook
 .ipynb_checkpoints
 
