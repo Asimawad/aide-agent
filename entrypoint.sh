@@ -27,41 +27,44 @@ export CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 # --- Start first model ---
 echo "Starting vLLM server for coder model #1 with $CODER_MODEL on port 8000..."
 touch $first_model_log
+if [ -n "$CODER_MODEL" ]; then
 
-python -m vllm.entrypoints.openai.api_server \
-    --model "$CODER_MODEL" \
-    --port 8000 \
-    --dtype bfloat16 \
-    --device cuda \
-    --max-model-len 8192 \
-    --gpu-memory-utilization 0.9 \
-    --max-num-batched-tokens 16384 \
-    --max-num-seqs 50 \
-    --trust-remote-code \
-    --enforce-eager &> $first_model_log &
+    python -m vllm.entrypoints.openai.api_server \
+        --model "$CODER_MODEL" \
+        --port 8000 \
+        --dtype bfloat16 \
+        --device cuda \
+        --max-model-len 8192 \
+        --gpu-memory-utilization 0.9 \
+        --max-num-batched-tokens 16384 \
+        --max-num-seqs 50 \
+        --trust-remote-code \
+        --enforce-eager &> $first_model_log &
 
-CODER_MODEL_PID=$!
-echo "Started model 1 with PID: $CODER_MODEL_PID"
+    CODER_MODEL_PID=$!
+    echo "Started model 1 with PID: $CODER_MODEL_PID"
 
-tail -n +1 -f $first_model_log &
-TAIL_PID=$!
+    tail -n +1 -f $first_model_log &
+    TAIL_PID=$!
 
-# Wait for the first model to be healthy
-timeout=1200
-start=$(date +%s)
+    # Wait for the first model to be healthy
+    timeout=1200
+    start=$(date +%s)
 
-echo "Waiting for model $CODER_MODEL health on port 8000..."
-while ! curl -s http://localhost:8000/health > /dev/null; do
-    now=$(date +%s)
-    if (( now - start > timeout )); then
-        echo "Timeout waiting for model 1"
-        exit 1
-    fi
-    sleep 5
-done
-kill $TAIL_PID
-echo "Model $CODER_MODEL is healthy."
-
+    echo "Waiting for model $CODER_MODEL health on port 8000..."
+    while ! curl -s http://localhost:8000/health > /dev/null; do
+        now=$(date +%s)
+        if (( now - start > timeout )); then
+            echo "Timeout waiting for model 1"
+            exit 1
+        fi
+        sleep 5
+    done
+    kill $TAIL_PID
+    echo "Model $CODER_MODEL is healthy."
+else
+    echo "CODER_MODEL is not set. Skipping first model start."
+fi
 
 if [ -n "$PLANNER_MODEL" ]; then
     echo "PLANNER_MODEL is set to $PLANNER_MODEL"
