@@ -47,7 +47,57 @@ class VerboseFilter(logging.Filter):
     def filter(self, record):
         return not (hasattr(record, "verbose") and record.verbose)
 
-# journal_to_rich_tree and journal_to_string_tree remain the same
+def journal_to_rich_tree(journal: Journal):
+    best_node = journal.get_best_node()
+
+    def append_rec(node: Node, tree):
+        if node.is_buggy:
+            s = "[red]◍ bug"
+        else:
+            style = "bold " if node is best_node else ""
+
+            if node is best_node:
+                s = f"[{style}green]● {node.metric.value:.3f} (best)"
+            else:
+                s = f"[{style}green]● {node.metric.value:.3f}"
+
+        subtree = tree.add(s)
+        for child in node.children:
+            append_rec(child, subtree)
+
+    tree = Tree("[bold blue]Solution tree")
+    for n in journal.draft_nodes:
+        append_rec(n, tree)
+    return tree
+
+
+def journal_to_string_tree(journal: Journal) -> str:
+    best_node = journal.get_best_node()
+    tree_str = "Solution tree\n"
+
+    def append_rec(node: Node, level: int):
+        nonlocal tree_str
+        indent = "  " * level
+        if node.is_buggy:
+            s = f"{indent}◍ bug (ID: {node.id})\n"
+        else:
+            # support for multiple markers; atm only "best" is supported
+            markers = []
+            if node is best_node:
+                markers.append("best")
+            marker_str = " & ".join(markers)
+            if marker_str:
+                s = f"{indent}● {node.metric.value:.3f} ({marker_str}) (ID: {node.id})\n"
+            else:
+                s = f"{indent}● {node.metric.value:.3f} (ID: {node.id})\n"
+        tree_str += s
+        for child in node.children:
+            append_rec(child, level + 1)
+
+    for n in journal.draft_nodes:
+        append_rec(n, 0)
+
+    return tree_str
 
 def run():
     cfg = load_cfg()
