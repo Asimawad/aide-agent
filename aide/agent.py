@@ -189,15 +189,15 @@ class Agent: # This is now the base class
 
     def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict: Dict[str, Any]=None,retries: int = 3) -> tuple[str, str, str]:
         """Generate a natural language plan + code in the same LLM call and split them apart."""
-
-        system_prompt = system_prompt_dict or get_agent_system_prompt()
+        if system_prompt_dict is None:
+            system_prompt_dict = get_agent_system_prompt()
         log_prefix = f"AGENT_PLAN_CODE_QUERY_STEP->{self.current_step}" 
         completion_text = None
         for attempt in range(retries):
             logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request.", extra={"verbose": True})
             try:
                 completion_text = query(
-                    system_message=system_prompt,
+                    system_message=system_prompt_dict,
                     user_message=user_prompt_dict,
                     model=self.acfg.code.model,
                     temperature=self.acfg.code.temp,
