@@ -17,7 +17,7 @@ except Exception as e:
     pass
 # --- Configuration ---
 BASE_RUN_DATA_DIR = "."
-RUN_FOLDER_NAME = f"logs/{run_name}" or f"logs/run_"
+RUN_FOLDER_NAME = f"logs/{cfg.exp_name}" or f"logs/run_"
 JOURNAL_RELATIVE_PATH = f"journal.json"
 
 BEST_CODE_RELATIVE_PATH = f"best_solution.py"
