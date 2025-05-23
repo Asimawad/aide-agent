@@ -54,9 +54,9 @@ agent:
 
   # ── Tree-search / debugging heuristics ───────────────────────────────────
   search:
-    max_debug_depth: 10
-    debug_prob: 0.95
-    num_drafts: 5
+    max_debug_depth: 50
+    debug_prob: 0.65
+    num_drafts: 12
 
 # ─── W&B experiment tracking ────────────────────────────────────────────────
 wandb:

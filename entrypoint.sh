@@ -34,10 +34,10 @@ if [ -n "$CODER_MODEL" ]; then
         --port 8000 \
         --dtype bfloat16 \
         --device cuda \
-        --max-model-len 8196 \
-        --gpu-memory-utilization 0.95 \
-        --max-num-batched-tokens 16384 \
-        --max-num-seqs 50 \
+        --max-model-len 16384 \
+        --gpu-memory-utilization 0.9 \
+        --max-num-batched-tokens 8192 \
+        --max-num-seqs 3 \
         --trust-remote-code \
         --enforce-eager &> $first_model_log &
 
