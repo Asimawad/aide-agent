@@ -217,7 +217,7 @@ def run():
 
     def exec_callback(*args, **kwargs):
         # status_rich.update("[magenta]Executing code...")
-        logger.info("Interpreter: Executing code...") # Logged via logger
+        # logger.info("Interpreter: Executing code...") # Logged via logger
         res = interpreter.run(*args, **kwargs)
         # status_rich.update("[green]Generating code...")
         logger.info("Interpreter: Code execution finished.") # Logged via logger
@@ -252,7 +252,7 @@ def run():
 
                 global_step += 1 # Increment after successful step
                 progress_bar.update(main_task, advance=1)
-                logger.info(f"--- Agent Step {current_step_num_display}/{cfg.agent.steps} END ---")
+                logger.info(f"--- Agent Step {current_step_num_display}/{cfg.agent.steps} END --- \n")
                 console.rule(f"Step {current_step_num_display} Summary") # Visual separator
 
         logger.info("All agent steps completed.")

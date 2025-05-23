@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
-set -e                          
-set -o pipefail               
-
+# set -e                          
+# set -o pipefail   
+cp -r logs/ logs_old/
+rm -rf workspaces/ wandb/ logs/
 O4_MODEL="o4-mini-2025-04-16"
 DeepSeek_MODEL="deepseek-chat"
 CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
+# CODER_MODEL="o3-mini"
+# ${O4_MODEL} #"RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
-competition_name="random-acts-of-pizza"
-data_dir="data/random-acts-of-pizza/"
-GOAL="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley"
-EVAL="Use multi-class logarithmic loss between predicted author probabilities and the true label." 
+competition_name="aerial-cactus-identification"
+data_dir="data/aerial-cactus-identification"
+GOAL="Predict the sales price for each house" 
+EVAL="Use the RMSE metric between the logarithm of the predicted and observed values." 
 aide \
     data_dir="${data_dir}/" \
-    desc_file="./data/random-acts-of-pizza/description.md" \
+    desc_file="${data_dir}/aerial-cactus-identification.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
-    agent.steps=25 \
+    agent.steps=15 \
     agent.time_limit=7200 \
     agent.obfuscate=False \
     agent.ITS_Strategy="Baseline" \

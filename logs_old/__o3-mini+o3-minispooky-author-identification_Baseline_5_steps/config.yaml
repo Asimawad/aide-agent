@@ -1,0 +1,84 @@
+data_dir: !!python/object/apply:pathlib.PosixPath
+- /
+- home
+- asim_aims_ac_za
+- workspace
+- aide-agent
+- aide
+- example_tasks
+- spooky-author-identification
+desc_file: !!python/object/apply:pathlib.PosixPath
+- /
+- home
+- asim_aims_ac_za
+- workspace
+- aide-agent
+- aide
+- example_tasks
+- spooky-author-identification
+- description.md
+goal: null
+eval: null
+log_dir: !!python/object/apply:pathlib.PosixPath
+- /
+- home
+- asim_aims_ac_za
+- workspace
+- aide-agent
+- logs
+- __o3-mini+o3-minispooky-author-identification_Baseline_5_steps
+log_level: DEBUG
+workspace_dir: !!python/object/apply:pathlib.PosixPath
+- /
+- home
+- asim_aims_ac_za
+- workspace
+- aide-agent
+- workspaces
+- __o3-mini+o3-minispooky-author-identification_Baseline_5_steps
+competition_name: spooky-author-identification
+preprocess_data: true
+copy_data: true
+use_template: false
+exp_name: __o3-mini+o3-minispooky-author-identification_Baseline_5_steps
+inference_engine: vllm
+exec:
+  timeout: 600
+  agent_file_name: runfile.py
+  format_tb_ipython: false
+agent:
+  steps: 5
+  time_limit: 7200
+  k_fold_validation: 5
+  expose_prediction: false
+  data_preview: true
+  convert_system_to_user: false
+  obfuscate: false
+  ITS_Strategy: Baseline
+  code:
+    model: o3-mini
+    planner_model: o3-mini
+    temp: 0.6
+    max_new_tokens: 2048
+    top_p: 0.9
+    top_k: 50
+    num_return_sequences: 1
+  feedback:
+    model: o4-mini-2025-04-16
+    planner_model: ???
+    temp: 0.5
+    max_new_tokens: ???
+    top_p: 1.0
+    top_k: 40
+    num_return_sequences: 1
+  search:
+    max_debug_depth: 5
+    debug_prob: 0.7
+    num_drafts: 5
+wandb:
+  enabled: true
+  project: MLE_BENCH_AIDE_VM
+  entity: asim_awad
+  run_name: __o3-mini+o3-minispooky-author-identification_Baseline_5_steps
+  log_code: true
+  log_artifacts: true
