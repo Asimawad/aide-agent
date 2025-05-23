@@ -144,43 +144,41 @@ def query(
         provider_name, model, max_tokens, reasoning_effort, model_kwargs
     )
 
+    log_identifier = f"Step: {current_step} - Model: {model} - Provider: {provider_name}"
+
     compiled_system_message = (
         compile_prompt_to_md(system_message) if system_message else None
     )
     compiled_user_message = compile_prompt_to_md(user_message) if user_message else None
+    # logger.info("Debugging prompt system message:", extra={"verbose": True})
+    # logger.info(f"Prompt system message: {compiled_system_message}", extra={"verbose": True})
+    # logger.info("Debugging prompt user message:", extra={"verbose": True})
+    # logger.info(f"Prompt user message: {compiled_user_message}", extra={"verbose": True})
 
     # Enhanced Logging
-    log_identifier = f"BACKEND_QUERY_STEP{current_step}_MODEL_{model.replace('/', '_').replace('-', '_')}_PROVIDER_{provider_name}"
 
-    logger.info(f"{log_identifier}: Dispatching query.", extra={"verbose": True})
+
     # Use json.dumps for better readability of dicts/lists in log files
     if compiled_system_message:
         try:
             system_log_content = json.dumps(system_message, indent=2) if isinstance(system_message, (dict, list)) else compiled_system_message
             # system_log_content = compiled_system_message  # Current behavior
-        except (
-            TypeError
-        ):  
+        except ( TypeError):
+            logger.warning(f"System message is not a dict or list: {system_message}")   
             system_log_content = str(system_message)
-        logger.debug(
-            f"{log_identifier}_SYSTEM_MESSAGE_START\n{system_log_content}\n{log_identifier}_SYSTEM_MESSAGE_END",
-            extra={"verbose": True},
-        )
+        logger.debug(f"System message for logging:\n{system_log_content}", extra={"verbose": True})
+
 
     if compiled_user_message:
         try:
             user_log_content = json.dumps(user_message, indent=2) if isinstance(user_message, (dict, list)) else compiled_user_message
-            # user_log_content = compiled_user_message  # Current behavior
         except TypeError:
             user_log_content = str(user_message)
-        logger.debug(
-            f"{log_identifier}_USER_MESSAGE_START\n{user_log_content}\n{log_identifier}_USER_MESSAGE_END",
-            extra={"verbose": True},
-        )
+        logger.debug(f"User message for logging:\n{user_log_content}", extra={"verbose": True})
 
     if func_spec:
         logger.debug(
-            f"{log_identifier}_FUNC_SPEC_START\n",
+            f"{log_identifier}_:stage : function call\n",
             extra={"verbose": True},
         )
 
@@ -228,7 +226,7 @@ def query(
 
     query_duration = time.time() - t0
     logger.info(
-        f"{log_identifier}: Query completed. Provider Latency: {latency:.3f}s, Total Dispatch: {query_duration:.3f}s, Tokens In/Out: {input_tokens}/{output_tokens}",
+        f"Query completed. Latency: {latency:.3f}s, Total Dispatch: {query_duration:.3f}s, Tokens In/Out: {input_tokens}/{output_tokens}",
         extra={"verbose": True},
     )
     if func_spec:
@@ -241,7 +239,7 @@ def query(
         except TypeError:
             response_log_content = str(raw_responses)
         logger.debug(
-            f"{log_identifier}_RAW_FUNCTION_RESPONSE_START\n{response_log_content}\n{log_identifier}_RAW_FUNCTION_RESPONSE_END",
+            f"RAW_FUNCTION_RESPONSE:\n{response_log_content}",
             extra={"verbose": True},
         )
     # else:

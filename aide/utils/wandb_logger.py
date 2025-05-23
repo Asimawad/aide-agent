@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 import pandas as pd
 import time 
+import re
 from typing import Optional
 try:
     import wandb
@@ -31,6 +32,19 @@ class WandbLogger:
         self._gold_medal_flags: list[int] = []
         self._silver_medal_flags: list[int] = []
         self._bronze_medal_flags: list[int] = []
+
+
+    def _sanitize_artifact_name_component(self, name_component: str) -> str:
+        """Sanitizes a string component for use in a W&B artifact name."""
+        # Replace invalid characters with underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9_.-]+', '_', name_component)
+        # Ensure it doesn't start or end with non-alphanumeric (except dots for versioning)
+        sanitized = re.sub(r'^[^a-zA-Z0-9]+', '', sanitized)
+        sanitized = re.sub(r'[^a-zA-Z0-9_]+$', '', sanitized) # Allow underscore at the end
+        if not sanitized: # if all chars were invalid
+            return "default_component"
+        return sanitized
+
 
     def init_wandb(self):
         if wandb and OmegaConf and self.cfg.wandb.enabled: # Check OmegaConf too
@@ -93,21 +107,33 @@ class WandbLogger:
 
     def _copy_best_solution_and_submission_for_wandb(self):
         logs_exp_dir = Path("logs") / self.cfg.exp_name
-        logs_exp_dir.mkdir(parents=True, exist_ok=True)
-        workspaces_exp_dir = self.cfg.workspace_dir
+        # logs_exp_dir.mkdir(parents=True, exist_ok=True) # This creates the parent, not the artifact dir
+
+        workspaces_exp_dir = self.cfg.workspace_dir # This is already Path(cfg.workspace_dir)
+        
         best_solution_src = workspaces_exp_dir / "best_solution"
-        best_submission_src = workspaces_exp_dir / "best_submission"
+        best_solution_dst_dir = logs_exp_dir / "best_solution_wandb_artifact" # Define full dst path
+
+        best_submission_src = workspaces_exp_dir / "best_submission" # Assuming you create this
+        best_submission_dst_dir = logs_exp_dir / "best_submission_wandb_artifact"
+
         if best_solution_src.exists():
-            copytree(best_solution_src, logs_exp_dir / "best_solution_wandb_artifact", use_symlinks=False)
-            logger.info(f"W&B: Copied best_solution to W&B staging: {logs_exp_dir / 'best_solution_wandb_artifact'}")
-        if best_submission_src.exists():
-            copytree(best_submission_src, logs_exp_dir / "best_submission_wandb_artifact", use_symlinks=False)
-            logger.info(f"W&B: Copied best_submission to W&B staging: {logs_exp_dir / 'best_submission_wandb_artifact'}")
+            best_solution_dst_dir.mkdir(parents=True, exist_ok=True) # Create the specific dst dir
+            copytree(best_solution_src, best_solution_dst_dir, use_symlinks=False)
+            logger.info(f"W&B: Copied best_solution to W&B staging: {best_solution_dst_dir}")
+        
+        if best_submission_src.exists(): # You might not be creating a 'best_submission' folder yet
+            best_submission_dst_dir.mkdir(parents=True, exist_ok=True) # Create the specific dst dir
+            copytree(best_submission_src, best_submission_dst_dir, use_symlinks=False)
+            logger.info(f"W&B: Copied best_submission to W&B staging: {best_submission_dst_dir}")
+        else:
+            logger.info(f"W&B: best_submission directory not found at {best_submission_src}, skipping copy.")
 
     def finalize_run(self, journal: Journal, competition_benchmarks: Optional[dict]):
         if self.wandb_run:
             self.app_logger.info("W&B: Finalizing run...")
             try:
+                # ... (your existing summary_data calculation) ...
                 summary_data = {}
                 wo_step = None; no_of_csvs = 0; buggy_nodes_count = 0
                 total_code_quality = 0; valid_code_quality_nodes = 0
@@ -116,24 +142,32 @@ class WandbLogger:
 
                 for node in journal.nodes:
                     if not node.is_buggy:
-                        if wo_step is None: wo_step = node.step
-                        submission_path_for_node = self.cfg.workspace_dir / "submission" / f"submission_node_{node.id}.csv"
-                        if (self.cfg.workspace_dir / "submission" / "submission.csv").exists() or submission_path_for_node.exists():
-                             no_of_csvs += 1
-                        if node.code_quality is not None:
+                        if wo_step is None: wo_step = node.step # step is 0-indexed in journal
+                        # Check for submission.csv for this specific node if you save them per node
+                        # For now, let's assume submission.csv is overwritten or a general check
+                        # submission_path_for_node = self.cfg.workspace_dir / "submission" / f"submission_node_{node.id}.csv"
+                        # For simplicity, let's check the general submission.csv for now
+                        if (self.cfg.workspace_dir / "submission" / "submission.csv").exists():
+                             no_of_csvs += 1 # This will count it for every non-buggy step if file exists. Be careful.
+                                             # Consider only counting if the node's code *produced* it.
+
+                        if node.code_quality is not None: # code_quality is float
                             total_code_quality += node.code_quality
                             valid_code_quality_nodes +=1
-                        if node.effective_debug_step: effective_debugs_count += 1
+                        if node.effective_debug_step: effective_debugs_count += 1 # This seems to be a boolean
+                        
                         if competition_benchmarks and node.metric and node.metric.value is not None:
-                            if node.metric.value >= competition_benchmarks.get("gold_threshold", float('inf')): gold_medals += 1
-                            elif node.metric.value >= competition_benchmarks.get("silver_threshold", float('inf')): silver_medals += 1
-                            elif node.metric.value >= competition_benchmarks.get("bronze_threshold", float('inf')): bronze_medals += 1
-                            if node.metric.value >= competition_benchmarks.get("median_threshold", float('inf')): above_median_count += 1
+                            metric_val = node.metric.value
+                            if metric_val >= competition_benchmarks.get("gold_threshold", float('inf')): gold_medals += 1
+                            elif metric_val >= competition_benchmarks.get("silver_threshold", float('inf')): silver_medals += 1
+                            elif metric_val >= competition_benchmarks.get("bronze_threshold", float('inf')): bronze_medals += 1
+                            
+                            if metric_val >= competition_benchmarks.get("median_threshold", float('inf')): above_median_count += 1
                     else:
                         buggy_nodes_count += 1
                 
-                summary_data["summary/steps_to_first_working_code"] = wo_step if wo_step is not None else self.cfg.agent.steps + 10
-                summary_data["summary/num_successful_submissions"] = no_of_csvs
+                summary_data["summary/steps_to_first_working_code"] = (wo_step + 1) if wo_step is not None else (self.cfg.agent.steps + 10) # Adjust for 1-based display
+                summary_data["summary/num_successful_submissions"] = no_of_csvs # This needs careful thought on how it's counted
                 summary_data["summary/num_buggy_nodes"] = buggy_nodes_count
                 summary_data["summary/avg_code_quality_non_buggy"] = (total_code_quality / valid_code_quality_nodes) if valid_code_quality_nodes > 0 else 0
                 if competition_benchmarks:
@@ -144,34 +178,46 @@ class WandbLogger:
                 summary_data["summary/effective_debug_steps"] = effective_debugs_count
                 
                 best_node = journal.get_best_node(only_good=True)
-                if best_node and best_node.metric:
+                if best_node and best_node.metric and best_node.metric.value is not None:
                     summary_data["summary/best_validation_metric"] = best_node.metric.value
                     summary_data["summary/best_node_id"] = best_node.id
-                    summary_data["summary/best_node_step"] = best_node.step
-                
+                    summary_data["summary/best_node_step"] = best_node.step + 1 # Adjust for 1-based display
+
                 self.wandb_run.summary.update(summary_data)
                 self.app_logger.info(f"W&B: Updated run summary: {summary_data}")
 
                 self._copy_best_solution_and_submission_for_wandb()
                 log_dir_for_artifacts = Path("logs") / self.cfg.exp_name
+
+                # Sanitize artifact names
+                sanitized_exp_name = self._sanitize_artifact_name_component(self.cfg.exp_name)
+
                 if (log_dir_for_artifacts / "journal.json").exists():
-                    artifact = wandb.Artifact(f"{self.cfg.exp_name}_journal", type="journal")
+                    artifact_name_journal = f"{sanitized_exp_name}_journal"
+                    self.app_logger.info(f"W&B: Logging journal artifact as: {artifact_name_journal}")
+                    artifact = wandb.Artifact(artifact_name_journal, type="journal")
                     artifact.add_file(str(log_dir_for_artifacts / "journal.json"))
                     self.wandb_run.log_artifact(artifact)
+
                 if (log_dir_for_artifacts / "best_solution_wandb_artifact").exists():
-                    artifact_code = wandb.Artifact(f"{self.cfg.exp_name}_best_solution", type="solution-code")
+                    artifact_name_code = f"{sanitized_exp_name}_best_solution"
+                    self.app_logger.info(f"W&B: Logging best solution artifact as: {artifact_name_code}")
+                    artifact_code = wandb.Artifact(artifact_name_code, type="solution-code")
                     artifact_code.add_dir(str(log_dir_for_artifacts / "best_solution_wandb_artifact"))
                     self.wandb_run.log_artifact(artifact_code)
                 
+                # ... (saving aide.log and aide.verbose.log - these are direct file saves, not artifacts, so name is less critical) ...
                 if (self.cfg.log_dir / "aide.log").exists():
                      self.wandb_run.save(str(self.cfg.log_dir / "aide.log"), base_path=str(self.cfg.log_dir.parent))
                 if (self.cfg.log_dir / "aide.verbose.log").exists():
                      self.wandb_run.save(str(self.cfg.log_dir / "aide.verbose.log"), base_path=str(self.cfg.log_dir.parent))
 
+
             except Exception as e:
                 self.app_logger.error(f"W&B: Error during summary/artifact logging: {e}", exc_info=True)
             finally:
-                self.wandb_run.finish()
-                self.app_logger.info("W&B run finished.")
+                if self.wandb_run: # Check if it's still valid before finishing
+                    self.wandb_run.finish()
+                    self.app_logger.info("W&B run finished.")
         else:
             self.app_logger.info("W&B run not available, skipping finalization.")

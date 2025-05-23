@@ -1,6 +1,7 @@
 import shutil
 import logging
 import random
+import json
 import time
 from rich.syntax import Syntax # Keep for logging if used
 from rich.console import Console # Keep for console output
@@ -12,7 +13,7 @@ from .utils import data_preview # data_preview.generate
 from .utils.config import Config
 from .utils.pretty_logging import log_step # logger from pretty_logging might conflict, be careful
 # from .utils.metric import MetricValue, WorstMetricValue # Defined in journal or imported there
-
+from .utils.wandb_logger import WandbLogger
 from .utils.prompt_utils import (
     get_agent_draft_user_prompt,
     get_agent_improve_user_prompt,
@@ -146,7 +147,6 @@ class Agent: # This is now the base class
 
         log_prefix_base = f"{self.__class__.__name__.upper()}_SEARCH_POLICY_STEP{self.current_step}"
         search_cfg = self.acfg.search
-        logger.info(f"{log_prefix_base}: Determining next action.", extra={"verbose": True})
 
         search_cfg = self.acfg.search
 
@@ -176,25 +176,22 @@ class Agent: # This is now the base class
             if greedy_node.is_buggy:
                  logger.info(f"{log_prefix_base}: Selected: Debug greedy node {greedy_node.id} (it was marked buggy).", extra={"verbose": True})
                  return greedy_node
-            logger.info(f"{log_prefix_base}: Selected: Improve greedy node {greedy_node.id} (metric: {greedy_node.metric.value:.3f if greedy_node.metric else 'N/A'}).", extra={"verbose": True})
+            metric_display = f"{greedy_node.metric.value:.3f}" if greedy_node.metric and greedy_node.metric.value is not None else 'N/A'
+            logger.info(f"{log_prefix_base}: Selected: Improve greedy node {greedy_node.id} (metric: {metric_display}).", extra={"verbose": True})
             return greedy_node
-        else:
-            logger.info(f"{log_prefix_base}: Selected: Draft new node (no best_node found, fallback).", extra={"verbose": True})
-            return None
+        # Corrected line:
+        metric_display = f"{greedy_node.metric.value:.3f}" if greedy_node.metric and greedy_node.metric.value is not None else 'N/A'
+        logger.info(f"{log_prefix_base}: Selected: Improve greedy node {greedy_node.id} (metric: {metric_display}).", extra={"verbose": True})
+        return greedy_node
 
     # REMOVE: _prompt_environment, _prompt_impl_guideline, _prompt_resp_fmt
     # These are now handled by functions in prompt_utils.py
 
-    def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict: Dict[str, Any]=None,retries: int = 1) -> tuple[str, str, str]:
+    def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict: Dict[str, Any]=None,retries: int = 3) -> tuple[str, str, str]:
         """Generate a natural language plan + code in the same LLM call and split them apart."""
 
         system_prompt = system_prompt_dict or get_agent_system_prompt()
-        log_prefix = f"AGENT_PLAN_CODE_QUERY_STEP{self.current_step}" 
-        # `excute` param seems unused by `query` directly, but kept for signature consistency if used elsewhere.
-        # `retries` here defines how many times this whole method retries, distinct from backend retries.
-        
-        system_prompt = get_agent_system_prompt() # Get system prompt from utils
-        log_prefix = f"AGENT_PLAN_CODE_QUERY_STEP{self.current_step}"
+        log_prefix = f"AGENT_PLAN_CODE_QUERY_STEP->{self.current_step}" 
         completion_text = None
         for attempt in range(retries):
             logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request.", extra={"verbose": True})
@@ -226,12 +223,14 @@ class Agent: # This is now the base class
 
 
     def _draft(self, parent_node=None) -> Node:
-        log_prefix_base = f"{self.__class__.__name__.upper()}_DRAFT_STEP{self.current_step}" # Generic prefix
+        log_prefix_base = f"{self.__class__.__name__}_DRAFT_STEP:{self.current_step}" # Generic prefix
         logger.info(f"{log_prefix_base}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
         draft_sys_prompt=get_agent_draft_system_prompt()
+        journal_summary=self.journal.generate_summary(include_code=False)
+        logger.info(f"{log_prefix_base}: Journal summary: {journal_summary}", extra={"verbose": True})
         prompt_user_message = get_agent_draft_user_prompt( # Agent uses its specific prompt structure
             task_desc=self.task_desc,
-            journal_summary=self.journal.generate_summary(include_code=False),
+            journal_summary=journal_summary,
             competition_name=self.competition_name,
             obfuscate=self.acfg.obfuscate,
             acfg_data_preview=self.acfg.data_preview,
@@ -270,8 +269,9 @@ class Agent: # This is now the base class
 
     
     def _debug(self, parent_node: Node) -> Node:
-        log_prefix_base = f"{self.__class__.__name__.upper()}_DEBUG_STEP{self.current_step}"
+        log_prefix_base = f"{self.__class__.__name__}_DEBUG_STEP{self.current_step}"
         logger.info(f"{log_prefix_base}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
+        logger.info(f"Buggy code: {parent_node.code}", extra={"verbose": True})
         prompt_user_message = get_agent_debug_user_prompt( # Agent uses its specific prompt
             task_desc=self.task_desc,
             competition_name=self.competition_name,
@@ -286,10 +286,7 @@ class Agent: # This is now the base class
         if not code: code = parent_node.code
         new_node = Node(plan=plan, code=code, parent=parent_node)
         logger.info(f"{log_prefix_base}: Debugged node {parent_node.id} to create new node {new_node.id}", extra={"verbose": True})
-        return new_node
-
-        logger.info(f"{log_prefix}: Debugged node {parent_node.id} to create new node {new_node.id}", extra={"verbose": True})
-        logger.debug(f"{log_prefix}_DEBUG_PLAN_START\n{plan}\n{log_prefix}_DEBUG_PLAN_END", extra={"verbose": True})
+        logger.debug(f"{log_prefix_base}_DEBUG_PLAN_START\n{plan}\n{log_prefix_base}_DEBUG_PLAN_END", extra={"verbose": True})
         # logger.debug(f"{log_prefix}_DEBUG_CODE_START\n{wrap_code(code)}\n{log_prefix}_DEBUG_CODE_END", extra={"verbose": True})
         return new_node
 
@@ -405,13 +402,17 @@ class Agent: # This is now the base class
             result_node.effective_debug_step = False; result_node.effective_reflections = False
         self._prev_buggy = result_node.is_buggy
         if result_node.is_buggy:
+
+            console.print(f"[bold red]---------[/bold red]\n") # Console output
             console.print(f"[bold red]Result: Buggy[/bold red]") # Console output
+            console.print(f"[bold red]Feedback: {result_node.analysis}[/bold red]") # Console output
         else: 
+            console.print(f"[bold green]---------[/bold green]\n") # Console output
             console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
+            console.print(f"[bold green]Feedback: {result_node.analysis}[/bold green]") # Console output
         step_log_data = { # Prepare data for WandbLogger
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
-            # ... (other core metrics needed by WandbLogger) ...
             f"progress/current_step": current_step_number,
             f"progress/competition_name": self.competition_name,
             "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
@@ -486,13 +487,11 @@ class Agent: # This is now the base class
         has_csv_submission_actual = (self.cfg.workspace_dir / "submission" / "submission.csv").exists()
         has_csv_submission_reported = review_response_dict.get("has_csv_submission", False)
         node.analysis = review_response_dict.get("summary", "Feedback LLM summary missing.")
+        with open("review_response_dict.json", "w") as f: json.dump(review_response_dict, f)
         node.is_buggy = (review_response_dict.get("is_bug", True) or node.exc_type is not None or metric_value is None or not has_csv_submission_reported or not has_csv_submission_actual)
         if node.is_buggy:
             node.metric = WorstMetricValue()
         else: 
-            console.print(f"[bold red]Result: Buggy[/bold red]") # Console output
-
-            console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
             node.metric = MetricValue(metric_value, maximize=not review_response_dict.get("lower_is_better", True))
         return node
 
@@ -686,8 +685,8 @@ class PlannerAgent(Agent): # Inherit from Agent
         return reflection_plan, revised_code
 
     def update_data_preview(self): # Identical to Agent
-        log_prefix = f"PLANNER_AGENT_DATA_PREVIEW_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Updating data preview.", extra={"verbose": True})
+        log_prefix = f"PLANNER_AGENT_DATA_PREVIEW_STEP-{self.current_step}"
+        logger.info(f"{log_prefix}: \n Updating data preview.", extra={"verbose": True})
         try:
             self.data_preview = data_preview.generate(self.cfg.workspace_dir / "input")
             logger.info(f"{log_prefix}: Data preview updated.", extra={"verbose": True})
@@ -701,7 +700,6 @@ class PlannerAgent(Agent): # Inherit from Agent
         # This is mostly copied from Agent.step and adapted for PlannerAgent logging prefixes
         # The core logic (search_policy -> _draft/_improve/_debug -> execute -> parse -> reflect -> log) is the same.
         log_prefix_main = f"PLANNER_AGENT_STEP{current_step_number}"
-        logger.info(f"{log_prefix_main}_START: Total Steps Configured: {self.acfg.steps}", extra={"verbose": True})
         t_step_start = time.time()
 
         submission_dir = self.cfg.workspace_dir / "submission"

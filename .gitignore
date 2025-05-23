@@ -72,11 +72,15 @@ playground_outputs/*
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-
+scratch.py
+review_response_dict.json
+draft_playground.py
+aideml-main.zip
+old_logs/*
 # Flask stuff:
 instance/
 .webassets-cache
-
+tests/
 # Scrapy stuff:
 .scrapy
 bfg-1.14.0.jar

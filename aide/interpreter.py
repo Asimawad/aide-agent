@@ -212,15 +212,12 @@ class Interpreter:
         assert self.process.is_alive()
 
         self.code_inq.put(code)
-        logger.debug(
-            f"[exec] Sent code to child (len={len(code.splitlines())} lines)"
-        )  # LOG+
 
         # wait for child to actually start execution (we don't want interrupt child setup)
         try:
             state = self.event_outq.get(timeout=10)
             assert state[0] == "state:ready", state
-            logger.debug("[exec] Child signalled READY")
+            # logger.debug("[exec] Child signalled READY")
         except queue.Empty:
             msg = "REPL child process failed to start execution"
             logger.critical(msg)

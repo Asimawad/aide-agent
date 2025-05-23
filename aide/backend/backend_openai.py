@@ -169,7 +169,7 @@ def query(
 
     t0 = time.time()
     _setup_openai_client()
-    logger.debug(f"[Timing] _setup_openai_client took: {time.time() - t0:.3f}s")
+
     t0 = time.time()
     # Prepare messages list for OpenAI API format
     model = model_kwargs.get("model", "")
@@ -184,7 +184,7 @@ def query(
         filtered_kwargs["tool_choice"] = func_spec.openai_tool_choice_dict
 
     logger.debug(
-        f"Calling OpenAI API with model {model} and parameters: {filtered_kwargs}",
+        f"OpenAI Backend Activated with model {model}",
         extra={"verbose": True},
     )
 
