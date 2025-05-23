@@ -150,31 +150,28 @@ def query(
         compile_prompt_to_md(system_message) if system_message else None
     )
     compiled_user_message = compile_prompt_to_md(user_message) if user_message else None
-    # logger.info("Debugging prompt system message:", extra={"verbose": True})
-    # logger.info(f"Prompt system message: {compiled_system_message}", extra={"verbose": True})
-    # logger.info("Debugging prompt user message:", extra={"verbose": True})
-    # logger.info(f"Prompt user message: {compiled_user_message}", extra={"verbose": True})
 
     # Enhanced Logging
-
 
     # Use json.dumps for better readability of dicts/lists in log files
     if compiled_system_message:
         try:
             system_log_content = json.dumps(system_message, indent=2) if isinstance(system_message, (dict, list)) else compiled_system_message
-            # system_log_content = compiled_system_message  # Current behavior
+            logger.debug(f"System message for logging:\n{system_log_content}", extra={"verbose": True})
+            #   system_log_content = compiled_system_message  # Current behavior
         except ( TypeError):
             logger.warning(f"System message is not a dict or list: {system_message}")   
-            system_log_content = str(system_message)
-        logger.debug(f"System message for logging:\n{system_log_content}", extra={"verbose": True})
-
+            logger.debug(f"System message for logging:\n{compiled_system_message}", extra={"verbose": True})
+            system_log_content = str(system_message)  # Fallback to string representation
 
     if compiled_user_message:
         try:
             user_log_content = json.dumps(user_message, indent=2) if isinstance(user_message, (dict, list)) else compiled_user_message
+            logger.debug(f"User message for logging:\n{user_log_content}", extra={"verbose": True})
         except TypeError:
             user_log_content = str(user_message)
-        logger.debug(f"User message for logging:\n{user_log_content}", extra={"verbose": True})
+            logger.debug(f"User message for logging:\n{compiled_user_message}", extra={"verbose": True})
+
 
     if func_spec:
         logger.debug(
