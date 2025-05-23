@@ -188,17 +188,40 @@ class Journal(DataClassJsonMixin):
             nodes = self.nodes
         return max(nodes, key=lambda n: n.metric)
 
-    def generate_summary(self, include_code: bool = False) -> str:
+
+    def generate_summary(self, include_code: bool = True) -> str:
         """Generate a summary of the journal for the agent."""
         summary = []
-        for n in self.good_nodes:
-            summary_part = f"Design: {n.plan}\n"
-            if include_code:
-                summary_part += f"Code: {n.code}\n"
-            summary_part += f"Results: {n.analysis}\n"
-            summary_part += f"Validation Metric: {n.metric.value}\n"
-            summary.append(summary_part)
-        return "\n-------------------------------\n".join(summary)
+        if len(self.good_nodes) == 0:
+            count = 0
+            for n in self.draft_nodes:
+                count += 1
+                split_plan = n.plan.split("</think>")
+                if len(split_plan) > 1:
+                    summary_part = f"Design: {split_plan[1]}\n"
+                else:
+                    summary_part = f"Design: {n.plan}\n"
+                summary.append(summary_part)
+                if include_code:
+                    summary.append(f"Code: {n.code}\n")
+                if n.analysis:
+                    summary.append(f"Results: {n.analysis}\n")
+                if count == 3:
+                    break
+            return "\n-------------------------------\n".join(summary)
+        else:
+
+            for n in self.good_nodes:
+                summary_part = f"Design: {n.plan}\n"
+                split_plan = n.plan.split("</think>")
+                if len(split_plan) > 1:
+                    summary_part = f"Design: {split_plan[1]}\n"
+                if include_code:
+                    summary_part += f"Code: {n.code}\n"
+                summary_part += f"Results: {n.analysis}\n"
+                summary_part += f"Validation Metric: {n.metric.value}\n"
+                summary.append(summary_part)
+            return "\n-------------------------------\n".join(summary)
 
 
 def get_path_to_node(journal: Journal, node_id: str) -> list[str]:

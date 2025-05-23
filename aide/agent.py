@@ -187,7 +187,7 @@ class Agent: # This is now the base class
     # REMOVE: _prompt_environment, _prompt_impl_guideline, _prompt_resp_fmt
     # These are now handled by functions in prompt_utils.py
 
-    def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict: Dict[str, Any]=None,retries: int = 3) -> tuple[str, str, str]:
+    def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict=None, retries: int = 3) -> tuple[str, str, str]: 
         """Generate a natural language plan + code in the same LLM call and split them apart."""
         if system_prompt_dict is None:
             system_prompt_dict = get_agent_system_prompt()
@@ -276,6 +276,7 @@ class Agent: # This is now the base class
             task_desc=self.task_desc,
             competition_name=self.competition_name,
             parent_node_code=parent_node.code,
+            parent_node_feedback=parent_node.analysis,
             parent_node_term_out=parent_node.term_out,
             acfg_data_preview=self.acfg.data_preview,
             data_preview_content=self.data_preview
@@ -287,13 +288,13 @@ class Agent: # This is now the base class
         new_node = Node(plan=plan, code=code, parent=parent_node)
         logger.info(f"{log_prefix_base}: Debugged node {parent_node.id} to create new node {new_node.id}", extra={"verbose": True})
         logger.debug(f"{log_prefix_base}_DEBUG_PLAN_START\n{plan}\n{log_prefix_base}_DEBUG_PLAN_END", extra={"verbose": True})
-        # logger.debug(f"{log_prefix}_DEBUG_CODE_START\n{wrap_code(code)}\n{log_prefix}_DEBUG_CODE_END", extra={"verbose": True})
+        logger.debug(f"{log_prefix_base}_DEBUG_CODE_START\n{wrap_code(code)}\n{log_prefix_base}_DEBUG_CODE_END", extra={"verbose": True})
         return new_node
 
     def reflect(self, node: Node) -> tuple[str, str]:
-        log_prefix = f"{self.__class__.__name__.upper()}_REFLECT_STEP{self.current_step}_NODE{node.id}"
+        log_prefix_base = f"{self.__class__.__name__.upper()}_REFLECT_STEP{self.current_step}_NODE{node.id}"
         # ... (rest of reflect implementation from Agent class) ...
-        logger.info(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
+        logger.info(f"{log_prefix_base}: Initiating self-reflection.", extra={"verbose": True})
         try:
             reflection_plan, revised_code = perform_two_step_reflection(
                 code=node.code, analysis=node.analysis, term_out=node.term_out,
@@ -303,11 +304,11 @@ class Agent: # This is now the base class
                 current_step=self.current_step
             )
         except Exception as e:
-            logger.error(f"{log_prefix}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
+            logger.error(f"{log_prefix_base}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
             return f"REFLECTION_ERROR: {e}", node.code
-        if revised_code and revised_code.strip() and revised_code != node.code: logger.info(f"{log_prefix}: Self-reflection resulted in code changes.", extra={"verbose": True})
-        elif reflection_plan == "No specific errors found requiring changes.": logger.info(f"{log_prefix}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
-        else: logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+        if revised_code and revised_code.strip() and revised_code != node.code: logger.info(f"{log_prefix_base}: Self-reflection resulted in code changes.", extra={"verbose": True})
+        elif reflection_plan == "No specific errors found requiring changes.": logger.info(f"{log_prefix_base}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
+        else: logger.warning(f"{log_prefix_base}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
         return reflection_plan, revised_code
 
 
@@ -318,8 +319,8 @@ class Agent: # This is now the base class
         This version doesn't have `analysis` or `term_out` from a node.
         Returns: Tuple: (reflection_plan, revised_code)
         """
-        log_prefix = f"AGENT_DOUBLE_REFLECT_STEP{self.current_step}" # No node ID here
-        logger.info(f"{log_prefix}: Initiating self-reflection (double_reflect variant).", extra={"verbose": True})
+        log_prefix_base = f"AGENT_DOUBLE_REFLECT_STEP{self.current_step}" # No node ID here
+        logger.info(f"{log_prefix_base}: Initiating self-reflection (double_reflect variant).", extra={"verbose": True})
 
         try:
             reflection_plan, revised_code = perform_two_step_reflection(
@@ -336,19 +337,19 @@ class Agent: # This is now the base class
                 current_step=self.current_step
             )
         except Exception as e:
-            logger.error(f"{log_prefix}: Error during double_reflect call: {e}", exc_info=True, extra={"verbose": True})
+            logger.error(f"{log_prefix_base}: Error during double_reflect call: {e}", exc_info=True, extra={"verbose": True})
             return f"DOUBLE_REFLECTION_ERROR: {e}", code
 
 
         if revised_code and revised_code.strip() and revised_code != code:
-            logger.info(f"{log_prefix}: Self-reflection (double_reflect) resulted in code changes.", extra={"verbose": True})
+            logger.info(f"{log_prefix_base}: Self-reflection (double_reflect) resulted in code changes.", extra={"verbose": True})
         elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info(f"{log_prefix}: Self-reflection (double_reflect) found no errors requiring changes.", extra={"verbose": True})
+            logger.info(f"{log_prefix_base}: Self-reflection (double_reflect) found no errors requiring changes.", extra={"verbose": True})
         else:
-            logger.warning(f"{log_prefix}: Self-reflection (double_reflect) finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+            logger.warning(f"{log_prefix_base}: Self-reflection (double_reflect) finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
 
-        logger.debug(f"{log_prefix}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix}_REFLECTION_PLAN_END", extra={"verbose": True})
-        # logger.debug(f"{log_prefix}_REVISED_CODE_BY_DOUBLE_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix}_REVISED_CODE_BY_DOUBLE_REFLECTION_END", extra={"verbose": True})
+        logger.debug(f"{log_prefix_base}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix_base}_REFLECTION_PLAN_END", extra={"verbose": True})
+        # logger.debug(f"{log_prefix_base}_REVISED_CODE_BY_DOUBLE_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix_base}_REVISED_CODE_BY_DOUBLE_REFLECTION_END", extra={"verbose": True})
         return reflection_plan, revised_code
 
     def update_data_preview(self):
@@ -404,10 +405,12 @@ class Agent: # This is now the base class
         if result_node.is_buggy:
 
             console.print(f"[bold red]---------[/bold red]\n") # Console output
+            console.print(f"[bold red]stage: {node_stage}[/bold red]") # Console output
             console.print(f"[bold red]Result: Buggy[/bold red]") # Console output
             console.print(f"[bold red]Feedback: {result_node.analysis}[/bold red]") # Console output
         else: 
             console.print(f"[bold green]---------[/bold green]\n") # Console output
+            console.print(f"[bold green]stage: {node_stage}[/bold green]")
             console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
             console.print(f"[bold green]Feedback: {result_node.analysis}[/bold green]") # Console output
         step_log_data = { # Prepare data for WandbLogger
@@ -638,7 +641,7 @@ class PlannerAgent(Agent): # Inherit from Agent
         if not fix_plan: return Node(plan="DEBUG_PLAN_FAILED", code=parent_node.code, summary=bug_summary or "DEBUG_PLAN_FAILED", parent=parent_node)
         code_user_prompt = get_planner_agent_debug_code_user_prompt(
             bug_summary_from_planner=bug_summary, fix_plan_from_planner=fix_plan,
-            parent_node_code=parent_node.code, parent_node_term_out=parent_node.term_out,
+            parent_node_code=parent_node.code, parent_node_feedback=parent_node.analysis, parent_node_term_out=parent_node.term_out,
             competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview,
             data_preview_content=self.data_preview)
         _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))

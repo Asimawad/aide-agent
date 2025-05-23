@@ -19,14 +19,14 @@ aide \
     desc_file="${data_dir}/aerial-cactus-identification.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
-    agent.steps=15 \
+    agent.steps=50 \
     agent.time_limit=7200 \
     agent.obfuscate=False \
     agent.ITS_Strategy="Baseline" \
     agent.code.model="${CODER_MODEL}" \
     agent.code.planner_model="${CODER_MODEL}" \
-    agent.code.temp=0.6 \
-    agent.code.max_new_tokens=2048 \
+    agent.code.temp=0.8 \
+    agent.code.max_new_tokens=4096 \
     agent.code.num_return_sequences=1 \
     agent.feedback.model="${O4_MODEL}" \
     agent.search.max_debug_depth=5 \

@@ -217,7 +217,7 @@ def run():
 
     def exec_callback(*args, **kwargs):
         # status_rich.update("[magenta]Executing code...")
-        # logger.info("Interpreter: Executing code...") # Logged via logger
+        logger.info("Interpreter: Executing code...") # Logged via logger
         res = interpreter.run(*args, **kwargs)
         # status_rich.update("[green]Generating code...")
         logger.info("Interpreter: Code execution finished.") # Logged via logger
@@ -238,13 +238,15 @@ def run():
         ) as progress_bar:
             main_task = progress_bar.add_task("Agent Steps", total=cfg.agent.steps)
 
+
             for i in range(cfg.agent.steps):
                 current_step_num_display = i + 1
                 logger.info(f"--- Agent Step {current_step_num_display}/{cfg.agent.steps} START ---")
                 # progress_bar.update(main_task, description=f"Step {current_step_num_display}/{cfg.agent.steps}")
-                
+                t0 = time.time()
                 agent.step(exec_callback=exec_callback, current_step_number=current_step_num_display)
-                
+                t1 = time.time()
+                logger.info(f"Step {current_step_num_display} took {t1 - t0:.2f} seconds.")
                 # Save run state periodically
                 if (current_step_num_display % cfg.get('save_every_n_steps', 1)) == 0: # Example: save every step
                     logger.info(f"Saving run state at step {current_step_num_display}")
@@ -252,9 +254,8 @@ def run():
 
                 global_step += 1 # Increment after successful step
                 progress_bar.update(main_task, advance=1)
-                logger.info(f"--- Agent Step {current_step_num_display}/{cfg.agent.steps} END --- \n")
+                logger.info(f"--- Agent Step {current_step_num_display}/{cfg.agent.steps} END : took {t1 - t0:.2f} seconds --- \n")
                 console.rule(f"Step {current_step_num_display} Summary") # Visual separator
-
         logger.info("All agent steps completed.")
         logger.info(journal_to_string_tree(journal)) # Log final tree structure
         save_run(cfg, journal) # Final save
