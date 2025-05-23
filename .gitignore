@@ -76,7 +76,6 @@ scratch.py
 review_response_dict.json
 draft_playground.py
 aideml-main.zip
-old_logs/*
 # Flask stuff:
 instance/
 .webassets-cache
