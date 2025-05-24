@@ -220,7 +220,7 @@ def run():
         logger.info("Interpreter: Executing code...") # Logged via logger
         res = interpreter.run(*args, **kwargs)
         # status_rich.update("[green]Generating code...")
-        logger.info("Interpreter: Code execution finished.") # Logged via logger
+        logger.info(f"Interpreter: Code execution finished in {res.exec_time:.2f} seconds.") # Logged via logger
         return res
 
     # The generate_live function for Rich display can be simplified if console output is primarily through logging

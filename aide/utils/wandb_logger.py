@@ -3,221 +3,238 @@ import logging
 import shutil
 from pathlib import Path
 import pandas as pd
-import time 
-import re
+import numpy as np # For np.isnan
 from typing import Optional
+from omegaconf import OmegaConf
 try:
     import wandb
-    from omegaconf import OmegaConf # Import OmegaConf here
 except ImportError:
     wandb = None
-    OmegaConf = None # Handle if OmegaConf is also optional, though likely not
 
-from aide.utils.config import Config 
-from aide.journal import Journal 
-from . import copytree 
-
-logger = logging.getLogger("aide.wandb") 
+from ..journal import Journal # For type hinting in finalize_run
+from ..utils.config import Config # For type hinting cfg
 
 class WandbLogger:
     def __init__(self, cfg: Config, app_logger: logging.Logger):
         self.cfg = cfg
+        self.app_logger = app_logger # Main application logger for internal messages
         self.wandb_run = None
-        self.app_logger = app_logger 
-        
-        self._metric_hist: list[float] = []
-        self._bug_flags: list[int] = []
-        self._sub_flags: list[int] = []
-        self._above_median_flags: list[int] = []
-        self._gold_medal_flags: list[int] = []
-        self._silver_medal_flags: list[int] = []
-        self._bronze_medal_flags: list[int] = []
-
-
-    def _sanitize_artifact_name_component(self, name_component: str) -> str:
-        """Sanitizes a string component for use in a W&B artifact name."""
-        # Replace invalid characters with underscores
-        sanitized = re.sub(r'[^a-zA-Z0-9_.-]+', '_', name_component)
-        # Ensure it doesn't start or end with non-alphanumeric (except dots for versioning)
-        sanitized = re.sub(r'^[^a-zA-Z0-9]+', '', sanitized)
-        sanitized = re.sub(r'[^a-zA-Z0-9_]+$', '', sanitized) # Allow underscore at the end
-        if not sanitized: # if all chars were invalid
-            return "default_component"
-        return sanitized
+        self._metric_hist = [] # For plotting validation metric history
+        self._bug_flags = []   # For plotting buggy vs clean steps
+        self._sub_flags = []   # For plotting submission presence
+        # For competition benchmark related plots (if any)
+        self._above_median_flags = []
+        self._gold_medal_flags = []
+        self._silver_medal_flags = []
+        self._bronze_medal_flags = []
 
 
     def init_wandb(self):
-        if wandb and OmegaConf and self.cfg.wandb.enabled: # Check OmegaConf too
-            try:
-                # Convert OmegaConf to a plain Python dictionary
-                resolved_cfg_container = OmegaConf.to_container(self.cfg, resolve=True, throw_on_missing=False)
-                
-                self.wandb_run = wandb.init(
-                    project=self.cfg.wandb.project,
-                    entity=self.cfg.wandb.entity,
-                    name=self.cfg.wandb.run_name,
-                    config=resolved_cfg_container, # USE THE RESOLVED CONTAINER
-                    job_type="aide_run",
-                    tags=["aide-agent", self.cfg.agent.ITS_Strategy, self.cfg.agent.code.model],
-                )
-                self.app_logger.info(f"W&B run initialized: {self.wandb_run.url if self.wandb_run else 'Failed'}")
-            except Exception as e:
-                self.app_logger.error(f"Failed to initialize W&B: {e}", exc_info=True)
-                self.wandb_run = None
-        elif not OmegaConf:
-            self.app_logger.error("OmegaConf is not available. Cannot serialize config for W&B.")
+        if not wandb or not self.cfg.wandb.enabled:
+            self.app_logger.info("W&B logging is disabled or wandb is not installed.")
+            return
+
+        try:
+            # Ensure wandb directory exists if not default
+            if self.cfg.wandb.get("dir"):
+                Path(self.cfg.wandb.dir).mkdir(parents=True, exist_ok=True)
+
+            self.wandb_run = wandb.init(
+                project=self.cfg.wandb.project,
+                entity=self.cfg.wandb.entity,
+                name=self.cfg.wandb.run_name or self.cfg.exp_name,
+                dir=self.cfg.wandb.get("dir", "./"), # Use wandb.dir from cfg or default to current
+                config=OmegaConf.to_container(self.cfg, resolve=True),
+                job_type="aide_run",
+                tags=["aide-ds", self.cfg.agent.code.model, self.cfg.agent.ITS_Strategy, self.cfg.competition_name],
+                save_code=False, # Usually better to manage code artifacts explicitly
+                reinit=True # Allows re-initializing in the same process (e.g. testing)
+            )
+            self.app_logger.info(f"W&B Run initialized: {self.wandb_run.url if self.wandb_run else 'Failed'}")
+        except Exception as e:
+            self.app_logger.error(f"Failed to initialize W&B: {e}", exc_info=True)
             self.wandb_run = None
-        else:
-            self.app_logger.info("W&B logging is disabled in the configuration.")
 
-    # ... rest of the WandbLogger class remains the same ...
-    def log_step_data(self, step_data: dict, current_step_number: int):
-        if self.wandb_run:
-            try:
-                is_buggy_val = step_data.get("eval/is_buggy", 1) 
-                submission_produced_val = step_data.get("eval/submission_produced", 0)
-                metric_val = step_data.get("eval/validation_metric", float('nan'))
+    def log_step_data(self, step_data: dict, current_step: int, result_node=None, competition_benchmarks=None):
+        """
+        Logs step data, including custom plots if a result_node is provided.
+        `result_node` is the Node object from the agent after execution and parsing.
+        `competition_benchmarks` is the dict loaded for the current competition.
+        """
+        if not self.wandb_run:
+            return
 
-                self._bug_flags.append(is_buggy_val)
-                self._sub_flags.append(submission_produced_val)
-                if not pd.isna(metric_val) and is_buggy_val == 0 : 
-                    self._metric_hist.append(metric_val)
-                
-                if wandb: 
-                    bug_count = sum(self._bug_flags); clean_count = len(self._bug_flags) - bug_count
-                    if bug_count + clean_count > 0: 
-                        bug_table = wandb.Table(data=[["Buggy", bug_count], ["Clean", clean_count]], columns=["label", "count"])
-                        step_data["plots/bug_vs_clean_summary"] = wandb.plot.bar(bug_table, "label", "count", title="Buggy vs Clean Steps (Summary)")
-
-                    with_sub = sum(self._sub_flags); without_sub = len(self._sub_flags) - with_sub
-                    if with_sub + without_sub > 0:
-                        sub_table = wandb.Table(data=[["Has submission", with_sub], ["No submission", without_sub]], columns=["label", "count"])
-                        step_data["plots/submission_presence_summary"] = wandb.plot.bar(sub_table, "label", "count", title="Submission Produced vs Missing (Summary)")
-
-                    if self._metric_hist:
-                        metric_table_data = [[v] for v in self._metric_hist if isinstance(v, (int, float))]
-                        if metric_table_data:
-                            tbl = wandb.Table(data=metric_table_data, columns=["val"])
-                            step_data["plots/val_metric_scatter_summary"] = wandb.plot.scatter(tbl, "val", "val", title="All Valid Metrics (Summary)")
-
-                self.wandb_run.log(step_data, step=current_step_number)
-                logger.debug(f"W&B: Logged step {current_step_number} data.", extra={"verbose": True})
-            except Exception as e:
-                logger.error(f"W&B: Error logging step data: {e}", exc_info=True)
-
-    def _copy_best_solution_and_submission_for_wandb(self):
-        logs_exp_dir = Path("logs") / self.cfg.exp_name
-        # logs_exp_dir.mkdir(parents=True, exist_ok=True) # This creates the parent, not the artifact dir
-
-        workspaces_exp_dir = self.cfg.workspace_dir # This is already Path(cfg.workspace_dir)
+        # --- Plotting Logic (moved from Agent.step) ---
+        # This logic now uses self.wandb_run if needed, but preferably uses wandb module directly for plots
+        # It also updates internal lists like self._metric_hist
         
-        best_solution_src = workspaces_exp_dir / "best_solution"
-        best_solution_dst_dir = logs_exp_dir / "best_solution_wandb_artifact" # Define full dst path
+        # Ensure result_node attributes are available for plotting
+        is_buggy = step_data.get(f"eval/is_buggy", 1) == 1 # Default to buggy if not specified
+        metric_value = step_data.get(f"eval/validation_metric") 
+        submission_exists = step_data.get(f"eval/submission_produced", 0) == 1
 
-        best_submission_src = workspaces_exp_dir / "best_submission" # Assuming you create this
-        best_submission_dst_dir = logs_exp_dir / "best_submission_wandb_artifact"
-
-        if best_solution_src.exists():
-            best_solution_dst_dir.mkdir(parents=True, exist_ok=True) # Create the specific dst dir
-            copytree(best_solution_src, best_solution_dst_dir, use_symlinks=False)
-            logger.info(f"W&B: Copied best_solution to W&B staging: {best_solution_dst_dir}")
+        # --- Histogram/Scatter of validation metric ---
+        if metric_value is not None and not (isinstance(metric_value, float) and np.isnan(metric_value)):
+            self._metric_hist.append(metric_value)
         
-        if best_submission_src.exists(): # You might not be creating a 'best_submission' folder yet
-            best_submission_dst_dir.mkdir(parents=True, exist_ok=True) # Create the specific dst dir
-            copytree(best_submission_src, best_submission_dst_dir, use_symlinks=False)
-            logger.info(f"W&B: Copied best_submission to W&B staging: {best_submission_dst_dir}")
-        else:
-            logger.info(f"W&B: best_submission directory not found at {best_submission_src}, skipping copy.")
-
-    def finalize_run(self, journal: Journal, competition_benchmarks: Optional[dict]):
-        if self.wandb_run:
-            self.app_logger.info("W&B: Finalizing run...")
-            try:
-                # ... (your existing summary_data calculation) ...
-                summary_data = {}
-                wo_step = None; no_of_csvs = 0; buggy_nodes_count = 0
-                total_code_quality = 0; valid_code_quality_nodes = 0
-                gold_medals = 0; silver_medals = 0; bronze_medals = 0
-                above_median_count = 0; effective_debugs_count = 0
-
-                for node in journal.nodes:
-                    if not node.is_buggy:
-                        if wo_step is None: wo_step = node.step # step is 0-indexed in journal
-                        # Check for submission.csv for this specific node if you save them per node
-                        # For now, let's assume submission.csv is overwritten or a general check
-                        # submission_path_for_node = self.cfg.workspace_dir / "submission" / f"submission_node_{node.id}.csv"
-                        # For simplicity, let's check the general submission.csv for now
-                        if (self.cfg.workspace_dir / "submission" / "submission.csv").exists():
-                             no_of_csvs += 1 # This will count it for every non-buggy step if file exists. Be careful.
-                                             # Consider only counting if the node's code *produced* it.
-
-                        if node.code_quality is not None: # code_quality is float
-                            total_code_quality += node.code_quality
-                            valid_code_quality_nodes +=1
-                        if node.effective_debug_step: effective_debugs_count += 1 # This seems to be a boolean
-                        
-                        if competition_benchmarks and node.metric and node.metric.value is not None:
-                            metric_val = node.metric.value
-                            if metric_val >= competition_benchmarks.get("gold_threshold", float('inf')): gold_medals += 1
-                            elif metric_val >= competition_benchmarks.get("silver_threshold", float('inf')): silver_medals += 1
-                            elif metric_val >= competition_benchmarks.get("bronze_threshold", float('inf')): bronze_medals += 1
-                            
-                            if metric_val >= competition_benchmarks.get("median_threshold", float('inf')): above_median_count += 1
-                    else:
-                        buggy_nodes_count += 1
-                
-                summary_data["summary/steps_to_first_working_code"] = (wo_step + 1) if wo_step is not None else (self.cfg.agent.steps + 10) # Adjust for 1-based display
-                summary_data["summary/num_successful_submissions"] = no_of_csvs # This needs careful thought on how it's counted
-                summary_data["summary/num_buggy_nodes"] = buggy_nodes_count
-                summary_data["summary/avg_code_quality_non_buggy"] = (total_code_quality / valid_code_quality_nodes) if valid_code_quality_nodes > 0 else 0
-                if competition_benchmarks:
-                    summary_data["summary/gold_medals_achieved"] = gold_medals
-                    summary_data["summary/silver_medals_achieved"] = silver_medals
-                    summary_data["summary/bronze_medals_achieved"] = bronze_medals
-                    summary_data["summary/steps_above_median"] = above_median_count
-                summary_data["summary/effective_debug_steps"] = effective_debugs_count
-                
-                best_node = journal.get_best_node(only_good=True)
-                if best_node and best_node.metric and best_node.metric.value is not None:
-                    summary_data["summary/best_validation_metric"] = best_node.metric.value
-                    summary_data["summary/best_node_id"] = best_node.id
-                    summary_data["summary/best_node_step"] = best_node.step + 1 # Adjust for 1-based display
-
-                self.wandb_run.summary.update(summary_data)
-                self.app_logger.info(f"W&B: Updated run summary: {summary_data}")
-
-                self._copy_best_solution_and_submission_for_wandb()
-                log_dir_for_artifacts = Path("logs") / self.cfg.exp_name
-
-                # Sanitize artifact names
-                sanitized_exp_name = self._sanitize_artifact_name_component(self.cfg.exp_name)
-
-                if (log_dir_for_artifacts / "journal.json").exists():
-                    artifact_name_journal = f"{sanitized_exp_name}_journal"
-                    self.app_logger.info(f"W&B: Logging journal artifact as: {artifact_name_journal}")
-                    artifact = wandb.Artifact(artifact_name_journal, type="journal")
-                    artifact.add_file(str(log_dir_for_artifacts / "journal.json"))
-                    self.wandb_run.log_artifact(artifact)
-
-                if (log_dir_for_artifacts / "best_solution_wandb_artifact").exists():
-                    artifact_name_code = f"{sanitized_exp_name}_best_solution"
-                    self.app_logger.info(f"W&B: Logging best solution artifact as: {artifact_name_code}")
-                    artifact_code = wandb.Artifact(artifact_name_code, type="solution-code")
-                    artifact_code.add_dir(str(log_dir_for_artifacts / "best_solution_wandb_artifact"))
-                    self.wandb_run.log_artifact(artifact_code)
-                
-                # ... (saving aide.log and aide.verbose.log - these are direct file saves, not artifacts, so name is less critical) ...
-                if (self.cfg.log_dir / "aide.log").exists():
-                     self.wandb_run.save(str(self.cfg.log_dir / "aide.log"), base_path=str(self.cfg.log_dir.parent))
-                if (self.cfg.log_dir / "aide.verbose.log").exists():
-                     self.wandb_run.save(str(self.cfg.log_dir / "aide.verbose.log"), base_path=str(self.cfg.log_dir.parent))
+        if len(self._metric_hist) >= 1: # Plot if at least one valid metric
+            metric_table_data = [[v] for v in self._metric_hist if isinstance(v, (int, float)) and not np.isnan(v)]
+            if metric_table_data: # Ensure there's data after filtering NaNs
+                try:
+                    tbl = wandb.Table(data=metric_table_data, columns=["validation_metric_value"])
+                    # Scatter plot of metric values over steps
+                    # To make a meaningful scatter, we need step numbers.
+                    # We can accumulate (step, metric_value) pairs if needed, or just plot distribution.
+                    # For now, let's keep it simple with a histogram.
+                    step_data["plots/val_metric_histogram"] = wandb.plot.histogram(
+                        tbl, "validation_metric_value", title="Validation Metric Distribution"
+                    )
+                except Exception as e:
+                    self.app_logger.warning(f"W&B: Failed to create validation metric histogram: {e}")
 
 
-            except Exception as e:
-                self.app_logger.error(f"W&B: Error during summary/artifact logging: {e}", exc_info=True)
-            finally:
-                if self.wandb_run: # Check if it's still valid before finishing
-                    self.wandb_run.finish()
-                    self.app_logger.info("W&B run finished.")
-        else:
-            self.app_logger.info("W&B run not available, skipping finalization.")
+        # --- Bar chart: Buggy (1) vs Clean (0) ---
+        self._bug_flags.append(1 if is_buggy else 0)
+        bug_count = sum(self._bug_flags)
+        clean_count = len(self._bug_flags) - bug_count
+        try:
+            bug_table = wandb.Table(data=[["Buggy Steps", bug_count], ["Clean Steps", clean_count]], columns=["label", "count"])
+            step_data["plots/bug_vs_clean_bar"] = wandb.plot.bar(bug_table, "label", "count", title="Buggy vs Clean Steps")
+        except Exception as e:
+            self.app_logger.warning(f"W&B: Failed to create bug_vs_clean bar chart: {e}")
+
+        # --- Bar chart: Submission produced vs missing ---
+        self._sub_flags.append(1 if submission_exists else 0)
+        with_sub = sum(self._sub_flags)
+        without_sub = len(self._sub_flags) - with_sub
+        try:
+            sub_table = wandb.Table(data=[["Submission Produced", with_sub], ["No Submission", without_sub]], columns=["label", "count"])
+            step_data["plots/submission_presence_bar"] = wandb.plot.bar(sub_table, "label", "count", title="Submission Produced vs Missing")
+        except Exception as e:
+            self.app_logger.warning(f"W&B: Failed to create submission presence bar chart: {e}")
+        
+        # --- Competition Benchmark Plots ---
+        if result_node and not is_buggy and metric_value is not None and not np.isnan(metric_value) and competition_benchmarks:
+            current_metric = metric_value
+            is_lower_better = result_node.metric.maximize is False # Assuming result_node.metric exists and has maximize
+
+            def check_threshold(val, threshold, lower_is_better_flag):
+                if threshold is None: return False
+                return val <= threshold if lower_is_better_flag else val >= threshold
+
+            threshold_map = {
+                "above_median": (self._above_median_flags, competition_benchmarks.get("median_threshold")),
+                "gold_medal": (self._gold_medal_flags, competition_benchmarks.get("gold_threshold")),
+                "silver_medal": (self._silver_medal_flags, competition_benchmarks.get("silver_threshold")),
+                "bronze_medal": (self._bronze_medal_flags, competition_benchmarks.get("bronze_threshold")),
+            }
+
+            for key_suffix, (flag_list, threshold_value) in threshold_map.items():
+                if threshold_value is not None: # Only plot if threshold exists
+                    is_met = 1 if check_threshold(current_metric, threshold_value, is_lower_better) else 0
+                    flag_list.append(is_met)
+                    true_count = sum(flag_list)
+                    false_count = len(flag_list) - true_count
+                    title_suffix = key_suffix.replace('_', ' ').title()
+                    try:
+                        table = wandb.Table(
+                            data=[[f"Met {title_suffix}", true_count], [f"Not Met {title_suffix}", false_count]],
+                            columns=["label", "count"]
+                        )
+                        step_data[f"plots/benchmark/{key_suffix}_bar"] = wandb.plot.bar(
+                            table, "label", "count", title=f"Steps Meeting {title_suffix}"
+                        )
+                    except Exception as e:
+                        self.app_logger.warning(f"W&B: Failed to create {key_suffix} bar chart: {e}")
+        
+        # --- Log all collected step_data ---
+        try:
+            self.wandb_run.log(step_data, step=current_step)
+            self.app_logger.debug(f"W&B: Logged data for step {current_step}. Keys: {list(step_data.keys())}")
+        except Exception as e:
+            self.app_logger.error(f"W&B: Failed to log step data: {e}", exc_info=True)
+
+
+    def finalize_run(self, journal: Journal, competition_benchmarks: Optional[dict] = None):
+        if not self.wandb_run:
+            self.app_logger.info("W&B: No active run to finalize.")
+            return
+
+        self.app_logger.info("W&B: Finalizing run...")
+        try:
+            # --- Log Summary Statistics ---
+            summary_data = {}
+            # Steps to first working code
+            wo_step = None
+            for node in journal.nodes:
+                if not node.is_buggy: # Assuming is_buggy is False for working code
+                    wo_step = node.step
+                    break
+            summary_data["summary/steps_to_first_working_code"] = wo_step if wo_step is not None else self.cfg.agent.steps + 10
+
+            # Num successful submissions
+            num_successful_submissions = sum(1 for node in journal.nodes if not node.is_buggy and (self.cfg.workspace_dir / "best_solution" / "submission.csv").exists()) # A bit simplistic, assumes best_solution is from a non-buggy node
+            summary_data["summary/num_successful_submissions"] = num_successful_submissions
+            
+            # Num buggy nodes
+            summary_data["summary/num_buggy_nodes"] = len(journal.buggy_nodes)
+
+            # Avg code quality for non-buggy nodes
+            non_buggy_qualities = [node.code_quality for node in journal.good_nodes if hasattr(node, 'code_quality') and node.code_quality is not None]
+            summary_data["summary/avg_code_quality_non_buggy"] = np.mean(non_buggy_qualities) if non_buggy_qualities else 0
+            
+            # Benchmark related summaries
+            if competition_benchmarks:
+                summary_data["summary/gold_medals_achieved"] = sum(self._gold_medal_flags)
+                summary_data["summary/silver_medals_achieved"] = sum(self._silver_medal_flags)
+                summary_data["summary/bronze_medals_achieved"] = sum(self._bronze_medal_flags)
+                summary_data["summary/steps_above_median"] = sum(self._above_median_flags)
+
+            # Effective debug steps (from Node attribute)
+            summary_data["summary/effective_debug_steps"] = sum(1 for node in journal.nodes if hasattr(node, 'effective_debug_step') and node.effective_debug_step)
+
+            self.wandb_run.summary.update(summary_data)
+            self.app_logger.info(f"W&B: Updated run summary: {summary_data}")
+
+            # --- Save Logs and Artifacts ---
+            # Save best solution and submission if they exist
+            best_solution_dir_src = self.cfg.workspace_dir / "best_solution"
+            best_submission_src = best_solution_dir_src / "submission.csv"
+            best_code_src = best_solution_dir_src / "solution.py"
+
+            if best_submission_src.exists():
+                self.wandb_run.save(str(best_submission_src), base_path=str(best_solution_dir_src.parent), policy="live")
+                self.app_logger.info(f"W&B: Saved best submission: {best_submission_src}")
+            else:
+                self.app_logger.info(f"W&B: best_submission file not found at {best_submission_src}, not saving.")
+            
+            if best_code_src.exists():
+                self.wandb_run.save(str(best_code_src), base_path=str(best_solution_dir_src.parent), policy="live")
+                self.app_logger.info(f"W&B: Saved best solution code: {best_code_src}")
+            else:
+                self.app_logger.info(f"W&B: best_solution.py not found at {best_code_src}, not saving.")
+
+
+            # Save general log files
+            log_files_to_save = ["aide.log", "aide.verbose.log"]
+            for log_file in log_files_to_save:
+                if (self.cfg.log_dir / log_file).exists():
+                    self.wandb_run.save(str(self.cfg.log_dir / log_file), base_path=str(self.cfg.log_dir.parent), policy="end")
+            
+            # Save journal.json and config.yaml
+            if (self.cfg.log_dir / "journal.json").exists():
+                self.wandb_run.save(str(self.cfg.log_dir / "journal.json"), base_path=str(self.cfg.log_dir.parent), policy="end")
+            if (self.cfg.log_dir / "config.yaml").exists():
+                self.wandb_run.save(str(self.cfg.log_dir / "config.yaml"), base_path=str(self.cfg.log_dir.parent), policy="end")
+
+
+        except Exception as e_sum:
+            self.app_logger.error(f"W&B: Error during summary/artifact logging: {e_sum}", exc_info=True)
+        finally:
+            self.wandb_run.finish()
+            self.app_logger.info("W&B run finished.")
+            self.wandb_run = None # Reset for potential future runs in same process
+
+    def get_wandb_run_obj(self):
+        """Returns the raw wandb run object if initialized, else None."""
+        return self.wandb_run

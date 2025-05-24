@@ -3,7 +3,6 @@ import shutil
 import zipfile
 from pathlib import Path
 import json
-
 logger = logging.getLogger("aide")
 
 

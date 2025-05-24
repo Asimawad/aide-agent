@@ -34,7 +34,7 @@ if [ -n "$CODER_MODEL" ]; then
         --port 8000 \
         --dtype bfloat16 \
         --device cuda \
-        --max-model-len 16384 \
+        --max-model-len 12000 \
         --gpu-memory-utilization 0.9 \
         --max-num-batched-tokens 8192 \
         --max-num-seqs 3 \
