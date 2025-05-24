@@ -9,7 +9,7 @@ dataclasses-json
 funcy
 genson
 humanize
-flashinfer-python
+# flashinfer-python
 ipython
 jsonschema
 omegaconf
