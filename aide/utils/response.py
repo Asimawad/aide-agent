@@ -114,7 +114,7 @@ def format_code(code) -> str:
 
 
 # New: extract summary before PLAN
-def extract_summary(text, task=False):
+def extract_summary_and_plan(text, task=False):
     """Extract summary from the response before the 'PLAN:' section."""
     # Remove any thinking tags
     if "</think>" in text:
@@ -123,6 +123,9 @@ def extract_summary(text, task=False):
     # Split on PLAN: and return the first part as summary
     if task:
         return text
-
-    summary = text.split("PLAN:")[0].strip()
-    return summary
+    if "PLAN" in text:
+        parts = text.split("PLAN")
+        summary = parts[0].strip()
+        plan = parts[1].strip()
+        return summary, plan
+    return " " , text

@@ -171,15 +171,15 @@ def perform_two_step_reflection(
     }
 
     logger.info(
-        f"{log_prefix_coder}: Sending request for code revision. Model: {model_name}",
+        f"Sending request for code revision. Model: {model_name}",
         extra={"verbose": True},
     )  # Using model_name passed in, which is acfg.code.model
     logger.debug(
-        f"{log_prefix_coder}_SYSTEM_PROMPT_START\n{system_prompt2}\n{log_prefix_coder}_SYSTEM_PROMPT_END",
+        f"SYSTEM_PROMPT_START\n{system_prompt2}\nSYSTEM_PROMPT_END",
         extra={"verbose": True},
     )
     logger.debug(
-        f"{log_prefix_coder}_USER_PROMPT_START\n{coder_user_prompt}\n{log_prefix_coder}_USER_PROMPT_END",
+        f"USER_PROMPT_START\n{coder_user_prompt}\nUSER_PROMPT_END",
         extra={"verbose": True},
     )
 
@@ -195,16 +195,16 @@ def perform_two_step_reflection(
             current_step=current_step,  # Pass current_step
         )
         logger.info(
-            f"{log_prefix_coder}: Received code revision response.",
+            f"Received code revision response.",
             extra={"verbose": True},
         )
         logger.debug(
-            f"{log_prefix_coder}_RAW_RESPONSE_START\n{revised_code_response}\n{log_prefix_coder}_RAW_RESPONSE_END",
+            f"RAW_RESPONSE_START\n{revised_code_response}\nRAW_RESPONSE_END",
             extra={"verbose": True},
         )
     except Exception as e:
         logger.error(
-            f"{log_prefix_coder}: Error during coder LLM query: {e}",
+            f"Error during coder LLM query: {e}",
             exc_info=True,
             extra={"verbose": True},
         )
@@ -213,12 +213,12 @@ def perform_two_step_reflection(
     revised_code = extract_code_func(revised_code_response)
     if revised_code:
         logger.debug(
-            f"{log_prefix_coder}_EXTRACTED_CODE_START\n{revised_code}\n{log_prefix_coder}_EXTRACTED_CODE_END",
+            f"EXTRACTED_CODE_START\n{revised_code}\nEXTRACTED_CODE_END",
             extra={"verbose": True},
         )
     else:
         logger.warning(
-            f"{log_prefix_coder}: Code extraction failed from revision response. Raw response was: {revised_code_response}",
+            f"Code extraction failed from revision response. Raw response was: {revised_code_response}",
             extra={"verbose": True},
         )
 

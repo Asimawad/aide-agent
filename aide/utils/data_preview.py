@@ -220,14 +220,14 @@ def generate(base_path: Path, include_file_details=True, simple=False) -> str: #
     if not isinstance(base_path, Path): # Ensure base_path is a Path object
         base_path = Path(base_path)
 
-    logger.info(f"Generating data preview for: {base_path}")
+    logger.info(f"Generating data preview for: {base_path.stem}")
     tree_str = file_tree(base_path)
     tree = f"Directory structure for {base_path.name}:\n```\n{tree_str}\n```"
     out = [tree]
 
     if include_file_details:
         files_processed_count = 0
-        max_files_to_detail = 10 # Limit number of files to detail to prevent overly long previews
+        max_files_to_detail = 3 # Limit number of files to detail to prevent overly long previews
 
         for fn in _walk(base_path): # _walk should also be robust
             if files_processed_count >= max_files_to_detail:

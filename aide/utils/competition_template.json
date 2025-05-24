@@ -26,7 +26,7 @@
     "bronze_threshold": 0.1,
     "median_threshold": 0.5
   },
-  "house-prices": {
+  "house_prices": {
     "gold_threshold": 0.1,
     "silver_threshold": 0.1,
     "bronze_threshold": 0.1,

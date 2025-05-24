@@ -165,12 +165,12 @@ class Interpreter:
             args=(self.code_inq, self.result_outq, self.event_outq),
         )
         self.process.start()
-        logger.debug(f"[spawn] New child PID={self.process.pid}")  # LOG+
+        # logger.debug(f"[spawn] New child PID={self.process.pid}")  # LOG+
 
     def cleanup_session(self):
         if self.process is None:
             return
-        logger.debug(f"[cleanup] Terminating child PID={self.process.pid}")  # LOG+
+        # logger.debug(f"[cleanup] Terminating child PID={self.process.pid}")  # LOG+
 
         # give the child process a chance to terminate gracefully
         self.process.terminate()
@@ -198,7 +198,7 @@ class Interpreter:
 
         """
 
-        logger.debug(f"REPL is executing code (reset_session={reset_session})")
+        # logger.debug(f"REPL is executing code (reset_session={reset_session})")
 
         if reset_session:
             if self.process is not None:
@@ -245,7 +245,7 @@ class Interpreter:
                 # check if the child is done
                 state = self.event_outq.get(timeout=1)  # wait for state:finished
                 assert state[0] == "state:finished", state
-                logger.debug(f"[exec] Child FINISHED (exc={state[1]})")  # LOG+
+                # logger.debug(f"[exec] Child FINISHED (exc={state[1]})")  # LOG+
                 exec_time = time.time() - start_time
                 break
             except queue.Empty:

@@ -210,7 +210,7 @@ def query(
     req_time = time.time() - t0
 
     choice = completion.choices[0]
-    logger.debug(f"[Timing] backoff_create end: {time.time() - t0:.3f}s")
+
     if func_spec is None:
         output = choice.message.content
     else:

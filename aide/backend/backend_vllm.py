@@ -14,7 +14,7 @@ logger = logging.getLogger("aide")
 
 _client1: openai.OpenAI = None
 _vllm_config1: dict = {
-    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
+    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8000/v1"),
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"),
 }
 
@@ -36,38 +36,36 @@ VLLM_API_EXCEPTIONS = (
 def _setup_vllm_client():
     """Sets up the OpenAI client for vLLM server."""
     global _client
-    if _client is None:
-        logger.info(
-            f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}",
-            extra={"verbose": True},
+    logger.info(
+        f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}",
+        extra={"verbose": True},
+    )
+    try:
+        _client = openai.OpenAI(
+            base_url=_vllm_config["base_url"],
+            api_key=_vllm_config["api_key"],
+            max_retries=0,  # Rely on backoff_create for retries
         )
-        try:
-            _client = openai.OpenAI(
-                base_url=_vllm_config["base_url"],
-                api_key=_vllm_config["api_key"],
-                max_retries=0,  # Rely on backoff_create for retries
-            )
 
-        except Exception as e:
-            logger.error(f"Failed to setup vLLM client: {e}")
-            raise
+    except Exception as e:
+        logger.error(f"Failed to setup vLLM client: {e}")
+        raise
 
 
 def _setup_vllm_client1():
     """Sets up the OpenAI client for vLLM server."""
     global _client1
-    if _client1 is None:
-        logger.info(
-            f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}",
-            extra={"verbose": True},
-        )
-        try:
+    logger.info(
+        f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}",
+        extra={"verbose": True},
+    )
+    try:
             _client1 = openai.OpenAI(
                 base_url=_vllm_config1["base_url"],
                 api_key=_vllm_config1["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
             )
-        except Exception as e:
+    except Exception as e:
             logger.error(f"Failed to setup vLLM client: {e}")
             raise
 
@@ -139,10 +137,7 @@ def query(
                     **filtered_api_params,
                 )
             else:
-                logger.debug(
-                    f"Calling vLLM planner API>>>>> {model}", extra={"verbose": True}
-                )
-                logger.info(f"Calling vLLM planner API>>>>> {model}")
+                logger.info(f"{model} is generating using vLLM backend ...")
                 _setup_vllm_client1()
                 t0 = time.time()
                 completion = backoff_create(
