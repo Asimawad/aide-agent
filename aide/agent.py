@@ -87,7 +87,7 @@ class Agent: # This is now the base class
         self.wandb_logger = wandb_logger # Store the WandbLogger instance
         self.competition_benchmarks = competition_benchmarks
         self.competition_name = self.cfg.competition_name
-        
+        self.reflection_applied = False
         self.data_preview: str | None = None
         self.start_time = time.time()
         self.current_step = 0
@@ -253,7 +253,7 @@ class Agent: # This is now the base class
 
     def reflect(self, node: Node) -> tuple[str, str]:
         log_prefix_base = f"{self.__class__.__name__.upper()}_REFLECT_STEP{self.current_step}_NODE{node.id}"
-        # ... (rest of reflect implementation from Agent class) ...
+
         logger.info(f"{log_prefix_base}: Initiating self-reflection.", extra={"verbose": True})
         try:
             reflection_plan, revised_code = perform_two_step_reflection(
@@ -269,6 +269,7 @@ class Agent: # This is now the base class
         if revised_code and revised_code.strip() and revised_code != node.code: logger.info(f"{log_prefix_base}: Self-reflection resulted in code changes.", extra={"verbose": True})
         elif reflection_plan == "No specific errors found requiring changes.": logger.info(f"{log_prefix_base}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
         else: logger.warning(f"{log_prefix_base}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+        self.reflection_applied = True
         return reflection_plan, revised_code
 
 
@@ -302,6 +303,7 @@ class Agent: # This is now the base class
 
 
         if revised_code and revised_code.strip() and revised_code != code:
+            self.reflection_applied = True
             logger.info(f"{log_prefix_base}: Self-reflection (double_reflect) resulted in code changes.", extra={"verbose": True})
         elif reflection_plan == "No specific errors found requiring changes.":
             logger.info(f"{log_prefix_base}: Self-reflection (double_reflect) found no errors requiring changes.", extra={"verbose": True})
@@ -309,7 +311,6 @@ class Agent: # This is now the base class
             logger.warning(f"{log_prefix_base}: Self-reflection (double_reflect) finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
 
         logger.debug(f"{log_prefix_base}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix_base}_REFLECTION_PLAN_END", extra={"verbose": True})
-        # logger.debug(f"{log_prefix_base}_REVISED_CODE_BY_DOUBLE_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix_base}_REVISED_CODE_BY_DOUBLE_REFLECTION_END", extra={"verbose": True})
         return reflection_plan, revised_code
 
     def update_data_preview(self):
@@ -319,6 +320,8 @@ class Agent: # This is now the base class
         try:
             self.data_preview = data_preview.generate(self.cfg.workspace_dir / "input")
             logger.info(f"{log_prefix}: Data preview updated.", extra={"verbose": True})
+            if self.current_step == 1:
+                logger.info(f"{log_prefix}: Data preview: {self.data_preview}", extra={"verbose": True})
         except Exception as e:
             logger.error(f"{log_prefix}: Failed to update data preview: {e}", exc_info=True, extra={"verbose": True})
             self.data_preview = "Error generating data preview."
@@ -326,24 +329,29 @@ class Agent: # This is now the base class
     def process_step(self,exec_callback: ExecCallbackType,result_node: Node,node_stage: str, current_step_number: int, use_reflection: bool = True):
         
         logger.info(f"Executing code for step {current_step_number}.", extra={"verbose": True})
+
         exec_start_time = time.time()
         exec_result = exec_callback(result_node.code, reset_session=True)
         exec_duration = time.time() - exec_start_time
+
         logger.info(f"Code execution for step {current_step_number} finished in {exec_duration:.2f}s.", extra={"verbose": True})
         result_node = self.parse_exec_result(node=result_node, exec_result=exec_result)
         buggy_status_before_reflection = result_node.is_buggy
         if use_reflection and self.acfg.ITS_Strategy == "self-reflection" and result_node.is_buggy:
             _, reflection_code = self.reflect(node=result_node)
             if reflection_code and reflection_code.strip() and reflection_code != result_node.code:
-                result_node.code = reflection_code; reflection_applied = True
+                result_node.code = reflection_code; self.reflection_applied = True
                 exec_start_time_reflect = time.time()
                 exec_result_reflect = exec_callback(result_node.code, reset_session=True)
                 exec_duration = time.time() - exec_start_time_reflect
                 result_node = self.parse_exec_result(node=result_node, exec_result=exec_result_reflect)
+                logger.info(f"Reflection applied: {self.reflection_applied} and result_node.is_buggy: {result_node.is_buggy}", extra={"verbose": True})
         if buggy_status_before_reflection and not result_node.is_buggy:
-            result_node.effective_debug_step = True; result_node.effective_reflections = reflection_applied
+            result_node.effective_debug_step = True; result_node.effective_reflections = self.reflection_applied
+            console.print(f"[bold green]Effective debug step: {result_node.effective_debug_step} and effective reflections: {result_node.effective_reflections}[/bold green]")
         else:
             result_node.effective_debug_step = False; result_node.effective_reflections = False
+            console.print(f"[bold red]Effective debug step: {result_node.effective_debug_step} and effective reflections: {result_node.effective_reflections}[/bold red]")
         self._prev_buggy = result_node.is_buggy
         if result_node.is_buggy:
 
@@ -358,7 +366,7 @@ class Agent: # This is now the base class
             console.print(f"[bold green]Feedback: {result_node.analysis}[/bold green]") # Console output
         return result_node, exec_duration
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
-        log_prefix_main = f"{self.__class__.__name__.upper()}_STEP{current_step_number}"
+        log_prefix_main = f"{self.__class__.__name__}_Step: {current_step_number}"
         logger.info(f"{log_prefix_main}_START: Total Steps Configured: {self.acfg.steps}", extra={"verbose": True})
         t_step_start = time.time()
         submission_dir = self.cfg.workspace_dir / "submission"
@@ -375,9 +383,8 @@ class Agent: # This is now the base class
             node_stage = "improve"; result_node = self._improve(parent_node)
 
         # Process step
-        reflection_applied = False
         result_node, exec_duration = self.process_step(exec_callback=exec_callback, result_node=result_node, node_stage=node_stage, current_step_number=current_step_number, use_reflection=draft_flag)
-        print(reflection_applied)
+        print(self.reflection_applied)
         step_log_data = { # Prepare data for WandbLogger
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
@@ -385,7 +392,7 @@ class Agent: # This is now the base class
             f"progress/competition_name": self.competition_name,
             "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
             f"code/estimated_quality": int(self._code_quality),
-            f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0,
+            f"eval/reflection_applied_successfully": 1 if self.reflection_applied and not result_node.is_buggy else 0,
             f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0,
             f"eval/validation_metric": result_node.metric.value if not result_node.is_buggy and result_node.metric else float('nan'),
             f"eval/submission_produced": 1 if (submission_dir / "submission.csv").exists() and not result_node.is_buggy else 0,
@@ -413,8 +420,7 @@ class Agent: # This is now the base class
 
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
         log_prefix = ""
-        # ... (implementation from Agent class) ...
-        # This method is complex and has its own LLM call for feedback.
+
         # It should be inheritable directly if Agent's version is suitable.
         logger.info(f"{log_prefix}: Parsing execution result.", extra={"verbose": True})
         node.absorb_exec_result(exec_result)
@@ -478,9 +484,6 @@ class PlannerAgent(Agent): # Inherit from Agent
     ):
         super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
 
-        # Example: self.planner_specific_attribute = "some_value"
-        # _code_quality is already in base Agent __init__
-
 
     # Override _query_llm_with_retries as it's specific to PlannerAgent's two-model approach
     def _query_llm_with_retries(
@@ -496,20 +499,21 @@ class PlannerAgent(Agent): # Inherit from Agent
     ) -> Any:
 
         completion_text = None
-        log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
+        log_prefix = f"PlannerAgent_LLM_QUERY_{query_type.upper()}_Step: {self.current_step}"
         for attempt in range(retries):
-            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
+            logger.info(f"{log_prefix}Attempt {attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
             try:
                 completion_text = query(
                     system_message=system_prompt, user_message=user_prompt,
                     model=model, temperature=temperature, planner=planner_flag,
                     current_step=self.current_step, convert_system_to_user=convert_system_to_user,
-                    max_tokens=self.acfg.code.max_new_tokens
+                    max_tokens=self.acfg.code.max_new_tokens,
+                    max_retries=retries
                 )
-                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True})
+                logger.info(f"{log_prefix}Attempt {attempt+1}: Received response.", extra={"verbose": True})
                 return completion_text
             except Exception as e:
-                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
+                logger.error(f"{log_prefix}Attempt {attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
                 if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
                 time.sleep(2)
         return None
@@ -590,8 +594,9 @@ class PlannerAgent(Agent): # Inherit from Agent
                                master_plan_text: str,
                                code_accumulator: str) -> str:
         """Generates code for a single segment using the chained Coder."""
-        log_prefix_segment = f"Code Chaine step {self.current_step }"
-        logger.info(f"{log_prefix_segment}: Generating code.")
+        log_prefix_segment = f"Code Chain step {self.current_step }"
+        logger.info(f"{log_prefix_segment}: Generating code. Segment: {segment_name}")
+        logger.info(f"--------------------------------")
 
         system_prompt_getter = CHAINED_CODER_SYSTEM_PROMPT_GETTERS.get(segment_name)
         user_prompt_constructor = CHAINED_CODER_USER_PROMPT_CONSTRUCTORS.get(segment_name)
@@ -609,7 +614,6 @@ class PlannerAgent(Agent): # Inherit from Agent
             data_preview_content=self.data_preview
         )
         
-        # Assuming self.code_query calls the Coder LLM (e.g., o4-mini)
         code_snippet = self._code_segment_query( # Call the new specialized method
             user_prompt_dict=segment_user_prompt,
             system_prompt_dict=segment_system_prompt,
@@ -620,12 +624,12 @@ class PlannerAgent(Agent): # Inherit from Agent
             return f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}\n"
         
         logger.info(f"{log_prefix_segment}: Successfully generated code snippet for {segment_name.replace(' ', '_')}.")
-        logger.debug(f"{log_prefix_segment} {segment_name.replace(' ', '_')} Snippet: \n{code_snippet.strip()}\n{log_prefix_segment}_SNIPPET_END")
+        logger.debug(f"{log_prefix_segment} {segment_name.replace(' ', '_')} Snippet: \n{code_snippet.strip()}\n --------------------------------")
         return code_snippet.strip()
 
 
     def _draft_generate_code_chained(self, task_summary: str, master_plan_text: str) -> str:
-        log_prefix_chain = f"PLANNER_AGENT_CHAINED_DRAFT_STEP{self.current_step}"
+        log_prefix_chain = f"PlannerAgent_Chained_Draft_Step: {self.current_step}"
         logger.info(f"{log_prefix_chain}: Starting chained code generation for draft.")
         
         # Initial boilerplate for the script
@@ -638,14 +642,13 @@ class PlannerAgent(Agent): # Inherit from Agent
                 code_accumulator += f"# {plan_step_line.strip()}\n"
         code_accumulator += "# --- End Master Plan ---\n\n"
 
-        # Define the order of segments
-        # Make sure segment_names match keys in CHAINED_CODER_USER_PROMPT_CONSTRUCTORS and SYSTEM_PROMPT_GETTERS
+
         segments_order = [
             "Setup & Imports",
             "Data Loading",
-            "Data Preprocessing", # This now includes Dataset/Transforms/Split/Loaders
+            "Data Preprocessing",
             "Modeling",
-            "Training & Validation", # This now includes loss/optimizer and the loop
+            "Training & Validation", 
             "Prediction & Submission"
         ]
 
@@ -664,9 +667,9 @@ class PlannerAgent(Agent): # Inherit from Agent
 
     # Modify the existing _draft method to use this chained approach
     def _draft(self, parent_node=None) -> Node:
-        log_prefix = f"PLANNER_AGENT_DRAFT_STEP{self.current_step}"
+        log_prefix = f"PlannerAgent_Draft_Step: {self.current_step}"
         logger.info(f"{log_prefix}: Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}")
-        
+
         # 1. Generate Master Plan using the Planner model
         logger.info(f"{log_prefix}: Calling Planner for Task Summary and Master Plan.")
         plan_user_prompt = get_planner_agent_draft_plan_user_prompt(
@@ -689,7 +692,7 @@ class PlannerAgent(Agent): # Inherit from Agent
             final_summary = task_summary or "PLANNER_FAILED_TO_PRODUCE_SUMMARY_AND_PLAN"
         else:
             logger.info(f"{log_prefix}: Master Plan received from Planner. Proceeding to chained code generation.")
-            logger.debug(f"{log_prefix}_MASTER_PLAN_START\n{master_plan_text}\n{log_prefix}_MASTER_PLAN_END")
+            logger.debug(f"{log_prefix}Master Plan:\n{master_plan_text}")
             final_plan_text = master_plan_text # Store the full plan text for the node
             
             # 2. Generate Code via Chaining using the Coder model
@@ -705,7 +708,7 @@ class PlannerAgent(Agent): # Inherit from Agent
         return new_node
 
     def _improve(self, parent_node: Node) -> Node:
-        log_prefix = f"PLANNER_AGENT_IMPROVE_STEP{self.current_step}"
+        log_prefix = f"PlannerAgent_Improve_Step: {self.current_step}"
         logger.info(f"{log_prefix}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
         plan_user_prompt = get_planner_agent_improve_plan_user_prompt(
             task_desc=self.task_desc, parent_node_code=parent_node.code,
@@ -724,9 +727,8 @@ class PlannerAgent(Agent): # Inherit from Agent
         logger.info(f"{log_prefix}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
-
     def _debug(self, parent_node: Node) -> Node:
-        log_prefix = f"PLANNER_AGENT_DEBUG_STEP{self.current_step}"
+        log_prefix = f"PlannerAgent_Debug_Step: {self.current_step}"
         logger.info(f"{log_prefix}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
         plan_user_prompt = get_planner_agent_debug_plan_user_prompt(
             task_desc=self.task_desc, parent_node_code=parent_node.code,
@@ -749,7 +751,7 @@ class PlannerAgent(Agent): # Inherit from Agent
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
 
 
-        log_prefix_main = f"PLANNER_AGENT_STEP{current_step_number}"
+        log_prefix_main = f"PlannerAgent_Step: {current_step_number}"
         t_step_start = time.time()
         submission_history = self.cfg.workspace_dir / "submission_history"
         submission_history.mkdir(exist_ok=True)
@@ -787,9 +789,8 @@ class PlannerAgent(Agent): # Inherit from Agent
 
 
         # Process step
-        reflection_applied = False
         result_node, exec_duration = self.process_step(exec_callback=exec_callback, result_node=result_node, node_stage=node_stage, current_step_number=current_step_number, use_reflection=draft_flag)
-        print(reflection_applied)
+        print(self.reflection_applied)
 
 
         logger.info(f"{log_prefix_main}: Preparing step log data for W&B.", extra={"verbose": True})
@@ -801,7 +802,7 @@ class PlannerAgent(Agent): # Inherit from Agent
             f"progress/competition_name": self.competition_name,
             "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
             f"code/estimated_quality": int(self._code_quality), # Assuming self._code_quality is set in parse_exec_result
-            f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0,
+            f"eval/reflection_applied_successfully": 1 if self.reflection_applied and not result_node.is_buggy else 0,
             f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0,
             f"eval/validation_metric": result_node.metric.value if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None else float('nan'),
             f"eval/submission_produced": 1 if (submission_dir / "submission.csv").exists() and not result_node.is_buggy else 0,

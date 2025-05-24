@@ -212,7 +212,7 @@ def preview_json(p: Path, file_name: str) -> str:
         return f"-> Unexpected error previewing JSON {file_name}: {e}. File size: {get_file_len_size(p)[1]}."
 
 
-def generate(base_path: Path, include_file_details=True, simple=False) -> str: # Added Path type hint
+def generate(base_path: Path, include_file_details=True, simple=False, log_start=True) -> str: # Added Path type hint and log_start
     """
     Generate a textual preview of a directory, including an overview of the directory
     structure and previews of individual files
@@ -220,7 +220,8 @@ def generate(base_path: Path, include_file_details=True, simple=False) -> str: #
     if not isinstance(base_path, Path): # Ensure base_path is a Path object
         base_path = Path(base_path)
 
-    logger.info(f"Generating data preview for: {base_path.stem}")
+    if log_start:
+        logger.info(f"Generating data preview for: {base_path.stem}")
     tree_str = file_tree(base_path)
     tree = f"Directory structure for {base_path.name}:\n```\n{tree_str}\n```"
     out = [tree]
@@ -267,12 +268,12 @@ def generate(base_path: Path, include_file_details=True, simple=False) -> str: #
 
 
     result = "\n\n".join(out)
-    max_len = 10000 # Increased max length a bit, but still needs a limit
+    max_len = 2000 # Increased max length a bit, but still needs a limit
 
     if len(result) > max_len:
         if not simple: # If it's too long and not already simple, try simple
             logger.info(f"Data preview length ({len(result)}) > max_len ({max_len}). Retrying with simple=True.")
-            return generate(base_path, include_file_details=include_file_details, simple=True)
+            return generate(base_path, include_file_details=include_file_details, simple=True, log_start=False)
         else: # If already simple and still too long, truncate
             logger.info(f"Data preview length ({len(result)}) > max_len ({max_len}) even with simple=True. Truncating.")
             return result[:max_len] + f"\n... (data preview truncated at {max_len} characters)"
