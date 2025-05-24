@@ -41,7 +41,7 @@ agent:
   code:
     model: "o3-mini"
     planner_model: "RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
-    temp: 0.9
+    temp: 0.8
     max_new_tokens: 2048
     top_p: 0.9
     top_k: 50
