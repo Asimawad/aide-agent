@@ -111,6 +111,6 @@ fi
 # OLLAMA_PID=$!
 # echo "Ollama server started with PID: $OLLAMA_PID"
 chmod +x run_aide.sh
-
+chmod +x gc.sh
 echo "Executing command: $@"
 exec "$@"
