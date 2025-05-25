@@ -26,12 +26,12 @@ aide \
     desc_file="${data_dir}/aerial-cactus-identification.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
-    agent.steps=5 \
+    agent.steps=25 \
     agent.time_limit=36000 \
     agent.obfuscate=False \
     agent.ITS_Strategy="chain-reflect" \
-    agent.code.model="${PLANNER_MODEL}" \
-    agent.code.planner_model="${PLANNER_MODEL}" \
+    agent.code.model="${DeepSeek_MODEL}" \
+    agent.code.planner_model="${DeepSeek_MODEL}" \
     agent.code.temp=0.8 \
     agent.code.max_new_tokens=2048 \
     agent.code.num_return_sequences=1 \
