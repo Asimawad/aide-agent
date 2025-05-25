@@ -50,37 +50,121 @@ def trim_long_string(string, threshold=5100, k=2500):
         return f"{first_k_chars}\n ... [{truncated_len} characters truncated] ... \n{last_k_chars}"
     else:
         return string
+import re
+import black # Assuming you have black for formatting
 
+def is_valid_python_script(script_content: str) -> bool:
+    """Check if a script content is a valid Python script."""
+    if not script_content.strip(): # Empty or whitespace-only is not valid for our purpose
+        return False
+    try:
+        compile(script_content, "<string>", "exec")
+        return True
+    except SyntaxError:
+        return False
+    except Exception: # Catch other potential errors during compile
+        return False
 
-def extract_code(text):
-    """Extract python code blocks from the text."""
-    parsed_codes = []
-    if "</think>" in text:
-        parts = re.split(r"</think>", text, maxsplit=1, flags=re.DOTALL)
-        # parts[0] is everything before </think>, parts[1] is everything after
-        text = parts[1].strip() if len(parts) > 1 else ""
+def format_code(code_content: str) -> str:
+    """Format Python code using Black. Returns original if formatting fails."""
+    if not code_content.strip():
+        return ""
+    try:
+        # Ensure mode is explicitly set if you have specific formatting needs
+        return black.format_str(code_content, mode=black.FileMode()).strip()
+    except black.parsing.InvalidInput:
+        return code_content.strip() # Return original if it's not valid Python for Black
+    except Exception:
+        return code_content.strip() # Fallback for other black errors
 
-    # text_no_think = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    # matches = re.findall(r"```(?:python)?\s*\n(.*?)\n\s*```", text_no_think, re.DOTALL)
-    # When code is in a text or python block
-    matches = re.findall(r"```(python)?\n*(.*?)\n*```", text, re.DOTALL)
-    for match in matches:
-        code_block = match[1]
-        parsed_codes.append(code_block)
+def extract_code(text: str, expect_single_script: bool = True) -> str:
+    """
+    Extracts Python code blocks from text, prioritizing well-formed blocks.
+    Removes <think>...</think> blocks first.
+    If expect_single_script is True, it tries to join multiple found blocks.
+    """
+    if not text:
+        return ""
 
-    # When the entire text is code or backticks of the code block is missing
-    if len(parsed_codes) == 0:
-        matches = re.findall(r"^(```(python)?)?\n?(.*?)\n?(```)?$", text, re.DOTALL)
-        if matches:
-            code_block = matches[0][2]
-            parsed_codes.append(code_block)
+    # 1. Remove all <think>...</think> blocks first to clean up the input
+    # Using re.DOTALL to make '.' match newlines as well.
+    cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    
+    # If after removing think tags, the text is empty, return empty string.
+    if not cleaned_text.strip():
+        return ""
 
-    # validate the parsed codes
-    valid_code_blocks = [
-        format_code(c) for c in parsed_codes if is_valid_python_script(c)
+    # 2. Regex patterns to try, from more specific to more general
+    #    Pattern 1: Standard fenced block with optional 'python' and newlines
+    #    Captures content between ```python\n ... \n``` or ```\n ... \n```
+    #    Allows for optional whitespace around newlines.
+    patterns = [
+        r"```(?:python)?\s*\n(.*?)\n\s*```",  # Your primary pattern, good for well-formed blocks
+        r"```(?:python)?(.*?)\n\s*```",      # Allows code on the same line as ```python
+        r"```\s*\n(.*?)\n\s*```",          # Generic block with newlines
+        r"```(.*?)```",                    # Most lenient fenced block (code on same line, no newlines required)
     ]
-    return format_code("\n\n".join(valid_code_blocks))
 
+    extracted_code_blocks = []
+
+    for pattern in patterns:
+        matches = re.findall(pattern, cleaned_text, re.DOTALL)
+        for match_content in matches:
+            # If the pattern has multiple capture groups (like some of your original fallbacks did),
+            # re.findall returns tuples. We need to find the actual code.
+            # For the patterns above, match_content should be the code itself.
+            # Ensure it's a string if a pattern might have multiple groups.
+            code_candidate = match_content if isinstance(match_content, str) else "".join(m for m in match_content if m) # Join if it's a tuple of groups
+            
+            if code_candidate.strip(): # Ensure it's not just whitespace
+                extracted_code_blocks.append(code_candidate.strip())
+        
+        if extracted_code_blocks: # If any pattern found blocks, use them and stop
+            break
+            
+    # 3. Fallback: If no fenced blocks found, try to identify code if the whole text is a script
+    #    This is risky and should only be used if you are somewhat confident the remaining text IS code.
+    #    A simple heuristic: does it start with common Python keywords or import statements?
+    if not extracted_code_blocks and cleaned_text.strip():
+        # Check if the cleaned text (without fences) itself looks like Python
+        # This is a simpler check than your original broad regex fallback
+        lines = cleaned_text.strip().split('\n')
+        if lines and (lines[0].strip().startswith(("import ", "from ", "def ", "class ")) or 
+                      any(line.strip().startswith("# Thought:") for line in lines[:5])): # Check for your convention
+            # We make a judgment call here: if it starts like Python, assume the whole thing is code.
+            # This avoids capturing trailing natural language if the LLM just forgot closing backticks.
+            # However, it might miss code if it's preceded by significant natural language.
+            potential_code = cleaned_text.strip()
+            if is_valid_python_script(potential_code): # Validate before adding
+                 extracted_code_blocks.append(potential_code)
+
+
+    # 4. Validate and format the collected blocks
+    valid_formatted_blocks = []
+    for block in extracted_code_blocks:
+        # It's possible a block contains non-code text if regex was too lenient
+        # and then further code. Let's try to re-extract from the block if it's complex.
+        # This is a bit recursive but can help clean up.
+        # For simplicity here, we'll just validate what we got from the main patterns.
+        if is_valid_python_script(block):
+            valid_formatted_blocks.append(format_code(block))
+        # else:
+            # Optionally, log or handle blocks that were extracted by regex but are not valid Python.
+            # print(f"Warning: Regex extracted a block, but it's not valid Python:\n---\n{block[:200]}...\n---")
+
+    if not valid_formatted_blocks:
+        return "" # No valid Python code found
+
+    if expect_single_script:
+        # For AIDE, you likely want to join them into one script.
+        # Ensure there's a newline between blocks for proper syntax if they were separate.
+        return "\n\n".join(valid_formatted_blocks).strip()
+    else:
+        # If you might want individual valid blocks (e.g., for SFT data where LLM gives multiple examples)
+        # you could return the list:
+        # return valid_formatted_blocks 
+        # For now, sticking to single script output:
+        return "\n\n".join(valid_formatted_blocks).strip()
 
 def extract_plan(text):
     """Extract plan from the text."""
