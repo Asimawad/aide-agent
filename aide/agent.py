@@ -460,26 +460,37 @@ class CodeChainAgent(Agent): # Inherit from Agent
         retries: int = 3,
         max_tokens: int = None,
     ) -> Any:
-
         completion_text = None
         log_prefix = f""
         for attempt in range(retries):
             logger.info(f"Generation Attempt {attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
             try:
-
                 completion_text = query(
                     system_message=system_prompt, user_message=user_prompt,
                     model=model, temperature=temperature, planner=planner_flag,
                     current_step=self.current_step, convert_system_to_user=convert_system_to_user,
                     max_tokens=self.acfg.code.max_new_tokens,
-                  )
+                )
                 logger.info(f"{log_prefix} Attempt {attempt+1}: Received response.", extra={"verbose": True})
+                if query_type == "Segment-Generation":
+                    code_snippet = extract_code(completion_text)
+                    if not code_snippet or not code_snippet.strip():
+                        logger.warning(f"{log_prefix} Attempt {attempt+1}: Retrying ...")
+                        # Continue to next attempt instead of returning
+                        continue
+                    else:
+                        logger.info(f"{log_prefix} Attempt {attempt+1}: Successfully extracted code.", extra={"verbose": True})
+                        logger.debug(f"{log_prefix} \n EXTRACTED_CODE_START\n ----------- \n {code_snippet}\n ----------- \n EXTRACTED_CODE_END", extra={"verbose": True})
+                        return code_snippet.strip()
                 return completion_text
             except Exception as e:
                 logger.error(f"{log_prefix} Attempt {attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
-                if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
+                if attempt == retries - 1:
+                    logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True})
+                    return None
                 time.sleep(2)
         return ""
+
 
     def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
         system_prompt = get_planner_agent_plan_system_prompt()
@@ -538,14 +549,15 @@ class CodeChainAgent(Agent): # Inherit from Agent
                 logger.error(f"LLM query returned None.")
                 return "#LLM_QUERY_RETURNED_NONE_FOR_SEGMENT"
 
-            code_snippet = extract_code(completion_text)
+            # code_snippet = extract_code(completion_text)
             
-            if not code_snippet or not code_snippet.strip():
-                logger.warning(f"Code extraction failed. Using raw completion text. Raw: {trim_long_string(completion_text)}")
-                if "```python" not in completion_text and "import " not in completion_text and "def " not in completion_text:
-                    code_snippet = f"#CODE_EXTRACTION_FAILED_OR_NOT_CODE_FOR_SEGMENT: {trim_long_string(completion_text)}"
-                else:
-                    code_snippet = completion_text
+            # if not code_snippet or not code_snippet.strip():
+            #     logger.warning(f"Code extraction failed. Using raw completion text. Raw: {trim_long_string(completion_text)}")
+            #     if "```python" not in completion_text and "import " not in completion_text and "def " not in completion_text:
+            #         code_snippet = f"#CODE_EXTRACTION_FAILED_OR_NOT_CODE_FOR_SEGMENT: {trim_long_string(completion_text)}"
+            #     else:
+            #         
+            code_snippet = completion_text
             
             return code_snippet.strip() if code_snippet else ""
 
@@ -700,11 +712,11 @@ class CodeChainAgent(Agent): # Inherit from Agent
     # Modify the existing _draft method to use this chained approach
     def _draft(self, parent_node=None) -> Node:
         log_prefix = f""
-        logger.info(f"{log_prefix}: Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}")
+        logger.info(f"{log_prefix} Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}")
         memory=self.journal.generate_summary(include_code=False) # Memory
 
         # 1. Generate Master Plan using the Planner model
-        logger.info(f"{log_prefix}: Calling Planner for Task Summary and Master Plan.")
+        logger.info(f"{log_prefix} Calling Planner for Task Summary and Master Plan.")
         plan_user_prompt = get_planner_agent_draft_plan_user_prompt(
             task_desc=self.task_desc, 
             journal_summary=memory,
@@ -720,12 +732,12 @@ class CodeChainAgent(Agent): # Inherit from Agent
         )
         
         if not master_plan_text or master_plan_text.strip() == "": 
-            logger.error(f"{log_prefix}: Master plan generation failed by Planner. Aborting draft.")
+            logger.error(f"{log_prefix} Master plan generation failed by Planner. Aborting draft.")
             final_plan_text = "MASTER_PLAN_FAILED_BY_PLANNER"
             generated_code = "# MASTER_PLAN_FAILED_BY_PLANNER - No code generated."
             final_summary = task_summary or "PLANNER_FAILED_TO_PRODUCE_SUMMARY_AND_PLAN"
         else:
-            logger.info(f"{log_prefix}: Master Plan received from Planner. Proceeding to chained code generation.")
+            logger.info(f"{log_prefix} Master Plan received from Planner. Proceeding to chained code generation.")
 
             final_plan_text = master_plan_text # Store the full plan text for the node
             
@@ -734,11 +746,11 @@ class CodeChainAgent(Agent): # Inherit from Agent
             final_summary = task_summary # Use the summary from the planner
 
             if not generated_code or generated_code.strip().startswith("# FAILED TO GENERATE CODE FOR SEGMENT:") or generated_code.strip() == "# SEGMENT 1 (Data Loading & Initial Setup) FAILED TO GENERATE":
-                 logger.error(f"{log_prefix}: Chained code generation resulted in failure or predominantly error messages.")
+                 logger.error(f"{log_prefix} Chained code generation resulted in failure or predominantly error messages.")
                  # Keep generated_code as is, it will contain error placeholders
 
         new_node = Node(plan=final_plan_text, code=generated_code, summary=final_summary, task_summary=final_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Drafted new node {new_node.id} using ChainedCoder.")
+        logger.info(f"{log_prefix} Drafted new node {new_node.id} using ChainedCoder.")
         return new_node
 
     def _improve(self, parent_node: Node) -> Node:
