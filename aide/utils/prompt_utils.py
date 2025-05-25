@@ -1078,13 +1078,13 @@ def get_coder_chain_user_prompt_segment_submission(
 ) -> Dict[str, Any]:
     args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content)
     args["Your Current Coding Segment: Test Prediction & Submission File Generation"] = (
-        "Based on the 'Full Master Plan' and using the trained `model`, test data (e.g., `test_loader` or `X_test_processed`), and test IDs (e.g., from `test_df`) from 'Python Code Generated So Far', "
+        "Based on the 'Full Master Plan' and using the trained `model`, test data and test IDs ,'Python Code Generated So Far', "
         "write the Python code block *only* for generating predictions on the test set and creating the `submission.csv` file. This includes:\n"
-        "1. Loading the best model weights if they were saved to a file during training (e.g., `model.load_state_dict(torch.load('best_model.pth'))`).\n"
+        "1. Loading the best model weights if they were saved to a file during training `).\n"
         "2. Setting the model to evaluation mode (`model.eval()`).\n"
         "3. Iterating through the test data, moving it to `DEVICE`, and generating predictions (e.g., probabilities using `torch.sigmoid(model(images))` or `model.predict_proba()`).\n"
         "4. Collecting all test predictions and their corresponding IDs.\n"
-        "5. Creating a pandas DataFrame matching the submission file format specified in the 'Task Description' or 'Full Master Plan' (usually columns like 'id' and the target prediction, e.g., 'has_cactus').\n"
+        "5. Creating a pandas DataFrame matching the submission file format specified in the 'Task Description' or 'Full Master Plan' (usually columns like 'id' and the target prediction, e.g.).\n"
         "6. Saving this DataFrame to `./submission/submission.csv` using `df.to_csv(path, index=False)`.\n"
         "Remember to include '# Thought:' comments."
     )
