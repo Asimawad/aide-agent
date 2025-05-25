@@ -488,7 +488,7 @@ def get_agent_debug_user_prompt(
 #################################################################################################################################################################
 
 # --- Static Prompt Components (from PlannerAgent) ---
-PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT2: Dict[str, Any] = {
+PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "SYSTEM": (
         "You are an expert Kaggle Grandmaster and a meticulous Technical Lead. Your primary responsibility is to "
         "create exceptionally detailed, actionable, and high-quality strategic plans for solving machine learning competitions. "
@@ -532,7 +532,7 @@ PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT2: Dict[str, Any] = {
 }
 # In aide/utils/prompt_utils.py
 
-PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT3: Dict[str, Any] = {
     "SYSTEM": (
         "You are an expert Kaggle Grandmaster and a meticulous Technical Lead. Your primary responsibility is to "
         "create an exceptionally detailed, actionable, and high-quality strategic Master Plan for solving a given machine learning competition. "
@@ -582,6 +582,86 @@ PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
         "Critical Reminder": "Your role is exclusively planning and summarizing. The Coder agent relies ENTIRELY on the clarity, explicitness (especially the 'HOW' for each step, including function/library/variable specifics), and logical correctness of your 'Task Summary' and 'Plan'. DO NOT generate any Python code."
     }
 }
+
+
+
+PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT1: Dict[str, Any] = {
+    "SYSTEM": (
+        "You are an expert Kaggle Grandmaster and a meticulous Technical Lead. Your primary responsibility is to "
+        "create an exceptionally detailed, actionable, and high-quality strategic Master Plan for solving a given machine learning competition. "
+        "This Master Plan will be the sole blueprint for a separate Coder agent. "
+        "Your output MUST be a 'Task Summary' followed by a 'Plan'. You do NOT write any code."
+    ),
+    "user_instructions": {
+        "Input Understanding": "You will receive: a 'Full Kaggle Competition Description' (including evaluation, data files, and submission format), a 'Data Overview' (file structure and CSV column info), and potentially a 'Memory of Previous Attempts'.",
+        
+        "Output Requirements (Strict Adherence Mandatory)": (
+            "Your entire response MUST strictly follow this two-part structure, using the specified markdown headers:\n\n"
+            "## Task Summary:\n"
+            "   - Provide a concise summary (around 5-7 sentences) of the overall competition task. Clearly state: \n"
+            "     a) The main objective (e.g., 'predict house sale prices').\n"
+            "     b) The primary evaluation metric (e.g., 'Root Mean Squared Logarithmic Error (RMSLE)').\n"
+            "     c) Key characteristics of the input data (e.g., 'tabular data with numerical and categorical features in train.csv and test.csv').\n"
+            "     d) The expected submission file format (e.g., 'CSV with Id and SalePrice columns').\n"
+            "     This summary orients the Coder agent about the core problem.\n\n"
+            "## Plan:\n"
+            "   - Construct a list of 7-10 sequential, numbered bullet points outlining the step-by-step methodology to create a *simple, correct, and bug-free first draft solution* that completes the full task from data loading to submission file generation.\n"
+            "   - **Crucial Detail for Each Plan Step (WHAT, HOW, WHY - The '3 Ws'):** For *every* bullet point, you MUST explicitly detail:\n"
+            "       a. **WHAT** is the specific action or goal of this step (e.g., 'Load training and test data', 'Handle missing numerical values', 'Encode categorical features').\n"
+            "       b. **HOW** this action will be achieved: Be extremely specific. Mention key Python libraries (e.g., `pandas`, `numpy`, `sklearn.impute`, `sklearn.preprocessing`, `xgboost`), specific functions/classes (e.g., `pd.read_csv()`, `SimpleImputer()`, `StandardScaler()`, `OneHotEncoder()`, `XGBRegressor()`), critical parameters if non-default or for clarity (e.g., `SimpleImputer(strategy='median')`, `train_test_split(test_size=0.2, random_state=42)`), and names of key variables to be created or used (e.g., 'Load data into `train_df` and `test_df`', 'Imputed features stored in `X_train_numeric_imputed`', 'Instantiate model as `xgb_model`'). Your 'HOW' should be precise enough that a Coder agent can translate it directly into code with minimal ambiguity.\n"
+            "       c. **WHY** this step is necessary or its purpose in the overall solution (a brief rationale, e.g., 'to prepare data for modeling', 'to prevent data leakage from test set into training transformations', 'to convert text categories into a machine-understandable format').\n"
+            "   - **File Name Specificity:** Your plan must be specific about actual file names to be loaded (e.g., `train.csv`, `test.csv`, `sample_submission.csv`), deriving these from the 'Full Kaggle Competition Description' and 'Data Overview' provided in the user message.\n"
+            "   - **Constraints for This Draft Plan:**\n"
+            "       - **No EDA:** Do NOT include steps for Exploratory Data Analysis.\n"
+            "       - **Simplicity:** Prioritize a straightforward, robust approach. Avoid complex ensembling, extensive hyperparameter optimization, or overly niche techniques for this initial draft. A simple model like Linear Regression, RandomForest, or a basic XGBoost/LightGBM is preferred.\n"
+            "       - **Data Access:** Assume all necessary data files are located in a standard `./input/` directory (relative to the script's execution) and require no unzipping, unless the problem description explicitly states otherwise.\n"
+            "       - **Memory Consideration:** If a 'Memory of Previous Attempts' is provided, analyze it. Your new plan should aim to be a *distinctly different, viable approach* if previous ones failed, or build upon successful elements while avoiding repeated mistakes. Specifically state if your approach differs from memory and why.\n\n"
+            "   *Example Plan Steps (for a hypothetical house price prediction task - Tabular Regression, Evaluation: RMSLE):*\n"
+            '   " - **1. Initial Setup & Data Loading**: \n'
+            "     *WHAT:* Import core libraries and load the training (`train.csv`) and test (`test.csv`) datasets.\n"
+            "     *HOW:* Use `import pandas as pd`, `import numpy as np`, `from sklearn.model_selection import train_test_split`. Load data using `train_df = pd.read_csv('./input/train.csv')` and `test_df = pd.read_csv('./input/test.csv')`. Store test IDs: `test_ids = test_df['Id']`.\n"
+            "     *WHY:* To set up the environment and get the primary datasets into pandas DataFrames for manipulation, and preserve test IDs for submission.\n"
+            '   " - **2. Target Variable Transformation & Feature Separation**: \n'
+            "     *WHAT:* Apply a log transformation to the target variable `SalePrice` to handle skewness (common for price data and RMSLE metric) and separate features from the target.\n"
+            "     *HOW:* Create `train_labels = np.log1p(train_df['SalePrice'])`. Drop `SalePrice` from `train_df` to create `train_features = train_df.drop(['SalePrice', 'Id'], axis=1)`. Prepare `test_features = test_df.drop('Id', axis=1)`.\n"
+            "     *WHY:* Log transforming the target helps normalize its distribution for regression models and aligns with RMSLE. Separating features and target is standard practice.\n"
+            '   " - **3. Align Train/Test Columns & Identify Feature Types**: \n'
+            "     *WHAT:* Ensure training and test feature sets have the same columns in the same order, and identify numerical and categorical features.\n"
+            "     *HOW:* Get `all_features = pd.concat((train_features, test_features)).reset_index(drop=True)`. Then, re-align: `train_features = all_features.iloc[:len(train_labels)].copy()`, `test_features = all_features.iloc[len(train_labels):].copy()`. Identify `numeric_cols = train_features.select_dtypes(include=np.number).columns` and `categorical_cols = train_features.select_dtypes(include='object').columns`.\n"
+            "     *WHY:* Consistent feature sets are crucial. Identifying feature types guides subsequent preprocessing.\n"
+            '   " - **4. Preprocessing - Numerical Features**: \n'
+            "     *WHAT:* Impute missing values in numerical features and then scale them.\n"
+            "     *HOW:* Use `from sklearn.impute import SimpleImputer`. Create `imputer_num = SimpleImputer(strategy='median')`. Fit on `train_features[numeric_cols]`: `imputer_num.fit(train_features[numeric_cols])`. Transform both: `train_features[numeric_cols] = imputer_num.transform(train_features[numeric_cols])`, `test_features[numeric_cols] = imputer_num.transform(test_features[numeric_cols])`. Then, use `from sklearn.preprocessing import StandardScaler`. Create `scaler_num = StandardScaler()`. Fit on `train_features[numeric_cols]`, then transform both.\n"
+            "     *WHY:* Imputation handles missing data. Scaling helps models that are sensitive to feature magnitudes (e.g., linear models, SVMs, NNs).\n"
+            '   " - **5. Preprocessing - Categorical Features**: \n'
+            "     *WHAT:* Impute missing values in categorical features and then apply one-hot encoding.\n"
+            "     *HOW:* Use `SimpleImputer(strategy='most_frequent')` for categorical columns, fitting on train and transforming both. Then, use `pd.get_dummies(data, columns=categorical_cols, dummy_na=False)` on concatenated train/test categorical features, then split back. Ensure alignment by `train_features_encoded.align(test_features_encoded, join='inner', axis=1)` before concatenating with numerical.\n"
+            "     *WHY:* Imputation handles missing categories. One-hot encoding converts categories to a machine-understandable numerical format.\n"
+            '   " - **6. Combine Features & Split for Validation**: \n'
+            "     *WHAT:* Combine processed numerical and categorical features. Split combined training features for local validation.\n"
+            "     *HOW:* Use `pd.concat([train_features_numeric_processed, train_features_categorical_processed], axis=1)` to create `X_train_final`. Do similarly for `X_test_final`. Then, `X_train, X_val, y_train, y_val = train_test_split(X_train_final, train_labels, test_size=0.2, random_state=42)`.\n"
+            "     *WHY:* To create the final feature matrices for model training and evaluation.\n"
+            '   " - **7. Model Training**: \n'
+            "     *WHAT:* Instantiate and train a simple regression model.\n"
+            "     *HOW:* Use `from sklearn.ensemble import RandomForestRegressor`. Create `model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)`. Train using `model.fit(X_train, y_train)`.\n"
+            "     *WHY:* RandomForest is a robust baseline for tabular regression.\n"
+            '   " - **8. Validation Metric Calculation & Display**: \n'
+            "     *WHAT:* Predict on the validation set and calculate RMSLE.\n"
+            "     *HOW:* Make predictions: `val_preds_log = model.predict(X_val)`. Since target was log-transformed, inverse transform: `val_preds = np.expm1(val_preds_log)`. Calculate RMSLE: `rmsle_score = np.sqrt(mean_squared_log_error(np.expm1(y_val), val_preds))`. Print: `print(f'Validation RMSLE: {rmsle_score:.5f}')`.\n"
+            "     *WHY:* To assess model performance locally using the competition metric.\n"
+            '   " - **9. Test Set Prediction**: \n'
+            "     *WHAT:* Generate predictions on the processed test set.\n"
+            "     *HOW:* `test_preds_log = model.predict(X_test_final)`. Inverse transform: `test_preds = np.expm1(test_preds_log)`.\n"
+            "     *WHY:* To get predictions for the submission.\n"
+            '   " - **10. Submission File Generation**: \n'
+            "     *WHAT:* Create and save the submission CSV file.\n"
+            "     *HOW:* Create DataFrame: `submission = pd.DataFrame({'Id': test_ids, 'SalePrice': test_preds})`. Save: `submission.to_csv('./submission/submission.csv', index=False)`.\n"
+            "     *WHY:* To produce the final output in the format required by the competition.\n"
+        ),
+        "Critical Reminder": "Your role is exclusively planning and summarizing. The Coder agent relies ENTIRELY on the clarity, explicitness (especially the 'HOW' for each step, including function/library/variable specifics), and logical correctness of your 'Task Summary' and 'Plan'. DO NOT generate any Python code."
+    }
+}
+
 
 PLANNER_AGENT_PLAN_RESPONSE_FORMAT_TEXT: str = (
     "Your response for the plan should be a detailed and high quality bullet points of the steps of your proposed solution in natural language (7-10 sentences), "
@@ -887,26 +967,40 @@ def get_planner_agent_debug_code_user_prompt(
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
 
-
 #################################################################################################################################################################
 ############################################################## --- prompt chaining --- #############################################################################
 #################################################################################################################################################################
 
-_BASE_CODER_CHAIN_SYSTEM_MESSAGE = (
-    "You are an expert Python Coder specializing in implementing specific segments of a larger machine learning solution for Kaggle competitions. "
+_BASE_CODER_CHAIN_SYSTEM_MESSAGE1 = (
     "You will be given a 'Task Summary', the 'Full Master Plan' (generated by a Technical Lead), the 'Python Code Generated So Far' in previous segments, and specific instructions for the current coding segment. "
-    "Your goal is to write *only* the Python code block for the current task, ensuring it integrates seamlessly with the existing code and precisely follows the Master Plan. "
-    "You MUST include '# Thought:' comments before logical code blocks, explaining your reasoning and linking to the Master Plan steps you are implementing for this segment."
+    " **Your Output MUST be ONLY a Python code block for the current segment.**\n"
+    "Ensure it integrates seamlessly with the existing code and precisely follows the Master Plan.\n"
+    "You MUST include '# Thought:' comments before logical code blocks, explaining your reasoning and linking to the Master Plan steps you are implementing for this segment.\n"
     "because this is only a segment of the full solution, you should be aware of the libraries, variables, and functions that are already defined in the previous segments, and not use something that is not imported or defined in the previous segments."
-    "if you need to use a library that is not imported in the previous segments, you should import it in the current segment."
+    "if you need to use a library that is not imported in the previous segments, you should import it in the current segment."\
+    " - Do NOT include any conversational text, explanations, or self-corrections outside the '# Thought:' comments and the ```python ... ``` code block. Your entire response for this segment is the code block itself."
 )
 
+
+_BASE_CODER_CHAIN_SYSTEM_MESSAGE = (
+    "You are an expert Python Coder specializing in implementing specific segments of a larger machine learning solution for Kaggle competitions. "
+    "Your **sole task** is to generate a Python code snippet for a specific segment of a larger program. "
+    "You will receive context: 'Task Summary', 'Full Master Plan', 'Python Code Generated So Far', and 'Your Current Coding Segment' instructions.\n"
+     "because this is only a segment of the full solution, you should be aware of the libraries, variables, and functions that are already defined in the previous segments, and not use something that is not imported or defined in the previous segments."
+    "**CRITICAL OUTPUT REQUIREMENTS:**\n"
+    "1. Your response MUST start *immediately* with ```python and end *immediately* with ```. NO TEXT BEFORE OR AFTER THE CODE BLOCK.\n"
+    "2. Inside the code block, *before each distinct logical code unit* that implements a part of the plan for THIS SEGMENT, include a *concise* comment starting with '# Thought:'. This comment should explain: a) Your immediate coding strategy. b) The purpose of the upcoming code. c) The Master Plan step(s) it addresses for this segment.\n"
+    "3. The code you generate for this segment must be self-contained for its purpose but integrate with 'Python Code Generated So Far'. If new imports are needed *for this segment's logic only* and were not in prior code, include them at the start of *your* code block for this segment.\n"
+    "4. Implement *only* the functionalities specified for the current segment. Do NOT include code for other segments.\n"
+    "5. ABSOLUTELY NO conversational text, self-correction narratives (e.g., 'Wait, no...', 'Let me think...'), or any other text should appear outside the ```python ... ``` block or outside the '# Thought:' comments within the code block. "
+    "Violation of this format will result in failure. Focus on directly generating the required code snippet."
+)
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_SETUP: Dict[str, Any] = {
     "SYSTEM": _BASE_CODER_CHAIN_SYSTEM_MESSAGE,
     "user_instructions": { # Meta-instructions for this system prompt's design
-        "Current Segment Focus": "Initial script setup: all major anticipated library imports, global configurations (e.g., random seeds using a `set_seed` function), and defining the primary PyTorch `DEVICE`.",
-        "Context Awareness": "Refer to the 'Full Master Plan' and 'Task Summary' to anticipate necessary libraries (e.g., `pandas`, `numpy`, `sklearn`, `torch`, `PIL`, `cv2`, `timm`, `albumentations`, `transformers` based on task type).",
-        "Output Requirement": "A Python code block containing only imports, a `set_seed()` function definition and its call, and `DEVICE` assignment. No data loading or other functional code yet."
+        "Current Segment Objective": "Initial script setup: all major anticipated library imports, global configurations (e.g., random seeds using a `set_seed` function), and defining the primary PyTorch `DEVICE`.",
+       "Context for This Segment": "Refer to the 'Full Master Plan' and 'Task Summary' to anticipate necessary libraries (e.g., `pandas`, `numpy`, `sklearn`, `torch`, `PIL`, `cv2`, `timm`, `transformers` based on task type).",
+        "Output Code Block Content": "A Python code block containing only imports, a `set_seed()` function definition and its call, and `DEVICE` assignment. No data loading or other functional code yet."
     }
 }
 
@@ -1004,6 +1098,7 @@ def get_coder_chain_user_prompt_segment_setup(
         "2. A function `def set_seed(seed_value: int): ...` that sets seeds for `random`, `numpy`, and `torch` for reproducibility, and a call to this function (e.g., `set_seed(42)`).\n"
         "3. Definition of the PyTorch `DEVICE` variable (e.g., `DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')`).\n"
         "Do NOT include any data loading or functional code beyond this setup. "
+        "Remember your output must ONLY be the Python code block" # Added reminder
         "Remember to include '# Thought:' comments explaining your choices for imports or setup, linking to general good practice or broad implications from the Master Plan."
     )
     return args
@@ -1017,6 +1112,7 @@ def get_coder_chain_user_prompt_segment_data_loading(
         "write the Python code block *only* for:\n"
         "1. Defining global string constants for all necessary base directories (e.g., `INPUT_DIR = './input'`, `TRAIN_IMG_DIR = os.path.join(INPUT_DIR, 'train/')` if it's an image task and the plan implies it) and full paths to primary data files (e.g., `TRAIN_DATA_PATH = os.path.join(INPUT_DIR, 'train_data.csv')`). Use `os.path.join` or `pathlib.Path` for robust path construction. The exact file names (`train_data.csv`, etc.) MUST come from the Master Plan.\n"
         "2. Loading the primary data files (e.g., training data, test data or sample submission for test IDs) specified in the Master Plan into pandas DataFrames. Name these DataFrames clearly (e.g., `train_df`, `test_df`, `submission_df_ids`).\n"
+        "Remember your output must ONLY be the Python code block with " # Added reminder
         "Remember to include '# Thought:' comments explaining your logic and linking to the relevant Master Plan steps you are addressing for this segment."
     )
     return args
