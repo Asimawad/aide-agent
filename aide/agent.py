@@ -188,7 +188,7 @@ class Agent: # This is now the base class
         log_prefix_base = f"{self.__class__.__name__}_DRAFT_STEP:{self.current_step}" # Generic prefix
         logger.info(f"{log_prefix_base}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
         draft_sys_prompt=get_agent_draft_system_prompt()
-        journal_summary=self.journal.generate_summary(include_code=False)
+        journal_summary=self.journal.generate_summary(stage="draft", include_code=True)
         logger.info(f"{log_prefix_base}: Journal summary: {journal_summary}", extra={"verbose": True})
         prompt_user_message = get_agent_draft_user_prompt( # Agent uses its specific prompt structure
             task_desc=self.task_desc,
@@ -520,7 +520,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
     def _code_segment_query(self, 
                                 user_prompt_dict: Dict[str, Any], 
                                 system_prompt_dict: Dict[str, Any], # Specific system prompt for the segment
-                                retries: int = 1
+                                retries: int = 3
                               ) -> str: # Returns only the code snippet string
 
             completion_text = self._query_llm_with_retries(
@@ -580,7 +580,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
         code_snippet = self._code_segment_query( # Call the new specialized method
             user_prompt_dict=segment_user_prompt,
             system_prompt_dict=segment_system_prompt,
-            retries=self.acfg.get('coder_segment_retries', 1) 
+            retries=self.acfg.get('coder_segment_retries', 3) 
         )
         if not code_snippet or code_snippet.strip() == "#CODE_FAILED" or not code_snippet.strip():
             logger.error(f"{log_prefix_segment}: Code generation failed or produced empty code.")

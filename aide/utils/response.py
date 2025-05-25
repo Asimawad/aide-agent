@@ -60,6 +60,8 @@ def extract_code(text):
         # parts[0] is everything before </think>, parts[1] is everything after
         text = parts[1].strip() if len(parts) > 1 else ""
 
+    # text_no_think = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # matches = re.findall(r"```(?:python)?\s*\n(.*?)\n\s*```", text_no_think, re.DOTALL)
     # When code is in a text or python block
     matches = re.findall(r"```(python)?\n*(.*?)\n*```", text, re.DOTALL)
     for match in matches:

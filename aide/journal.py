@@ -226,10 +226,28 @@ class Journal(DataClassJsonMixin):
     #             summary.append(summary_part)
     #         return "\n-------------------------------\n".join(summary)
 
-    def generate_summary(self, include_code: bool = True) -> str:
+    def generate_summary(self, stage: Literal["draft", "debug", "improve"]="draft", include_code: bool = True) -> str:
         """Generate a summary of the journal for the agent."""
+        if stage == "draft":
+            nodes = self.draft_nodes
+        elif stage == "debug":
+            nodes = self.buggy_nodes
+        elif stage == "improve":
+            nodes = self.good_nodes
+        else:
+            return "" # ValueError(f"Invalid stage: {stage}")
+
+        if len(nodes) == 0:
+            return ""
         summary = []
-        for n in self.good_nodes:
+
+        if len(nodes) >= 1 and include_code and (stage == "draft" or stage == "debug"):
+            for n in range(min(len(nodes), 2)):
+                summary.append(f"Code: {nodes[n].code}\nResults: {nodes[n].analysis}\n")
+            return "\n-------------------------------\n".join(summary)
+
+        summary = []
+        for n in nodes:
             summary_part = f"Design: {n.plan}\n"
             split_plan = n.plan.split("</think>")
             if len(split_plan) > 1:

@@ -30,7 +30,7 @@ setuptools
 packaging
 wheel
 s3fs
-
+datasets
 scikit-learn
 xgboost
 lightgbm
