@@ -488,7 +488,7 @@ def get_agent_debug_user_prompt(
 #################################################################################################################################################################
 
 # --- Static Prompt Components (from PlannerAgent) ---
-PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICTx: Dict[str, Any] = {
     "SYSTEM": (
         "You are an expert Kaggle Grandmaster and a meticulous Technical Lead. Your primary responsibility is to "
         "create exceptionally detailed, actionable, and high-quality strategic plans for solving machine learning competitions. "
@@ -585,7 +585,7 @@ PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT3: Dict[str, Any] = {
 
 
 
-PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT1: Dict[str, Any] = {
+PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "SYSTEM": (
         "You are an expert Kaggle Grandmaster and a meticulous Technical Lead. Your primary responsibility is to "
         "create an exceptionally detailed, actionable, and high-quality strategic Master Plan for solving a given machine learning competition. "
