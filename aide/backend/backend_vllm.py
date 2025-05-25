@@ -6,7 +6,7 @@ import os
 from typing import Optional, Dict, Any, Tuple
 import openai
 from omegaconf import OmegaConf
-
+from funcy import notnone, once, select_values
 from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
 
 logger = logging.getLogger("aide")
@@ -32,7 +32,7 @@ VLLM_API_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-
+@once
 def _setup_vllm_client():
     """Sets up the OpenAI client for vLLM server."""
     global _client
@@ -51,7 +51,7 @@ def _setup_vllm_client():
         logger.error(f"Failed to setup vLLM client: {e}")
         raise
 
-
+@once
 def _setup_vllm_client1():
     """Sets up the OpenAI client for vLLM server."""
     global _client1
@@ -103,7 +103,7 @@ def query(
     Implements backoff retries and drops system_message after 2 retries.
     """
     logger.info("activated vllm backend...", extra={"verbose": True})
-
+    model_kwargs = select_values(notnone, model_kwargs)
     # Prepare messages list for OpenAI API format
     def prepare_messages(sys_msg):
         return opt_messages_to_list(sys_msg, user_message, convert_system_to_user=False)

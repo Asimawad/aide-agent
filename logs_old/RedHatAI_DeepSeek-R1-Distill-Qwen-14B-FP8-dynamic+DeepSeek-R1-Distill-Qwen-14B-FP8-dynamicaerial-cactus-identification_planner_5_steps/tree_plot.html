@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en"> 
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#F2F0E7";
+const accentCol = "#fd4578";
+
+hljs.initHighlightingOnLoad();
+
+const updateTargetDims = () => {
+  // width is max-width of `.contentContainer` - its padding
+  // return [min(windowWidth, 900 - 80), 700]
+  return [windowWidth * (1 / 2), windowHeight];
+};
+
+const setCodeAndPlan = (code, plan) => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    // codeElm.innerText = code;
+    codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    // planElm.innerText = plan.trim();
+    planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+  }
+};
+
+windowResized = () => {
+  resizeCanvas(...updateTargetDims());
+  awaitingPostResizeOps = true;
+};
+
+const animEase = (t) => 1 - (1 - Math.min(t, 1.0)) ** 5;
+
+// ---- global constants ----
+
+const globalAnimSpeed = 1.1;
+const scaleFactor = 0.57;
+
+// ---- global vars ----
+
+let globalTime = 0;
+let manualSelection = false;
+
+let currentElemInd = 0;
+
+let treeStructData = {"edges": [], "layout": [[0.0, 1.0], [1.0, 1.0]], "plan": ["## Task Summary: The task is to create a machine learning model that classifies\nwhether an aerial image contains a cactus. The competition uses a Kaggle dataset\nwith 14,175 training images and 3,325 test images, each identified by a unique\nID. The model's performance is evaluated using the area under the ROC curve\n(AUC) on predicted probabilities for the test set. The images are 32x32 pixels,\nand the goal is to predict the presence of a cactus with high accuracy.  ##\nPlan:  1. **Data Loading and Dataset Creation**:      - Use PyTorch's\n`ImageFolder` to load the training images into a dataset.      - Split the\ntraining data into training and validation sets using an 80-20 split ratio to\navoid overfitting.    2. **Data Augmentation**:      - Apply transformations\nusing the `Albumentations` library, including random rotations, horizontal\nflips, and color jittering, to improve model generalization.    3. **Model\nSelection**:      - Use a pre-trained EfficientNet model from the `timm` library\nfor feature extraction.      - Modify the model's output layer to produce a\nsingle output neuron with a sigmoid activation function to output probabilities.\n4. **Model Initialization**:      - Define the model with the pre-trained\nEfficientNet backbone and add an additional layer if necessary for task-specific\nfeatures.    5. **Loss Function and Optimizer**:      - Use `BCEWithLogitsLoss`\nfor binary classification to combine sigmoid layer and binary cross-entropy\nloss.      - Optimize the model using the AdamW optimizer for efficient\ntraining.    6. **Training Loop**:      - Implement a training loop with forward\npasses, loss calculation, backpropagation, and weight updates.      - Monitor\ntraining loss and validation accuracy to detect overfitting and adjust training\nparameters if necessary.    7. **Validation**:      - After each epoch, evaluate\nthe model on the validation set to ensure generalization and prevent\noverfitting.    8. **Prediction on Test Set**:      - Load the test images into\na DataLoader and generate predictions using the trained model.      - Ensure\npredictions are probabilities between 0 and 1 for AUC evaluation.    9.\n**Submission File**:      - Create a CSV file with image IDs and predicted\nprobabilities in the required format for Kaggle submission.    This approach\nleverages transfer learning with a pre-trained model and basic data augmentation\nto provide a solid baseline solution.", "## Task Summary: The task involves creating a machine learning model to classify\nwhether aerial images contain a cactus. The dataset consists of 14,175 training\nimages and 3,325 test images, each 32x32 pixels. The model's performance is\nevaluated using the area under the ROC curve (AUC). The goal is to predict the\npresence of cacti with high accuracy, using a straightforward approach without\ncomplex ensembling or extensive hyperparameter tuning.  ## Plan:  1. **Data\nLoading and Dataset Creation**:      - Use `Pillow` to load images and\n`torchvision.transforms` for resizing and normalization.      - Create custom\n`Dataset` classes for training and validation data, ensuring images are\ncorrectly labeled and preprocessed.    2. **Data Augmentation**:      - Apply\nstandard transformations like random cropping, horizontal flipping, and\nnormalization using `torchvision.transforms` to improve model generalization.\n3. **Model Selection**:      - Use a pre-trained ResNet50 model from\n`torchvision.models` for feature extraction, providing a balance between\ncomplexity and performance.    4. **Model Initialization**:      - Load the pre-\ntrained ResNet50 model and replace the final fully connected layer with a new\nlayer for binary classification.    5. **Loss Function and Optimizer**:      -\nUse `BCEWithLogitsLoss` for binary classification to combine sigmoid layer and\nbinary cross-entropy loss.      - Optimize the model using the Adam optimizer\nfor efficient training.    6. **DataLoader Setup**:      - Create `DataLoader`\ninstances for training and validation data with appropriate batch sizes to\nefficiently load and process images.    7. **Training Loop**:      - Implement a\ntraining loop with forward passes, loss calculation, backpropagation, and weight\nupdates.      - Monitor training loss and validation accuracy to detect\noverfitting and adjust training parameters if necessary.    8. **Validation**:\n- After each epoch, evaluate the model on the validation set to ensure\ngeneralization and prevent overfitting.    9. **Prediction on Test Set**:      -\nLoad the test images into a DataLoader and generate predictions using the\ntrained model.      - Ensure predictions are probabilities between 0 and 1 for\nAUC evaluation.    10. **Submission File**:       - Create a CSV file with image\nIDs and predicted probabilities in the required format for Kaggle submission.\nThis approach leverages a well-known pre-trained model and basic data\naugmentation to provide a robust baseline solution, avoiding the pitfalls of the\nprevious attempt."], "code": ["# Script generated by AIDE PlannerAgent (Chained Coder) - Step 1\n# Competition: aerial-cactus-identification\n# Task Summary:  ...\n# --- Master Plan ---\n# The task is to create a machine learning model that classifies whether an aerial image contains a cactus. The competition uses a Kaggle dataset with 14,175 training images and 3,325 test images, each identified by a unique ID. The model's performance is evaluated using the area under the ROC curve (AUC) on predicted probabilities for the test set. The images are 32x32 pixels, and the goal is to predict the presence of a cactus with high accuracy.\n# 1. **Data Loading and Dataset Creation**:\n# - Use PyTorch's `ImageFolder` to load the training images into a dataset.\n# - Split the training data into training and validation sets using an 80-20 split ratio to avoid overfitting.\n# 2. **Data Augmentation**:\n# - Apply transformations using the `Albumentations` library, including random rotations, horizontal flips, and color jittering, to improve model generalization.\n# 3. **Model Selection**:\n# - Use a pre-trained EfficientNet model from the `timm` library for feature extraction.\n# - Modify the model's output layer to produce a single output neuron with a sigmoid activation function to output probabilities.\n# 4. **Model Initialization**:\n# - Define the model with the pre-trained EfficientNet backbone and add an additional layer if necessary for task-specific features.\n# 5. **Loss Function and Optimizer**:\n# - Use `BCEWithLogitsLoss` for binary classification to combine sigmoid layer and binary cross-entropy loss.\n# - Optimize the model using the AdamW optimizer for efficient training.\n# 6. **Training Loop**:\n# - Implement a training loop with forward passes, loss calculation, backpropagation, and weight updates.\n# - Monitor training loss and validation accuracy to detect overfitting and adjust training parameters if necessary.\n# 7. **Validation**:\n# - After each epoch, evaluate the model on the validation set to ensure generalization and prevent overfitting.\n# 8. **Prediction on Test Set**:\n# - Load the test images into a DataLoader and generate predictions using the trained model.\n# - Ensure predictions are probabilities between 0 and 1 for AUC evaluation.\n# 9. **Submission File**:\n# - Create a CSV file with image IDs and predicted probabilities in the required format for Kaggle submission.\n# This approach leverages transfer learning with a pre-trained model and basic data augmentation to provide a solid baseline solution.\n# --- End Master Plan ---\n\n# Thought: Import standard libraries for file handling, data manipulation, and system operations\nimport os\nimport sys\nimport glob\nimport random\nimport numpy as np\nimport pandas as pd\n\n# Thought: Import PyTorch and its utilities for neural networks and tensor operations\nimport torch\nimport torch.nn as nn\nimport torch.optim as optim\nfrom torch.utils.data import Dataset, DataLoader\n\n# Thought: Import Albumentations for data augmentation\nimport albumentations as A\nfrom albumentations.pytorch import ToTensorV2\n\n# Thought: Import timm library for pre-trained EfficientNet models\nimport timm\n\n\n# Thought: Set up a function to ensure reproducibility across runs\ndef set_seed(seed_value: int):\n    random.seed(seed_value)\n    np.random.seed(seed_value)\n    torch.manual_seed(seed_value)\n    torch.cuda.manual_seed(seed_value)\n    torch.backends.cudnn.deterministic = True\n\n\n# Thought: Set the seed to a specific value for consistent results\nset_seed(42)\n\n# Thought: Define the device to use for computation (GPU if available, else CPU)\nDEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n\n# Thought: Define base directories using os.path.join for cross-platform compatibility\nINPUT_DIR = os.path.join(\".\", \"input\")\nTRAIN_IMG_DIR = os.path.join(INPUT_DIR, \"train\")\nTEST_IMG_DIR = os.path.join(INPUT_DIR, \"test\")\nSUBMISSION_DIR = os.path.join(INPUT_DIR, \"sample_submission.csv\")\n\n# Thought: Define file paths for training and submission data\nTRAIN_DATA_PATH = os.path.join(INPUT_DIR, \"train.csv\")\nSUBMISSION_PATH = os.path.join(INPUT_DIR, \"sample_submission.csv\")\n\n# Thought: Load training data into a DataFrame\ntrain_df = pd.read_csv(TRAIN_DATA_PATH)\nprint(f\"Training data loaded with shape: {train_df.shape}\")\nprint(f\"Columns in training data: {train_df.columns}\")\n\n# Thought: Load sample submission data into a DataFrame\nsubmission_df = pd.read_csv(SUBMISSION_PATH)\nprint(f\"Submission data loaded with shape: {submission_df.shape}\")\nprint(f\"Columns in submission data: {submission_df.columns}\")\n\n# Thought: Import required libraries for data manipulation and image handling\nimport cv2\nfrom PIL import Image\nfrom sklearn.model_selection import train_test_split\nimport os\n\n# Thought: Define data transformations using Albumentations\nTRAIN_TRANSFORM = A.Compose(\n    [\n        A.Resize(224, 224),\n        A.RandomRotation(20),\n        A.HorizontalFlip(p=0.5),\n        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),\n        A.ToFloat(),\n        ToTensorV2(),\n    ]\n)\n\nVAL_TRANSFORM = A.Compose([A.Resize(224, 224), ToTensorV2()])\n\nTEST_TRANSFORM = A.Compose([A.Resize(224, 224), ToTensorV2()])\n\n\n# Thought: Create a custom Dataset class for handling image data\nclass CactusDataset(Dataset):\n    def __init__(self, image_ids, labels=None, img_dir=TRAIN_IMG_DIR, transform=None):\n        self.image_ids = image_ids\n        self.labels = labels\n        self.img_dir = img_dir\n        self.transform = transform\n\n    def __len__(self):\n        return len(self.image_ids)\n\n    def __getitem__(self, idx):\n        img_id = self.image_ids[idx]\n        img_path = os.path.join(self.img_dir, img_id + \".jpg\")\n        img = Image.open(img_path).convert(\"RGB\")\n\n        if self.transform:\n            img = self.transform(image=np.array(img))[\"image\"]\n\n        if self.labels is not None:\n            label = self.labels[idx]\n            return img, label\n        else:\n            return img\n\n\n# Thought: Prepare training and validation datasets\ndef prepare_datasets(train_df):\n    # Split into training and validation sets\n    train_idx, val_idx = train_test_split(\n        range(len(train_df)),\n        test_size=0.2,\n        random_state=42,\n        stratify=train_df[\"has_cactus\"],\n    )\n\n    train_dataset = CactusDataset(\n        image_ids=train_df.iloc[train_idx][\"id\"].values,\n        labels=train_df.iloc[train_idx][\"has_cactus\"].values.astype(np.float32),\n        transform=TRAIN_TRANSFORM,\n    )\n\n    val_dataset = CactusDataset(\n        image_ids=train_df.iloc[val_idx][\"id\"].values,\n        labels=train_df.iloc[val_idx][\"has_cactus\"].values.astype(np.float32),\n        transform=VAL_TRANSFORM,\n    )\n\n    return train_dataset, val_dataset\n\n\n# Thought: Prepare test dataset\ndef prepare_test_dataset(test_img_dir=TEST_IMG_DIR):\n    test_image_ids = [os.path.splitext(f)[0] for f in os.listdir(test_img_dir)]\n    test_dataset = CactusDataset(\n        image_ids=test_image_ids,\n        labels=None,\n        img_dir=test_img_dir,\n        transform=TEST_TRANSFORM,\n    )\n    return test_dataset\n\n\n# Thought: Create DataLoaders for training, validation, and test sets\nBATCH_SIZE = 32\nNUM_WORKERS = 4\n\ntrain_dataset, val_dataset = prepare_datasets(train_df)\ntest_dataset = prepare_test_dataset()\n\ntrain_loader = DataLoader(\n    train_dataset,\n    batch_size=BATCH_SIZE,\n    shuffle=True,\n    num_workers=NUM_WORKERS,\n    pin_memory=True,\n)\n\nval_loader = DataLoader(\n    val_dataset,\n    batch_size=BATCH_SIZE,\n    shuffle=False,\n    num_workers=NUM_WORKERS,\n    pin_memory=True,\n)\n\ntest_loader = DataLoader(\n    test_dataset,\n    batch_size=BATCH_SIZE,\n    shuffle=False,\n    num_workers=NUM_WORKERS,\n    pin_memory=True,\n)\n\n# Thought: Print dataset and loader information\nprint(f\"Training dataset size: {len(train_dataset):,}\")\nprint(f\"Validation dataset size: {len(val_dataset):,}\")\nprint(f\"Test dataset size: {len(test_dataset):,}\")\nprint(f\"Training loader batches per epoch: {len(train_loader)}\")\nprint(f\"Validation loader batches per epoch: {len(val_loader)}\")\nprint(f\"Test loader batches: {len(test_loader)}\")\n\n# Thought: Import necessary modules for model definition\nimport torch\nimport torch.nn as nn\nimport timm\n\n\n# Thought: Create a function to define the model architecture using EfficientNet\ndef create_model():\n    # Use EfficientNet-B0 as the base model\n    model = timm.create_model(\n        \"efficientnet_b0\",\n        pretrained=True,\n        num_classes=1,  # Binary classification (has_cactus: 0 or 1)\n    )\n\n    # Freeze the backbone layers to only train the classifier\n    for param in model.parameters():\n        param.requires_grad = False\n\n    # Add a new output layer for binary classification with sigmoid activation\n    model.classifier = nn.Sequential(\n        nn.Linear(model.classifier.in_features, 1), nn.Sigmoid()\n    )\n\n    return model\n\n\n# Thought: Instantiate the model and move it to the appropriate device\nmodel = create_model()\nmodel.to(DEVICE)\n\n# Thought: Print model information\nprint(f\"Model created and moved to {DEVICE}\")\nprint(f\"Total parameters: {sum(p.numel() for p in model.parameters()):,}\")\nprint(\n    f\"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}\"\n)\n\n# Thought: Import necessary modules for loss function and optimizer\nimport torch\nfrom torch import nn\nfrom torch.optim import AdamW\nfrom sklearn.metrics import roc_auc_score\n\n# Thought: Define the loss function and optimizer based on Master Plan\n# Using BCEWithLogitsLoss for binary classification and AdamW optimizer\nCRITERION = nn.BCEWithLogitsLoss()\nLEARNING_RATE = 0.001\nOPTIMIZER = AdamW(model.parameters(), lr=LEARNING_RATE)\n\n# Thought: Set number of epochs for training\nNUM_EPOCHS = 10\n\n# Thought: Implement the training loop with validation\nfor epoch in range(NUM_EPOCHS):\n    model.train()\n    train_loss = 0\n\n    # Training phase\n    for inputs, labels in train_loader:\n        inputs = inputs.to(DEVICE)\n        labels = labels.to(DEVICE)\n\n        # Zero gradients\n        OPTIMIZER.zero_grad()\n\n        # Forward pass\n        outputs = model(inputs)\n        loss = CRITERION(outputs.squeeze(), labels)\n\n        # Backward pass and optimize\n        loss.backward()\n        OPTIMIZER.step()\n\n        train_loss += loss.item()\n\n    # Validation phase\n    model.eval()\n    val_loss = 0\n    all_preds = []\n    all_labels = []\n\n    with torch.no_grad():\n        for val_inputs, val_labels in val_loader:\n            val_inputs = val_inputs.to(DEVICE)\n            val_labels = val_labels.to(DEVICE)\n\n            val_outputs = model(val_inputs)\n            val_loss += CRITERION(val_outputs.squeeze(), val_labels).item()\n\n            # Store predictions and labels for AUC calculation\n            all_preds.extend(val_outputs.cpu().numpy())\n            all_labels.extend(val_labels.cpu().numpy())\n\n    # Calculate AUC score\n    val_auc = roc_auc_score(all_labels, all_preds)\n\n    # Print epoch statistics\n    avg_train_loss = train_loss / len(train_loader)\n    avg_val_loss = val_loss / len(val_loader)\n\n    print(f\"Epoch {epoch+1}/{NUM_EPOCHS}\")\n    print(f\"Train Loss: {avg_train_loss:.4f}\")\n    print(f\"Validation Loss: {avg_val_loss:.4f}\")\n    print(f\"Validation Metric (AUC): {val_auc:.4f}\")\n\n    # Save the best model based on validation AUC\n    if val_auc > best_auc:\n        best_auc = val_auc\n        torch.save(model.state_dict(), \"best_model.pth\")\n\n    # Print a checkpoint\n    if (epoch + 1) % 5 == 0:\n        print(\"Checkpoint saved.\")\n\n# Thought: Load the best model weights for inference\nmodel.load_state_dict(torch.load(\"best_model.pth\"))\nmodel.eval()  # Set model to evaluation mode\n\n# Thought: Create a directory for submission if it doesn't exist\nos.makedirs(\"./submission\", exist_ok=True)\n\n# Thought: Initialize lists to store predictions and image IDs\ntest_preds = []\ntest_ids = []\n\n# Thought: Iterate through the test data to generate predictions\nwith torch.no_grad():\n    for images, img_ids in test_loader:\n        images = images.to(DEVICE)\n        outputs = model(images)\n        probs = torch.sigmoid(outputs).squeeze().cpu().numpy()\n\n        test_preds.extend(probs)\n        test_ids.extend(img_ids)\n\n# Thought: Create a DataFrame with the required submission format\nsubmission_df = pd.DataFrame({\"id\": test_ids, \"has_cactus\": test_preds})\n\n# Thought: Save the predictions to the required submission file path\nsubmission_df.to_csv(\"./submission/submission.csv\", index=False)", "# Script generated by AIDE PlannerAgent (Chained Coder) - Step 2\n# Competition: aerial-cactus-identification\n# Task Summary:  ...\n# --- Master Plan ---\n# The task involves creating a machine learning model to classify whether aerial images contain a cactus. The dataset consists of 14,175 training images and 3,325 test images, each 32x32 pixels. The model's performance is evaluated using the area under the ROC curve (AUC). The goal is to predict the presence of cacti with high accuracy, using a straightforward approach without complex ensembling or extensive hyperparameter tuning.\n# 1. **Data Loading and Dataset Creation**:\n# - Use `Pillow` to load images and `torchvision.transforms` for resizing and normalization.\n# - Create custom `Dataset` classes for training and validation data, ensuring images are correctly labeled and preprocessed.\n# 2. **Data Augmentation**:\n# - Apply standard transformations like random cropping, horizontal flipping, and normalization using `torchvision.transforms` to improve model generalization.\n# 3. **Model Selection**:\n# - Use a pre-trained ResNet50 model from `torchvision.models` for feature extraction, providing a balance between complexity and performance.\n# 4. **Model Initialization**:\n# - Load the pre-trained ResNet50 model and replace the final fully connected layer with a new layer for binary classification.\n# 5. **Loss Function and Optimizer**:\n# - Use `BCEWithLogitsLoss` for binary classification to combine sigmoid layer and binary cross-entropy loss.\n# - Optimize the model using the Adam optimizer for efficient training.\n# 6. **DataLoader Setup**:\n# - Create `DataLoader` instances for training and validation data with appropriate batch sizes to efficiently load and process images.\n# 7. **Training Loop**:\n# - Implement a training loop with forward passes, loss calculation, backpropagation, and weight updates.\n# - Monitor training loss and validation accuracy to detect overfitting and adjust training parameters if necessary.\n# 8. **Validation**:\n# - After each epoch, evaluate the model on the validation set to ensure generalization and prevent overfitting.\n# 9. **Prediction on Test Set**:\n# - Load the test images into a DataLoader and generate predictions using the trained model.\n# - Ensure predictions are probabilities between 0 and 1 for AUC evaluation.\n# 10. **Submission File**:\n# - Create a CSV file with image IDs and predicted probabilities in the required format for Kaggle submission.\n# This approach leverages a well-known pre-trained model and basic data augmentation to provide a robust baseline solution, avoiding the pitfalls of the previous attempt.\n# --- End Master Plan ---\n\nOkay, I need to write the initial setup code for this Kaggle competition. The task is to classify aerial images with cacti, so it's an image classification problem. The master plan mentions using PyTorch and pre-trained models, so I should import relevant libraries.\n\nFirst, I'll start with standard libraries like os for file handling, math for any mathematical operations, and time to track execution time. Then, I'll import numpy for numerical operations and pandas for data handling.\n\nSince this is a deep learning task, I'll need torch and torch.nn for building the model. Also, torch.optim for optimizers and torch.utils.data for data loading. I'll include torchvision.transforms for preprocessing images.\n\nThe plan uses a pre-trained ResNet50, so I'll import models from torchvision.models. Albumentations is mentioned for data augmentation, so I'll add that. For logging, I'll include the logging module and wandb if available, but I'll make it optional.\n\nNext, I need a function to set the seed for reproducibility. I'll define set_seed to handle random, numpy, and torch seeds. I'll call it with 42 as the seed value.\n\nThen, I'll assign the device variable to use GPU if available, otherwise CPU. This is important for training efficiency.\n\nI should make sure all necessary libraries are imported based on the master plan. I'll include any others that might be useful, like cv2 for image manipulation, but since the plan focuses on torchvision, maybe it's not needed here.\n\nI think that's all for the initial setup. No data loading yet, just imports and configuration.\n</think>\n\n```python\n# Thought: Import standard libraries for file handling, numerical operations, and logging\nimport os\nimport math\nimport time\nimport numpy as np\nimport pandas as pd\nimport torch\nimport torch.nn as nn\nimport torch.optim as optim\nfrom torch.utils.data import Dataset, DataLoader\nfrom torchvision.transforms import.Compose, Normalize, RandomResizedCrop, RandomHorizontalFlip\nfrom torchvision.models import resnet50\nimport albumentations as A\nimport logging\nfrom PIL import Image\nimport cv2\n\n# Thought: Set up logging configuration for monitoring\nlogging.basicConfig(level=logging.INFO)\n\n# Thought: Function to set random seeds for reproducibility\ndef set_seed(seed_value: int = 42):\n    \"\"\"Set random seeds for all possible random number generators.\"\"\"\n    np.random.seed(seed_value)\n    torch.manual_seed(seed_value)\n    if torch.cuda.is_available():\n        torch.cuda.manual_seed(seed_value)\n        torch.cuda.manual_seed_all(seed_value)\n    os.environ['PYTHONHASHSEED'] = str(seed_value)\n    \n# Thought: Set the device to use (GPU if available, else CPU)\nDEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\n\n# Thought: Call set_seed to ensure reproducibility\nset_seed()\n\n# Thought: Import additional libraries if available for enhanced functionality\ntry:\n    import wandb\nexcept ImportError:\n    pass\n\n# Thought: Ensure matplotlib is available for visualization needs\nimport matplotlib.pyplot as plt\n```\n\nThis setup ensures all necessary libraries are imported and foundational configurations are in place, aligning with the master plan's use of PyTorch and standard data handling practices.\n\n# Thought: Define file paths using os.path.join for cross-platform compatibility\nINPUT_DIR = os.path.join(\"input\")\nTRAIN_DATA_PATH = os.path.join(INPUT_DIR, \"train.csv\")\nTEST_DATA_PATH = os.path.join(INPUT_DIR, \"test.csv\")\nSAMPLE_SUBMISSION_PATH = os.path.join(INPUT_DIR, \"sample_submission.csv\")\nTRAIN_IMG_DIR = os.path.join(INPUT_DIR, \"train\")\nTEST_IMG_DIR = os.path.join(INPUT_DIR, \"test\")\n\n# Thought: Load training and test data into DataFrames\ntrain_df = pd.read_csv(TRAIN_DATA_PATH)\ntest_df = pd.read_csv(TEST_DATA_PATH)\nsample_submission_df = pd.read_csv(SAMPLE_SUBMISSION_PATH)\n\n# Thought: Verify the existence of required files and directories\nassert os.path.exists(INPUT_DIR), f\"Input directory not found at {INPUT_DIR}\"\nassert os.path.exists(\n    TRAIN_DATA_PATH\n), f\"Training data file not found at {TRAIN_DATA_PATH}\"\nassert os.path.exists(TEST_DATA_PATH), f\"Test data file not found at {TEST_DATA_PATH}\"\nassert os.path.exists(\n    TRAIN_IMG_DIR\n), f\"Training images directory not found at {TRAIN_IMG_DIR}\"\nassert os.path.exists(\n    TEST_IMG_DIR\n), f\"Test images directory not found at {TEST_IMG_DIR}\"\n\n\n# Thought: Function to load an image given a file path\ndef load_image(img_path: str) -> Image.Image:\n    \"\"\"Load and convert image to RGB if necessary.\"\"\"\n    img = Image.open(img_path)\n    if img.mode != \"RGB\":\n        img = img.convert(\"RGB\")\n    return img\n\n\n# Thought: Basic sanity check on the data\nlogging.info(f\"Training data shape: {train_df.shape}\")\nlogging.info(f\"Test data shape: {test_df.shape}\")\nlogging.info(f\"Sample submission shape: {sample_submission_df.shape}\")\n\n# Thought: Display the first few rows of the training data to inspect labels\nlogging.info(\"\\nFirst few rows of training data:\")\nlogging.info(train_df.head())\n\n# Thought: Display the columns of the training data\nlogging.info(f\"\\nColumns in training data: {train_df.columns.tolist()}\")\n# Output should show 'id' and 'has_cactus' columns\n\n# Thought: Define image dimensions based on the dataset\nIMAGE_HEIGHT = 32\nIMAGE_WIDTH = 32\nNUM_CHANNELS = 3\n\n\n# Thought: Create a custom Dataset class for handling image data\nclass CactusDataset(Dataset):\n    def __init__(self, df, img_dir, transform=None):\n        self.df = df\n        self.img_dir = img_dir\n        self.transform = transform\n\n    def __len__(self):\n        return len(self.df)\n\n    def __getitem__(self, idx):\n        img_id = self.df.iloc[idx][\"id\"]\n        img_path = os.path.join(self.img_dir, img_id + \".jpg\")\n        label = self.df.iloc[idx][\"has_cactus\"]\n\n        # Load and apply transformations\n        image = load_image(img_path)\n        if self.transform:\n            image = self.transform(image)\n\n        return image, label\n\n\n# Thought: Define data transformations using Albumentations and torchvision\nTRAIN_TRANSFORMS = A.Compose(\n    [\n        A.Resize(224, 224),  # Resizing to fit ResNet50 input size\n        A.RandomCrop(224, 224),\n        A.HorizontalFlip(),\n        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0),\n    ]\n)\n\nVAL_TEST_TRANSFORMS = A.Compose(\n    [\n        A.Resize(224, 224),\n        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0),\n    ]\n)\n\n# Thought: Split the training data into training and validation sets\ntrain_df, val_df = train_test_split(\n    train_df, test_size=0.2, random_state=42, stratify=train_df[\"has_cactus\"]\n)\n\n# Thought: Create datasets and data loaders for training and validation\ntrain_dataset = CactusDataset(train_df, TRAIN_IMG_DIR, transform=TRAIN_TRANSFORMS)\nval_dataset = CactusDataset(val_df, TRAIN_IMG_DIR, transform=VAL_TEST_TRANSFORMS)\ntest_dataset = CactusDataset(test_df, TEST_IMG_DIR, transform=VAL_TEST_TRANSFORMS)\n\nBATCH_SIZE = 32\nNUM_WORKERS = 4\n\ntrain_loader = DataLoader(\n    train_dataset,\n    batch_size=BATCH_SIZE,\n    shuffle=True,\n    num_workers=NUM_WORKERS,\n    pin_memory=True,\n)\n\nval_loader = DataLoader(\n    val_dataset,\n    batch_size=BATCH_SIZE,\n    shuffle=False,\n    num_workers=NUM_WORKERS,\n    pin_memory=True,\n)\n\ntest_loader = DataLoader(\n    test_dataset,\n    batch_size=BATCH_SIZE,\n    shuffle=False,\n    num_workers=NUM_WORKERS,\n    pin_memory=True,\n)\n\n# Thought: Log the dataset shapes and class distribution\nlogging.info(f\"Training dataset size: {len(train_dataset)} samples\")\nlogging.info(f\"Validation dataset size: {len(val_dataset)} samples\")\nlogging.info(f\"Test dataset size: {len(test_dataset)} samples\")\n\nlogging.info(\"\\nClass distribution in training dataset:\")\nlogging.info(train_df[\"has_cactus\"].value_counts())\nlogging.info(\"\\nClass distribution in validation dataset:\")\nlogging.info(val_df[\"has_cactus\"].value_counts())\n\n# Thought: Import necessary modules for model definition\nimport torch\nimport torch.nn as nn\nfrom torchvision.models import resnet50\n\n\n# Thought: Define the model architecture using ResNet50 with pre-trained weights\ndef create_model(num_classes: int = 1) -> nn.Module:\n    \"\"\"Create a binary classification model using ResNet50 with pre-trained weights.\"\"\"\n    model = resnet50(pretrained=True)\n\n    # Freeze the base network parameters\n    for param in model.parameters():\n        param.requires_grad = False\n\n    # Replace the final layer to match our binary classification task\n    model.fc = nn.Sequential(nn.Linear(model.fc.in_features, num_classes), nn.Sigmoid())\n\n    return model\n\n\n# Thought: Create the model and move it to the appropriate device\nmodel = create_model()\nmodel = model.to(DEVICE)\n\n# Thought: Log model details\nlogging.info(f\"Model architecture: {model}\")\nlogging.info(f\"Device: {DEVICE}\")\nlogging.info(\n    f\"Number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}\"\n)\n\n\n# Thought: Function to count the number of parameters in the model\ndef count_parameters(model):\n    return sum(p.numel() for p in model.parameters())\n\n\n# Thought: Verify the input size for the model\nlogging.info(f\"Expected input size: {224}x{224}x{3} (ResNet50 input size)\")\nlogging.info(f\"Model input size: {model.fc.in_features}\")\n\n# Thought: Initialize the loss function and optimizer as per the master plan\ncriterion = nn.BCEWithLogitsLoss()\noptimizer = optim.Adam(model.parameters(), lr=0.001)\nNUM_EPOCHS = 10\nBEST_MODEL_PATH = \"best_model.pth\"\nbest_val_auc = 0.0\n\n\n# Thought: Function to compute AUC score\ndef compute_auc(y_true, y_pred):\n    \"\"\"Compute the AUC score for binary classification.\"\"\"\n    return roc_auc_score(y_true, y_pred)\n\n\n# Thought: Main training loop\nfor epoch in range(NUM_EPOCHS):\n    # Training phase\n    model.train()\n    training_loss = 0.0\n\n    for inputs, labels in train_loader:\n        inputs = inputs.to(DEVICE)\n        labels = labels.to(DEVICE).float()  # BCEWithLogitsLoss expects float targets\n\n        # Zero the gradients\n        optimizer.zero_grad()\n\n        # Forward pass\n        outputs = model(inputs)\n        loss = criterion(outputs, labels)\n\n        # Backward pass and optimize\n        loss.backward()\n        optimizer.step()\n\n        # Accumulate training loss\n        training_loss += loss.item() * inputs.size(0)\n\n    # Validation phase\n    model.eval()\n    val_loss = 0.0\n    all_labels = []\n    all_preds = []\n\n    with torch.no_grad():\n        for val_inputs, val_labels in val_loader:\n            val_inputs = val_inputs.to(DEVICE)\n            val_labels = val_labels.to(DEVICE).float()\n\n            val_outputs = model(val_inputs)\n            val_loss += criterion(val_outputs, val_labels).item() * val_inputs.size(0)\n\n            # Collect predictions and labels\n            all_preds.extend(val_outputs.squeeze().sigmoid().cpu().numpy())\n            all_labels.extend(val_labels.cpu().numpy())\n\n    # Calculate validation AUC\n    val_auc = compute_auc(all_labels, all_preds)\n\n    # Print epoch statistics\n    avg_train_loss = training_loss / len(train_dataset)\n    avg_val_loss = val_loss / len(val_dataset)\n\n    print(f\"Epoch {epoch+1}/{NUM_EPOCHS}\")\n    print(f\"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}\")\n    print(f\"Validation Metric (AUC): {val_auc:.4f}\")\n\n    # Save the best model based on validation AUC\n    if val_auc > best_val_auc:\n        best_val_auc = val_auc\n        torch.save(model.state_dict(), BEST_MODEL_PATH)\n        print(f\"Best model saved with validation AUC: {best_val_auc:.4f}\")\n\n# Thought: Load the best model for further use\nmodel.load_state_dict(torch.load(BEST_MODEL_PATH))\n\n# Thought: Load the best model for inference\nmodel.load_state_dict(torch.load(\"best_model.pth\"))\nmodel.eval()\n\n# Thought: Create directory for submission if it doesn't exist\nos.makedirs(\"./submission\", exist_ok=True)\n\n# Thought: Initialize lists to store predictions and IDs\nall_preds = []\nall_ids = []\n\n# Thought: Iterate through the test data to generate predictions\nwith torch.no_grad():\n    for inputs, labels in test_loader:\n        inputs = inputs.to(DEVICE)\n        # Get predictions\n        outputs = model(inputs)\n        # Convert logits to probabilities using sigmoid\n        probs = torch.sigmoid(outputs).cpu().numpy()\n        all_preds.extend(probs.squeeze())\n\n        # Collect image IDs from test_df\n        batch_ids = test_df.iloc[test_loader.dataset.index_start :][\n            test_loader.dataset.index_start + len(inputs) :\n        ][\"id\"].tolist()\n        all_ids.extend(batch_ids)\n\n# Thought: Create a DataFrame with predictions\nsubmission_df = pd.DataFrame({\"id\": all_ids, \"has_cactus\": all_preds})\n\n# Thought: Save the DataFrame to the required submission file\nsubmission_df.to_csv(\"./submission/submission.csv\", index=False)\n\n# Thought: Log the creation of the submission file\nlogging.info(f\"Submission file created at './submission/submission.csv'\")"], "term_out": ["<OMITTED>", "Traceback (most recent call last):\n  File \"/home/asim_aims_ac_za/workspace/aide-agent/aide/interpreter.py\", line 137, in _run_session\n    exec(compile(code, self.agent_file_name, \"exec\"), global_scope)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"runfile.py\", line 33\n    Okay, I need to write the initial setup code for this Kaggle competition. The task is to classify aerial images with cacti, so it's an image classification problem. The master plan mentions using PyTorch and pre-trained models, so I should import relevant libraries.\n                                                                                                                                     ^\nSyntaxError: unterminated string literal (detected at line 33)\nExecution time: a moment seconds (time limit is 10 minutes)."], "analysis": ["The code execution failed with an AttributeError indicating albumentations.RandomRotation does not exist, preventing the pipeline from running and producing a submission CSV. No validation metric was computed.", "The script failed to execute due to a syntax error (unterminated string literal) before training or submission steps could run."], "exp_name": "RedHatAI_DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic+DeepSeek-R1-Distill-Qwen-14B-FP8-dynamicaerial-cactus-identification_planner_5_steps", "metrics": [0, 0]}
+
+let lastClick = 0;
+let firstFrameTime = undefined;
+
+let nodes = [];
+let edges = [];
+
+let lastScrollPos = 0;
+
+setup = () => {
+  canvas = createCanvas(...updateTargetDims());
+};
+
+class Node {
+  x;
+  y;
+  size;
+  xT;
+  yT;
+  xB;
+  yB;
+  treeInd;
+  color;
+  relSize;
+  animationStart = Number.MAX_VALUE;
+  animationProgress = 0;
+  isStatic = false;
+  hasChildren = false;
+  isRootNode = true;
+  isStarred = false;
+  selected = false;
+  renderSize = 10;
+  edges = [];
+  bgCol;
+
+  constructor(x, y, relSize, treeInd) {
+    const minSize = 35;
+    const maxSize = 60;
+
+    const maxColor = 10;
+    const minColor = 125;
+
+    this.relSize = relSize;
+    this.treeInd = treeInd;
+    this.size = minSize + (maxSize - minSize) * relSize;
+    this.color = minColor + (maxColor - minColor) * relSize;
+    this.bgCol = Math.round(Math.max(this.color / 2, 0));
+
+    this.x = x;
+    this.y = y;
+    this.xT = x;
+    this.yT = y - this.size / 2;
+    this.xB = x;
+    this.yB = y + this.size / 2;
+
+    nodes.push(this);
+  }
+
+  startAnimation = (offset = 0) => {
+    if (this.animationStart == Number.MAX_VALUE)
+      this.animationStart = globalTime + offset;
+  };
+
+  child = (node) => {
+    let edge = new Edge(this, node);
+    this.edges.push(edge);
+    edges.push(edge);
+    this.hasChildren = true;
+    node.isRootNode = false;
+    return node;
+  };
+
+  render = () => {
+    if (globalTime - this.animationStart < 0) return;
+
+    const mouseXlocalCoords = (mouseX - width / 2) / scaleFactor;
+    const mouseYlocalCoords = (mouseY - height / 2) / scaleFactor;
+    const isMouseOver =
+      dist(mouseXlocalCoords, mouseYlocalCoords, this.x, this.y) <
+      this.renderSize / 1.5;
+    if (isMouseOver) cursor(HAND);
+    if (isMouseOver && mouseIsPressed) {
+      nodes.forEach((n) => (n.selected = false));
+      this.selected = true;
+      setCodeAndPlan(
+        treeStructData.code[this.treeInd],
+        treeStructData.plan[this.treeInd],
+      );
+      manualSelection = true;
+    }
+
+    this.renderSize = this.size;
+    if (!this.isStatic) {
+      this.animationProgress = animEase(
+        (globalTime - this.animationStart) / 1000,
+      );
+      if (this.animationProgress >= 1) {
+        this.isStatic = true;
+      } else {
+        this.renderSize =
+          this.size *
+          (0.8 +
+            0.2 *
+              (-3.33 * this.animationProgress ** 2 +
+                4.33 * this.animationProgress));
+      }
+    }
+
+    fill(this.color);
+    if (this.selected) {
+      fill(accentCol);
+    }
+
+    noStroke();
+    square(
+      this.x - this.renderSize / 2,
+      this.y - this.renderSize / 2,
+      this.renderSize,
+      10,
+    );
+
+    noStroke();
+    textAlign(CENTER, CENTER);
+    textSize(this.renderSize / 2);
+    fill(255);
+    // fill(lerpColor(color(accentCol), color(255), this.animationProgress))
+    text("{ }", this.x, this.y - 1);
+    // DEBUG PRINT:
+    // text(round(this.relSize, 2), this.x, this.y - 1)
+    // text(this.treeInd, this.x, this.y + 15)
+
+    const dotAnimThreshold = 0.85;
+    if (this.isStarred && this.animationProgress >= dotAnimThreshold) {
+      let dotAnimProgress =
+        (this.animationProgress - dotAnimThreshold) / (1 - dotAnimThreshold);
+      textSize(
+        ((-3.33 * dotAnimProgress ** 2 + 4.33 * dotAnimProgress) *
+          this.renderSize) /
+          2,
+      );
+      if (this.selected) {
+        fill(0);
+        stroke(0);
+      } else {
+        fill(accentCol);
+        stroke(accentCol);
+      }
+      strokeWeight((-(dotAnimProgress ** 2) + dotAnimProgress) * 2);
+      text("*", this.x + 20, this.y - 11);
+      noStroke();
+    }
+
+    if (!this.isStatic) {
+      fill(bgCol);
+      const progressAnimBaseSize = this.renderSize + 5;
+      rect(
+        this.x - progressAnimBaseSize / 2,
+        this.y -
+          progressAnimBaseSize / 2 +
+          progressAnimBaseSize * this.animationProgress,
+        progressAnimBaseSize,
+        progressAnimBaseSize * (1 - this.animationProgress),
+      );
+    }
+    if (this.animationProgress >= 0.9) {
+      this.edges
+        .sort((a, b) => a.color() - b.color())
+        .forEach((e, i) => {
+          e.startAnimation((i / this.edges.length) ** 2 * 1000);
+        });
+    }
+  };
+}
+
+class Edge {
+  nodeT;
+  nodeB;
+  animX = 0;
+  animY = 0;
+  animationStart = Number.MAX_VALUE;
+  animationProgress = 0;
+  isStatic = false;
+  weight = 0;
+
+  constructor(nodeT, nodeB) {
+    this.nodeT = nodeT;
+    this.nodeB = nodeB;
+    this.weight = 2 + nodeB.relSize * 1;
+  }
+
+  color = () => this.nodeB.color;
+
+  startAnimation = (offset = 0) => {
+    if (this.animationStart == Number.MAX_VALUE)
+      this.animationStart = globalTime + offset;
+  };
+
+  render = () => {
+    if (globalTime - this.animationStart < 0) return;
+
+    if (!this.isStatic) {
+      this.animationProgress = animEase(
+        (globalTime - this.animationStart) / 1000,
+      );
+      if (this.animationProgress >= 1) {
+        this.isStatic = true;
+        this.animX = this.nodeB.xT;
+        this.animY = this.nodeB.yT;
+      } else {
+        this.animX = bezierPoint(
+          this.nodeT.xB,
+          this.nodeT.xB,
+          this.nodeB.xT,
+          this.nodeB.xT,
+          this.animationProgress,
+        );
+
+        this.animY = bezierPoint(
+          this.nodeT.yB,
+          (this.nodeT.yB + this.nodeB.yT) / 2,
+          (this.nodeT.yB + this.nodeB.yT) / 2,
+          this.nodeB.yT,
+          this.animationProgress,
+        );
+      }
+    }
+    if (this.animationProgress >= 0.97) {
+      this.nodeB.startAnimation();
+    }
+
+    strokeWeight(this.weight);
+    noFill();
+    stroke(
+      lerpColor(color(bgCol), color(accentCol), this.nodeB.relSize * 1 + 0.7),
+    );
+    bezier(
+      this.nodeT.xB,
+      this.nodeT.yB,
+      this.nodeT.xB,
+      (this.nodeT.yB + this.nodeB.yT) / 2,
+      this.animX,
+      (this.nodeT.yB + this.nodeB.yT) / 2,
+      this.animX,
+      this.animY,
+    );
+  };
+}
+
+draw = () => {
+  cursor(ARROW);
+  frameRate(120);
+  if (!firstFrameTime && frameCount <= 1) {
+    firstFrameTime = millis();
+  }
+  // ---- update global animation state ----
+  const initialSpeedScalingEaseIO =
+    (cos(min((millis() - firstFrameTime) / 8000, 1.0) * PI) + 1) / 2;
+  const initialSpeedScalingEase =
+    (cos(min((millis() - firstFrameTime) / 8000, 1.0) ** (1 / 2) * PI) + 1) / 2;
+  const initAnimationSpeedFactor = 1.0 - 0.4 * initialSpeedScalingEaseIO;
+  // update global scaling-aware clock
+  globalTime += globalAnimSpeed * initAnimationSpeedFactor * deltaTime;
+
+  if (nodes.length == 0) {
+    const spacingHeight = height * 1.3;
+    const spacingWidth = width * 1.3;
+    treeStructData.layout.forEach((lay, index) => {
+      new Node(
+        spacingWidth * lay[0] - spacingWidth / 2,
+        20 + spacingHeight * lay[1] - spacingHeight / 2,
+        1 - treeStructData.metrics[index],
+        index,
+      );
+    });
+    treeStructData.edges.forEach((ind) => {
+      nodes[ind[0]].child(nodes[ind[1]]);
+    });
+    nodes.forEach((n) => {
+      if (n.isRootNode) n.startAnimation();
+    });
+    nodes[0].selected = true;
+    setCodeAndPlan(
+      treeStructData.code[0],
+      treeStructData.plan[0],
+    )
+  }
+
+  const staticNodes = nodes.filter(
+    (n) => n.isStatic || n.animationProgress >= 0.7,
+  );
+  if (staticNodes.length > 0) {
+    const largestNode = staticNodes.reduce((prev, current) =>
+      prev.relSize > current.relSize ? prev : current,
+    );
+    if (!manualSelection) {
+      if (!largestNode.selected) {
+        setCodeAndPlan(
+          treeStructData.code[largestNode.treeInd],
+          treeStructData.plan[largestNode.treeInd],
+        );
+      }
+      staticNodes.forEach((node) => {
+        node.selected = node === largestNode;
+      });
+    }
+  }
+  background(bgCol);
+  // global animation transforms
+  translate(width / 2, height / 2);
+  scale(scaleFactor);
+
+  
+  // ---- fg render ----
+  edges.forEach((e) => e.render());
+  nodes.forEach((n) => n.render());
+  
+};
+
+    </script>
+    <title>AIDE Run Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        overflow: scroll;
+      }
+      body {
+        background-color: #f2f0e7;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 40vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+    </style>
+  </head>
+  <body>
+    <pre
+      id="text-container"
+    ><div id="plan"></div><hr><code id="code" class="language-python"></code></pre>
+  </body>
+</html>
