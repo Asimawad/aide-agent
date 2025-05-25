@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from .backend import compile_prompt_to_md
 
-from .agent import Agent, PlannerAgent
+from .agent import Agent, CodeChainAgent
 from .interpreter import Interpreter
 from .journal import Journal
 from omegaconf import OmegaConf
@@ -45,8 +45,8 @@ class Experiment:
             prep_agent_workspace(self.cfg)
 
         self.journal = Journal()
-        if self.cfg.ITS_Strategy == "planner":
-            self.agent = PlannerAgent(
+        if self.cfg.agent.ITS_Strategy == "code-chain" or self.cfg.agent.ITS_Strategy == "chain-reflect":
+            self.agent = CodeChainAgent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,
                 journal=self.journal,

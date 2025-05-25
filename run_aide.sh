@@ -29,11 +29,11 @@ aide \
     agent.steps=5 \
     agent.time_limit=36000 \
     agent.obfuscate=False \
-    agent.ITS_Strategy="planner" \
+    agent.ITS_Strategy="chain-reflect" \
     agent.code.model="${PLANNER_MODEL}" \
     agent.code.planner_model="${PLANNER_MODEL}" \
     agent.code.temp=0.8 \
-    agent.code.max_new_tokens=4096 \
+    agent.code.max_new_tokens=2048 \
     agent.code.num_return_sequences=1 \
     agent.feedback.model="${O4_MODEL}" \
     agent.search.max_debug_depth=5 \

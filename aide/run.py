@@ -19,7 +19,7 @@ from .utils.wandb_logger import WandbLogger # We will create this
 
 # Keep other imports from your original run.py
 from . import backend
-from .agent import Agent, PlannerAgent
+from .agent import Agent, CodeChainAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node  # Node might not be directly used here but good to have context
 from omegaconf import OmegaConf
@@ -187,9 +187,9 @@ def run():
     logger.info(f"Loaded benchmarks for {cfg.competition_name}")
 
     journal = Journal()
-    if cfg.agent.ITS_Strategy == "planner":
-        logger.info("Initializing PlannerAgent.")
-        agent = PlannerAgent(
+    if cfg.agent.ITS_Strategy == "code-chain" or cfg.agent.ITS_Strategy == "chain-reflect":
+        logger.info("Initializing CodeChainAgent.")
+        agent = CodeChainAgent(
             task_desc=task_desc, # task_desc is already a string or dict
             cfg=cfg,
             journal=journal,

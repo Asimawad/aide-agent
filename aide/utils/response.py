@@ -129,3 +129,49 @@ def extract_summary_and_plan(text, task=False):
         plan = parts[1].strip()
         return summary, plan
     return " " , text
+
+
+
+def extract_reflection_summary_and_revised_code(text: str) -> tuple[str, str]:
+    """
+    Extracts the reflection summary and the revised code snippet from an LLM response
+    that is expected to have 'Reflection Summary:' and 'Revised Code Snippet:' sections.
+    """
+    summary = ""
+    revised_code = ""
+
+    summary_match = re.search(r"Reflection Summary:(.*?)---", text, re.DOTALL | re.IGNORECASE)
+    if summary_match:
+        summary = summary_match.group(1).strip()
+    else: # Fallback if --- is missing but summary is there
+        summary_match_alt = re.search(r"Reflection Summary:(.*?)Revised Code Snippet:", text, re.DOTALL | re.IGNORECASE)
+        if summary_match_alt:
+            summary = summary_match_alt.group(1).strip()
+        else: # Try to grab anything before code as summary
+            summary_match_generic = re.search(r"(.*?)Revised Code Snippet:", text, re.DOTALL | re.IGNORECASE)
+            if summary_match_generic:
+                summary = summary_match_generic.group(1).strip()
+
+
+    # Extract code using existing extract_code, assuming it handles ```python ... ```
+    # We might need to be more specific if the reflection output has other text after the code block.
+    # For now, let's assume the Revised Code Snippet is the *last* major block.
+    code_block_match = re.search(r"Revised Code Snippet:.*?```python\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if code_block_match:
+        revised_code = code_block_match.group(1).strip()
+    else: # Fallback if only one code block is present after "Revised Code Snippet:"
+        code_block_match_alt = re.search(r"Revised Code Snippet:(.*)", text, re.DOTALL | re.IGNORECASE)
+        if code_block_match_alt:
+            potential_code_block = code_block_match_alt.group(1).strip()
+            extracted_code_from_potential = extract_code(potential_code_block) # Use your existing robust extractor
+            if extracted_code_from_potential:
+                revised_code = extracted_code_from_potential
+            else: # If no code block found, maybe the whole thing is the snippet (less likely)
+                revised_code = f"# FAILED TO EXTRACT REVISED CODE SNIPPET\n# Raw after 'Revised Code Snippet:':\n{potential_code_block}"
+        else:
+            revised_code = "# FAILED TO FIND 'Revised Code Snippet:' SECTION"
+            
+    if not summary:
+        summary = "SUMMARY_EXTRACTION_FAILED_FROM_REFLECTION"
+        
+    return summary, revised_code
