@@ -30,15 +30,19 @@ setuptools
 packaging
 wheel
 s3fs
+tensorflow
 datasets
 scikit-learn
 xgboost
 lightgbm
 # tensorflow==2.19.0
 keras
+pyvoro
 # numpy==2.1.3
 matplotlib
+albumentations
 seaborn
+inflect
 statsmodels
 nltk
 peft
