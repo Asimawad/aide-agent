@@ -38,20 +38,31 @@ def extract_jsons(text):
     return json_objects
 
 
-def trim_long_string(string, threshold=5100, k=2500):
-    # Check if the length of the string is longer than the threshold
+
+def trim_long_string(string: str, threshold: int = 3000, k: int = 1200) -> str: # Reduced defaults
+    """
+    Trims a long string to a specified threshold by showing the first k and last k characters.
+    Default threshold and k values are reduced to be more conservative with token counts.
+    """
+    if not isinstance(string, str): # Handle non-string inputs gracefully
+        return str(string)
+        
     if len(string) > threshold:
-        # Output the first k and last k characters
         first_k_chars = string[:k]
         last_k_chars = string[-k:]
+        truncated_len = len(string) - (len(first_k_chars) + len(last_k_chars)) # More accurate truncated_len
+        # Ensure k is not more than half the threshold to avoid overlap or negative truncated_len
+        if k * 2 > threshold:
+            # Adjust k to be smaller if string is not much larger than k*2
+            adjusted_k = len(string) // 3 
+            first_k_chars = string[:adjusted_k]
+            last_k_chars = string[-adjusted_k:]
+            truncated_len = len(string) - (len(first_k_chars) + len(last_k_chars))
 
-        truncated_len = len(string) - 2 * k
-
-        return f"{first_k_chars}\n ... [{truncated_len} characters truncated] ... \n{last_k_chars}"
+        return f"{first_k_chars}\n... [{truncated_len} characters truncated] ...\n{last_k_chars}"
     else:
         return string
-import re
-import black # Assuming you have black for formatting
+
 
 def is_valid_python_script(script_content: str) -> bool:
     """Check if a script content is a valid Python script."""

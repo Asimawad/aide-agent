@@ -8,7 +8,7 @@ import openai
 from omegaconf import OmegaConf
 from funcy import notnone, once, select_values
 from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
-
+from aide.backend.utils import ContextLengthExceededError # Add this import at the top of agent.py
 logger = logging.getLogger("aide")
 
 
@@ -174,7 +174,9 @@ def query(
             }
             logger.debug(f"No of tokens {output_tokens}")
             return output, req_time, input_tokens, output_tokens, info
-
+        except ContextLengthExceededError as cle: # Catch specific error
+            logger.error(f"Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True}) # exc_info=False as CLE is already logged well
+            return f"Exceeded context length limit", 0, 0, 0, {"error": str(cle)}
         except Exception as e:
             logger.error(
                 f"vLLM query failed (attempt {retries + 1}): {e}", exc_info=True

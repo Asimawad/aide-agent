@@ -11,6 +11,7 @@ from aide.backend.utils import (
     OutputType,
     opt_messages_to_list,
     backoff_create,
+    ContextLengthExceededError,
 )
 from funcy import notnone, once, select_values
 import openai
@@ -196,6 +197,9 @@ def query(
             messages=messages,
             **filtered_kwargs,
         )
+    except ContextLengthExceededError as cle:
+        logger.error(f"Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True})
+        return f"ERROR: {e}", 0, 0, 0, {"error": str(e)}
     except Exception as e:
         logger.error(f"OpenAI API call failed: {str(e)}")
         error_info = {"error": str(e), "model": model}

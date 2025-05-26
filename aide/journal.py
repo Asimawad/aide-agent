@@ -190,89 +190,58 @@ class Journal(DataClassJsonMixin):
         else:
             nodes = self.nodes
         return max(nodes, key=lambda n: n.metric)
+# aide/journal.py -> Journal.generate_summary method
 
+    def generate_summary(self, include_code: bool = True, max_nodes_to_summarize: int = 2, 
+                         code_threshold: int = 1000, code_k: int = 400,
+                         plan_threshold: int = 1000, plan_k: int = 400, # Added plan truncation
+                         analysis_threshold: int = 500, analysis_k: int = 200) -> str:
+        summary_parts = []
+        nodes_to_consider = []
 
-    # def generate_summary(self, include_code: bool = True) -> str:
-    #     """Generate a summary of the journal for the agent."""
-    #     summary = []
-    #     if len(self.good_nodes) == 0:
-    #         count = 0
-    #         for n in self.draft_nodes:
-    #             count += 1
-    #             split_plan = n.plan.split("</think>")
-    #             if len(split_plan) > 1:
-    #                 summary_part = f"Design: {split_plan[1]}\n"
-    #             else:
-    #                 summary_part = f"Design: {n.plan}\n"
-    #             summary.append(summary_part)
-    #             if include_code:
-    #                 summary.append(f"Code: {n.code}\n")
-    #             if n.analysis:
-    #                 summary.append(f"Results: {n.analysis}\n")
-    #             if count == 3:
-    #                 break
-    #         return "\n-------------------------------\n".join(summary)
-    #     else:
+        # Prioritize good nodes, then recent draft nodes if no good nodes
+        if self.good_nodes:
+            sorted_good_nodes = sorted(self.good_nodes, key=lambda n: n.step, reverse=True)
+            nodes_to_consider = sorted_good_nodes[:max_nodes_to_summarize]
+        elif self.draft_nodes:
+            sorted_draft_nodes = sorted(self.draft_nodes, key=lambda n: n.step, reverse=True)
+            nodes_to_consider = sorted_draft_nodes[:max_nodes_to_summarize]
+        
+        if not nodes_to_consider and self.nodes: # Fallback to most recent nodes
+            sorted_all_nodes = sorted(self.nodes, key=lambda n: n.step, reverse=True)
+            nodes_to_consider = sorted_all_nodes[:max_nodes_to_summarize]
 
-    #         for n in self.good_nodes:
-    #             summary_part = f"Design: {n.plan}\n"
-    #             split_plan = n.plan.split("</think>")
-    #             if len(split_plan) > 1:
-    #                 summary_part = f"Design: {split_plan[1]}\n"
-    #             if include_code:
-    #                 summary_part += f"Code: {n.code}\n"
-    #             summary_part += f"Results: {n.analysis}\n"
-    #             summary_part += f"Validation Metric: {n.metric.value}\n"
-    #             summary.append(summary_part)
-    #         return "\n-------------------------------\n".join(summary)
-
-    def generate_summary(self, stage: Literal["draft", "debug", "improve"]="draft", include_code: bool = True) -> str:
-        """Generate a summary of the journal for the agent."""
-        if stage == "draft":
-            nodes = self.draft_nodes
-        elif stage == "debug":
-            nodes = self.buggy_nodes
-        elif stage == "improve":
-            nodes = self.good_nodes
-        else:
-            return "" # ValueError(f"Invalid stage: {stage}")
-
-        if len(nodes) == 0:
-            return ""
-        summary = []
-
-        if len(nodes) >= 1 and include_code and (stage == "draft" or stage == "debug"):
-            for n in range(min(len(nodes), 2)):
-                summary.append(f"Code: {nodes[n].code}\nResults: {nodes[n].analysis}\n")
-            return "\n-------------------------------\n".join(summary)
-
-        summary = []
-        for n in nodes:
-            summary_part = f"Design: {n.plan}\n"
-            split_plan = n.plan.split("</think>")
-            if len(split_plan) > 1:
-                summary_part = f"Design: {split_plan[1]}\n"
-
-            current_entry_parts = []
+        for n_idx, n in enumerate(nodes_to_consider):
+            current_entry_parts = [f"--- Attempt {n_idx+1} (Node ID: {n.id}, Stage: {n.stage_name}) ---"]
             plan_to_use = n.plan
-            split_plan = n.plan.split("</think>")
-            if len(split_plan) > 1:
-                plan_to_use = split_plan[1]
+            if n.plan and "</think>" in n.plan:
+                split_plan = n.plan.split("</think>")
+                if len(split_plan) > 1:
+                    plan_to_use = split_plan[1]
             
-            current_entry_parts.append(f"Design: {plan_to_use.strip()}") # .strip() is good practice
-            
-            if include_code:
-                current_entry_parts.append(f"Code: {n.code.strip()}")
+            if plan_to_use:
+                 current_entry_parts.append(f"Design: {trim_long_string(plan_to_use.strip(), threshold=plan_threshold, k=plan_k)}")
+            else:
+                 current_entry_parts.append("Design: No plan provided.")
+
+            if include_code and n.code: # Check if n.code exists
+                current_entry_parts.append(f"Code: {trim_long_string(n.code.strip(), threshold=code_threshold, k=code_k)}")
+            elif include_code:
+                current_entry_parts.append("Code: No code available.")
+
             if n.analysis:
-                current_entry_parts.append(f"Results: {n.analysis.strip()}")
-            if n.metric and n.metric.value is not None: # Check if metric and its value exist
-                current_entry_parts.append(f"Validation Metric: {n.metric.value}")
+                current_entry_parts.append(f"Results: {trim_long_string(n.analysis.strip(), threshold=analysis_threshold, k=analysis_k)}")
+            if n.metric and n.metric.value is not None:
+                current_entry_parts.append(f"Validation Metric: {n.metric.value:.4f} ({'Maximize' if n.metric.maximize else 'Minimize'})")
+            if n.is_buggy:
+                current_entry_parts.append(f"Outcome: Buggy (Error type: {n.exc_type or 'Unknown'})")
             
-            summary.append("\n".join(current_entry_parts)) # Join parts of a single entry, then append
+            summary_parts.append("\n".join(current_entry_parts))
 
-        return "\n-------------------------------\n".join(summary)
-
-
+        if not summary_parts:
+            return "No previous attempts recorded or suitable for summary."
+            
+        return "\n\n-------------------------------\n".join(summary_parts)
 def get_path_to_node(journal: Journal, node_id: str) -> list[str]:
     path = [node_id]
 

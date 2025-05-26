@@ -411,7 +411,7 @@ def get_agent_draft_user_prompt(
         "Introduction": introduction,
         "Overall Task Description": task_desc,
         "Data Overview" :data_prev,
-        "Memory (Summary of Previous Attempts on this Task)": journal_summary,
+        "Memory": journal_summary,
         "Instructions": {
             "Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST,
             "Environment and Packages": get_competition_environment_text(competition_name),
@@ -777,7 +777,7 @@ def get_planner_agent_draft_plan_user_prompt(
         "Overall Task Description": task_desc,
         "Data Overview": data_overview,
         "Environment and Packages": get_competition_environment_text(competition_name),
-        "Memory (Summary of Previous Attempts on this Task-try to use a different approach than the previous solutions in the memory)": journal_summary,
+        "Memory": journal_summary,
         "Instructions": {
             "Guidance on Summary": "The summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan.",
 
@@ -814,10 +814,10 @@ def get_planner_agent_draft_code_user_prompt(
             "Task Summary": task_summary_from_planner if task_summary_from_planner else "No task summary was provided by the planner.",
             "Plan to Implement": plan_from_planner if plan_from_planner else "CRITICAL ERROR: No plan was provided by the planner. Cannot generate code."
         },
-        "Data Overview (if available)": data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
+        "Data Overview": data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
         "Environment and Packages": get_competition_environment_text(competition_name),
-        "Memory of Previous Attempts (if any)": journal_summary if journal_summary else "No previous attempts on record for this specific task.",
-        "Key Instructions for Your Code (Refer to System Prompt for Full Details)": {
+        "Memory": journal_summary if journal_summary else "No previous attempts on record for this specific task.",
+        "Key Instructions for Your Code": {
             "Primary Goal": "Generate a single, complete, runnable Python script that meticulously follows the 'Plan to Implement'.",
             "Commenting": "MANDATORY: Use '# Thought:' comments before each code block implementing a plan step, as detailed in your system instructions.",
             "Output Format": "Your response must be *only* the Python code block. No extra text.",
@@ -1084,7 +1084,7 @@ def _get_base_coder_chain_user_prompt_args(
         },
         "Python Code Generated So Far": wrap_code(current_code_so_far if current_code_so_far.strip() else "# This is the first code segment to be generated."),
         "Environment and Packages": get_competition_environment_text(competition_name),
-        "Data Overview (if available)": data_preview_content if data_preview_content else "Refer to Master Plan and Task Summary for data details."
+        "Data Overview": data_preview_content if data_preview_content else "Refer to Master Plan and Task Summary for data details."
     }
 
 def get_coder_chain_user_prompt_segment_setup(
