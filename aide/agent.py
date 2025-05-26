@@ -12,7 +12,7 @@ from .journal import Journal, Node
 from .utils import data_preview # data_preview.generate
 from .utils.config import Config
 from .utils.pretty_logging import log_step # logger from pretty_logging might conflict, be careful
-
+from .backend.utils import ContextLengthExceededError # Add this import at the top of agent.py
 from .utils.wandb_logger import WandbLogger
 from .utils.prompt_utils import (
     review_func_spec,
@@ -169,11 +169,17 @@ class Agent: # This is now the base class
                     num_responses=self.acfg.code.num_return_sequences,
                     convert_system_to_user=self.acfg.convert_system_to_user,
                 )
+            except ContextLengthExceededError as cle:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Context length exceeded: {cle}. Failing this operation.", extra={"verbose": True})
+                return "", f"LLM Query Error: Context Length Exceeded - {str(cle)}", "CONTEXT_LENGTH_EXCEEDED"
             except Exception as e:
                 logger.error(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Query failed: {e}", exc_info=True, extra={"verbose": True})
-                if attempt == retries - 1: return "", f"LLM Query Error: {e}", "LLM_QUERY_ERROR"
-                time.sleep(2)
+                if attempt == retries - 1: 
+                    return "", f"LLM Query Error: {e}", "LLM_QUERY_ERROR"
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5)) # Make delay configurable
                 continue
+            if completion_text == "Exceeded context length limit":
+                return "", completion_text or "No LLM response received", "EXTRACTION_FAILED"
             code = extract_code(completion_text)
             nl_text = extract_text_up_to_code(completion_text)
             if code and nl_text:
@@ -476,19 +482,44 @@ class CodeChainAgent(Agent): # Inherit from Agent
                     code_snippet = extract_code(completion_text)
                     if not code_snippet or not code_snippet.strip():
                         logger.warning(f"{log_prefix} Attempt {attempt+1}: Retrying ...")
-                        # Continue to next attempt instead of returning
                         continue
                     else:
                         logger.info(f"{log_prefix} Attempt {attempt+1}: Successfully extracted code.", extra={"verbose": True})
                         logger.debug(f"{log_prefix} \n EXTRACTED_CODE_START\n ----------- \n {code_snippet}\n ----------- \n EXTRACTED_CODE_END", extra={"verbose": True})
                         return code_snippet.strip()
+
+                if completion_text.startswith("Exceeded context length limit"):
+                    if retries == 0:
+                        try:
+                            user_prompt.pop("Memory", None)
+                        except Exception as e:
+                            logger.error(f"{log_prefix} Attempt {attempt+1}: Error dropping memory: {e}", exc_info=True, extra={"verbose": True})
+                    if retries == 1:
+                        try:
+                            user_prompt.pop("Memory", None)
+                            user_prompt.pop("Environment and Packages", None)
+                            user_prompt.pop("Data Overview", None)
+
+                        except Exception as e:
+                            logger.error(f"{log_prefix} Attempt {attempt+1}: Error dropping environment and packages: {e}", exc_info=True, extra={"verbose": True})
+                    if retries == 2:
+                        try:
+                            user_prompt.pop("Memory", None)
+                            user_prompt.pop("Instructions", None)
+                        except Exception as e:
+                            logger.error(f"{log_prefix} Attempt {attempt+1}: Error dropping data overview: {e}", exc_info=True, extra={"verbose": True})
+                    retries += 1
+                    continue
                 return completion_text
+            except ContextLengthExceededError as cle: # Catch specific error
+                logger.error(f"{log_prefix} Attempt {attempt+1}: Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True}) # exc_info=False as CLE is already logged well
+                return None #
             except Exception as e:
                 logger.error(f"{log_prefix} Attempt {attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
-                if attempt == retries - 1:
+                if attempt == retries - 1: 
                     logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True})
-                    return None
-                time.sleep(2)
+                    return None 
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5)) # Make delay configurable
         return ""
 
 
@@ -548,15 +579,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
             if completion_text is None:
                 logger.error(f"LLM query returned None.")
                 return "#LLM_QUERY_RETURNED_NONE_FOR_SEGMENT"
-
-            # code_snippet = extract_code(completion_text)
-            
-            # if not code_snippet or not code_snippet.strip():
-            #     logger.warning(f"Code extraction failed. Using raw completion text. Raw: {trim_long_string(completion_text)}")
-            #     if "```python" not in completion_text and "import " not in completion_text and "def " not in completion_text:
-            #         code_snippet = f"#CODE_EXTRACTION_FAILED_OR_NOT_CODE_FOR_SEGMENT: {trim_long_string(completion_text)}"
-            #     else:
-            #         
+  
             code_snippet = completion_text
             
             return code_snippet.strip() if code_snippet else ""
