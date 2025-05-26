@@ -22,7 +22,6 @@ from .utils.response import trim_long_string
 @dataclass(eq=False)
 class Node(DataClassJsonMixin):
     """A single node in the solution tree. Contains code, execution results, and evaluation information."""
-
     # ---- code & plan ----
     code: str
     plan: str = field(default=None, kw_only=True)  # type: ignore
