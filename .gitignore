@@ -15,6 +15,7 @@ uv.lock
 info/
 scratch
 build/
+logs_old/
 develop-eggs/
 dist/
 reflection_draafts.py
