@@ -184,7 +184,6 @@ class Agent: # This is now the base class
         logger.info(f"{log_prefix_base}: Selected: Improve greedy node {greedy_node.id} (metric: {metric_display}).", extra={"verbose": True})
         return greedy_node
 
-    # REMOVE: _prompt_environment, _prompt_impl_guideline, _prompt_resp_fmt
     # These are now handled by functions in prompt_utils.py
 
     def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict=None, retries: int = 3) -> tuple[str, str, str]: 
@@ -372,8 +371,13 @@ class Agent: # This is now the base class
         shutil.rmtree(submission_dir, ignore_errors=True); submission_dir.mkdir(exist_ok=True)
         self.current_step = current_step_number
         if not self.journal.nodes or self.data_preview is None: self.update_data_preview()
+        
+        
+        
         parent_node = self.search_policy()
+        
         result_node: Node; draft_flag = False; node_stage = "unknown"
+        
         if parent_node is None:
             draft_flag = True; node_stage = "draft"; result_node = self._draft(parent_node)
         elif parent_node.is_buggy:
@@ -381,12 +385,16 @@ class Agent: # This is now the base class
         else:
             node_stage = "improve"; result_node = self._improve(parent_node)
         
+
         logger.info(f"{log_prefix_main}: Executing code for node {result_node.id} (stage: {node_stage}).", extra={"verbose": True})
         exec_start_time = time.time()
         exec_result = exec_callback(result_node.code, reset_session=True)
         exec_duration = time.time() - exec_start_time
         logger.info(f"{log_prefix_main}: Code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
         result_node = self.parse_exec_result(node=result_node, exec_result=exec_result)
+        
+        
+        
         buggy_status_before_reflection = result_node.is_buggy
         reflection_applied = False
         if draft_flag and self.acfg.ITS_Strategy == "self-reflection" and result_node.is_buggy:
@@ -397,6 +405,8 @@ class Agent: # This is now the base class
                 exec_result_reflect = exec_callback(result_node.code, reset_session=True)
                 exec_duration = time.time() - exec_start_time_reflect
                 result_node = self.parse_exec_result(node=result_node, exec_result=exec_result_reflect)
+        
+        
         if buggy_status_before_reflection and not result_node.is_buggy:
             result_node.effective_debug_step = True; result_node.effective_reflections = reflection_applied
         else:
@@ -413,6 +423,10 @@ class Agent: # This is now the base class
             console.print(f"[bold green]stage: {node_stage}[/bold green]")
             console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
             console.print(f"[bold green]Feedback: {result_node.analysis}[/bold green]") # Console output
+        
+        
+        
+        
         step_log_data = { # Prepare data for WandbLogger
             f"exec/exec_time_s": exec_duration,
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
@@ -446,6 +460,10 @@ class Agent: # This is now the base class
         t_step_end = time.time()
         logger.info(f"{log_prefix_main}_END: Duration: {t_step_end - t_step_start:.2f}s", extra={"verbose": True})
 
+    
+    
+    
+    
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
         log_prefix = f"{self.__class__.__name__.upper()}_PARSE_EXEC_STEP{self.current_step}_NODE{node.id}"
         # ... (implementation from Agent class) ...
@@ -512,11 +530,6 @@ class PlannerAgent(Agent): # Inherit from Agent
         competition_benchmarks=None,
     ):
         super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
-        # PlannerAgent specific initializations, if any, can go here
-        # Example: self.planner_specific_attribute = "some_value"
-        # _code_quality is already in base Agent __init__
-        # W&B plot lists are now in WandbLogger, so remove them from here if they were duplicated.
-
     # Override _query_llm_with_retries as it's specific to PlannerAgent's two-model approach
     def _query_llm_with_retries(
         self,
