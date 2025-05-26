@@ -21,7 +21,7 @@ export first_model_log="./logs/vllm_coder.log"
 export second_model_log="./logs/vllm_planner.log"
 
 export FEEDBACK_MODEL="o4-mini-2025-04-16"
-export CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"
+export CODER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 
 
 # --- Start first model ---
@@ -34,9 +34,9 @@ if [ -n "$CODER_MODEL" ]; then
         --port 8000 \
         --dtype bfloat16 \
         --device cuda \
-        --max-model-len 3000 \
+        --max-model-len 18000 \
         --gpu-memory-utilization 0.9 \
-        --max-num-batched-tokens 8192 \
+        --max-num-batched-tokens 16384 \
         --max-num-seqs 3 \
         --trust-remote-code \
         --enforce-eager &> $first_model_log &

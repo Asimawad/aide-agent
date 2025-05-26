@@ -26,7 +26,8 @@ _PROVIDER_QUERY_FUNCTIONS: Dict[
 ] = {
     "openai": backend_openai.query,
     "vllm": backend_vllm.query,
-    "deepseek": backend_deepseek.query,
+    # "deepseek": backend_deepseek.query,
+    "deepseek": backend_vllm.query,
     "ollama": backend_ollama.query,  # Assuming Ollama uses OpenAI's API
     "hf": backend_local.query,  # Renamed "HF" to "hf" for consistency
 }
