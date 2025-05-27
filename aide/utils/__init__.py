@@ -16,6 +16,7 @@ def copytree(src: Path, dst: Path, use_symlinks=True):
         src (Path): source directory
         dst (Path): destination directory
     """
+    dst.mkdir(parents=True, exist_ok=True)
     assert dst.is_dir()
 
     if src.is_file():
