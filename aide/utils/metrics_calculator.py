@@ -81,20 +81,20 @@ def copy_best_solution_and_submission():
     workspaces_dir = os.path.join("workspaces", cfg.exp_name)
     logs_dir = Path(os.path.join("logs", cfg.exp_name))
     best_submission_dir = Path(os.path.join(workspaces_dir, "best_submission"))
-
-    if os.path.exists(best_submission_dir):
-        copytree(best_submission_dir, logs_dir, use_symlinks=False)
-        
+    try:
+        if os.path.exists(best_submission_dir):
+            copytree(best_submission_dir, logs_dir, use_symlinks=False)
+            
         shutil.copy(os.path.join(best_submission_dir, "submission.csv"), os.path.join(logs_dir, "submission.csv"))
-        print(f"Copied best_submission directory to {logs_dir}")
-    else:
-        print(f"best_submission directory not found in {workspaces_dir}")
+        logger.info(f"Copied best_submission directory to {logs_dir}")
+    except Exception as e:
+        logger.error(f"Error copying best_submission directory to {logs_dir}: {e}", exc_info=True)
 
 
 def save_logs_to_wandb():
     copy_best_solution_and_submission()
 
-    print("Saving logs directory to WandB")
+    logger.info("Saving logs directory to WandB")
     wandb.save(f"logs/{cfg.exp_name}/*", base_path="logs")  # Save log files
 
 
@@ -112,7 +112,7 @@ def load_run_config(run_logs_path: Path) -> Optional[Config]:
         return cast(Config, cfg_loaded) 
     except Exception as e:
         logger.error(f"Error loading config from {config_path}: {e}", exc_info=True)
-        return None
+        return cfg
 
 def load_run_journal(run_logs_path: Path) -> Optional[Journal]:
     journal_path = run_logs_path / "journal.json"

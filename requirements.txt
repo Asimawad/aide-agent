@@ -30,7 +30,7 @@ setuptools
 packaging
 wheel
 s3fs
-
+tensorflow
 scikit-learn
 xgboost
 lightgbm
@@ -41,6 +41,7 @@ matplotlib
 seaborn
 statsmodels
 nltk
+gensim
 peft
 pypdf
 pytest
@@ -70,7 +71,7 @@ Pillow # PIL for image manipulation
 # transformers # Hugging Face Transformers library for NLP models
 # sentence-transformers # For sentence embeddings and similarity tasks
 # # # --- Image Specific ---
-# albumentations # For image augmentation
+albumentations # For image augmentation
 # imgaug # Another library for image augmentation
 # # torchvision # For image datasets and transformations
 # --- Audio Specific ---
@@ -81,10 +82,14 @@ bayesian-optimization
 optuna # Hyperparameter optimization
 
 # --- Other Useful Utilities ---
-genson # For generating JSON schemas (used in data_preview.py)
+ # For generating JSON schemas (used in data_preview.py)
 httpx # Often a dependency of API clients like openai, good to ensure it's there.
 igraph # For tree visualization (tree_export.py) - can be python-igraph or cairocffi for plotting
 cairocffi # Often needed for igraph plotting capabilities
 pandas-stubs # For type hinting with pandas (development) - optional
 
 radon
+catboost
+tensorflow-decision-forests
+pymorphy2
+num2words

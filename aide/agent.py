@@ -22,7 +22,6 @@ from .utils.response import (
     trim_long_string,
     format_code,
     extract_plan, 
-    extract_summary, 
     extract_reflection_summary_and_revised_code,
     extract_summary_and_plan,
 )
@@ -42,6 +41,8 @@ from .utils.prompt_utils import (
     get_segment_reflection_user_prompt,
     get_agent_system_prompt,
     get_agent_draft_system_prompt,
+    get_agent_improve_system_prompt,
+    get_agent_debug_system_prompt,
     get_planner_agent_draft_plan_user_prompt,
     get_planner_agent_draft_code_user_prompt,
     get_planner_agent_improve_plan_user_prompt,
@@ -51,11 +52,8 @@ from .utils.prompt_utils import (
     get_planner_agent_plan_system_prompt,
     get_planner_agent_code_system_prompt,
     wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
-    get_agent_debug_system_prompt, # Assuming this is defined in prompt_utils
-    get_agent_improve_system_prompt, # Assuming this is defined
-    AGENT_DEBUG_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-    AGENT_IMPROVE_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-
+    AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+    AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
 )
 
 
@@ -100,16 +98,7 @@ class Agent:
         self.current_step = 0
         self._prev_buggy: bool = False # Tracks buggy status *before* reflection for current step logic
         self._code_quality: float = 0.0 # Set by parse_exec_result
-
-
-        # self.reflection_applied = False
-        # self._metric_hist = []
-        # self._bug_flags = []
-        # self._sub_flags = []
-        # self._above_median_flags = []
-        # self._gold_medal_flags = []
-        # self._silver_medal_flags = []
-        # self._bronze_medal_flags = []
+        self.reflection_applied = False
 
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
@@ -220,7 +209,7 @@ class Agent:
     def _improve(self, parent_node: Node) -> Node:
         log_prefix_base = f"{self.__class__.__name__}_IMPROVE_STEP{self.current_step}"
         logger.info(f"{log_prefix_base}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
-        improve_sys_prompt = AGENT_IMPROVE_SYSTEM_PROMPT_DICT # From prompt_utils
+        improve_sys_prompt = get_agent_improve_system_prompt() # From prompt_utils
         prompt_user_message = get_agent_improve_user_prompt(
             task_desc=self.task_desc, journal_summary=self.journal.generate_summary(include_code=False),
             competition_name=self.competition_name, parent_node_code=parent_node.code)
@@ -237,7 +226,7 @@ class Agent:
         log_prefix_base = f"{self.__class__.__name__}_DEBUG_STEP{self.current_step}"
         logger.info(f"{log_prefix_base}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
         logger.info(f"Buggy code: {parent_node.code}", extra={"verbose": True})
-        debug_sys_prompt = AGENT_DEBUG_SYSTEM_PROMPT_DICT # Use the new debug system prompt
+        debug_sys_prompt = get_agent_debug_system_prompt() # Use the new debug system prompt
         prompt_user_message = get_agent_debug_user_prompt(
             task_desc=self.task_desc, competition_name=self.competition_name,
             parent_node_code=parent_node.code, parent_node_term_out=parent_node.term_out,
@@ -319,11 +308,18 @@ class Agent:
             console.print(f"[bold red]stage: {node_stage}[/bold red]") # Console output
             console.print(f"[bold red]Result: Buggy[/bold red]") # Console output
             console.print(f"[bold red]Feedback: {result_node.analysis}[/bold red]") # Console output
+            # log them to the verbose file
+            logger.debug(f"stage: {node_stage}", extra={"verbose": True})
+            logger.debug(f"Result: Buggy", extra={"verbose": True})
+            logger.debug(f"Feedback: {result_node.analysis}", extra={"verbose": True})
         else: 
             console.print(f"[bold green]---------[/bold green]\n") # Console output
             console.print(f"[bold green]stage: {node_stage}[/bold green]")
             console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
             console.print(f"[bold green]Feedback: {result_node.analysis}[/bold green]") # Console output
+            logger.debug(f"stage: {node_stage}", extra={"verbose": True})
+            logger.debug(f"Result: Not Buggy", extra={"verbose": True})
+            logger.debug(f"Feedback: {result_node.analysis}", extra={"verbose": True})
         return result_node, exec_duration
 
 
@@ -535,7 +531,7 @@ class PlannerAgent(Agent):
         logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
         completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
         if completion_text is None: return "", "", ""
-        task_summary = extract_summary(completion_text,task=True); plan = extract_plan(completion_text) 
+        task_summary, plan = extract_summary_and_plan(completion_text,task=True); 
         if not (plan and task_summary): 
             plan = plan or str(completion_text) 
             task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
@@ -771,7 +767,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
                                ) -> str:
         """Generates code for a single segment using the chained Coder."""
         log_prefix_segment = f"Code Chain step {self.current_step }"
-        logger.info(f"{log_prefix_segment}: Generating code. Segment: {segment_name}")
+        logger.info(f"{log_prefix_segment}: Generating code. Segment: {segment_name}", extra={"verbose": True})
 
 
         system_prompt_getter = CHAINED_CODER_SYSTEM_PROMPT_GETTERS.get(segment_name)
@@ -799,7 +795,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
             logger.error(f"{log_prefix_segment}: Code generation failed or produced empty code.")
             return f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}\n"
         
-        logger.info(f"{log_prefix_segment}: Successfully generated code snippet for {segment_name.replace(' ', '_')}.")
+        logger.info(f"{log_prefix_segment}: Successfully generated code snippet for {segment_name.replace(' ', '_')}.", extra={"verbose": True})
         logger.debug(f"{segment_name.replace(' ', '_')} Snippet: \n{code_snippet.strip()}\n ")
 
         if chain_reflection:
@@ -843,7 +839,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
             "Training & Validation", 
             "Prediction & Submission"
         ]
-        chain_reflection = True if self.acfg.ITS_Strategy == "chain-reflect" else False 
+        chain_reflection = True if self.acfg.ITS_Strategy == "codechain_v2" else False 
         for segment_name in segments_order:
             code_snippet = self._generate_code_segment(
                 segment_name, task_summary, master_plan_text, code_accumulator, chain_reflection
@@ -993,139 +989,3 @@ class CodeChainAgent(Agent): # Inherit from Agent
         new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
         logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
-
-
-    # def step(self, exec_callback: ExecCallbackType, current_step_number: int):
-
-
-    #     log_prefix_main = f"CodeChainAgent_Step: {current_step_number}"
-    #     submission_history = self.cfg.workspace_dir / "submission_history"
-    #     submission_history.mkdir(exist_ok=True)
-    #     submission_dir = self.cfg.workspace_dir / "submission"
-    #     submission_csv = submission_dir / "submission.csv"
-    #     if submission_csv.exists():
-    #         backup_csv = submission_history / f"submission_step_{current_step_number}.csv"
-    #         shutil.copy(submission_csv, backup_csv)
-    #     logger.info(f"{log_prefix_main}: Clearing submission directory: {submission_dir}", extra={"verbose": True})
-    #     shutil.rmtree(submission_dir, ignore_errors=True)
-    #     submission_dir.mkdir(exist_ok=True)
-    #     self.current_step = current_step_number
-
-    #     if not self.journal.nodes or self.data_preview is None:
-    #         self.update_data_preview()
-
-    #     parent_node = self.search_policy()
-    #     result_node: Node
-    #     draft_flag = False
-    #     node_stage = "unknown"
-
-
-    #     if parent_node is None:
-    #         draft_flag = True
-    #         node_stage = "draft"
-
-    #         result_node = self._draft(parent_node)
-    #     elif parent_node.is_buggy:
-    #         node_stage = "debug"
-
-    #         result_node = self._debug(parent_node)
-    #     else:
-    #         node_stage = "improve"
-
-    #         result_node = self._improve(parent_node)
-
-
-    #     # Process step
-    #     result_node, exec_duration = self.process_step(exec_callback=exec_callback, result_node=result_node, node_stage=node_stage, current_step_number=current_step_number, use_reflection=draft_flag)
-    #     print(self.reflection_applied)
-
-
-    #     logger.info(f"{log_prefix_main}: Preparing step log data for W&B.", extra={"verbose": True})
-
-    #     step_log_data = {
-    #         f"exec/exec_time_s": exec_duration,
-    #         f"eval/is_buggy": 1 if result_node.is_buggy else 0,
-    #         f"progress/current_step": current_step_number,
-    #         f"progress/competition_name": self.competition_name,
-    #         "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
-    #         f"code/estimated_quality": int(self._code_quality), # Assuming self._code_quality is set in parse_exec_result
-    #         f"eval/reflection_applied_successfully": 1 if self.reflection_applied and not result_node.is_buggy else 0,
-    #         f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0,
-    #         f"eval/validation_metric": result_node.metric.value if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None else float('nan'),
-    #         f"eval/submission_produced": 1 if (submission_dir / "submission.csv").exists() and not result_node.is_buggy else 0,
-    #     }
-        
-    #     agent_validation_metrics_defined = False
-    #     if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
-    #         step_log_data[f"eval/validation_metric"] = result_node.metric.value
-    #         agent_validation_metrics_defined = True
-    #         if self.competition_benchmarks and wandb and self.wandb_logger:
-    #             for threshold_name, key_suffix in [
-    #                 ("median_threshold", "above_median"), ("gold_threshold", "gold_medal"),
-    #                 ("silver_threshold", "silver_medal"), ("bronze_threshold", "bronze_medal")]:
-    #                 flag_attr = f"_{key_suffix}_flags"
-    #                 if not hasattr(self, flag_attr): setattr(self, flag_attr, [])
-    #                 threshold_value = self.competition_benchmarks.get(threshold_name, float('inf'))
-    #                 is_met = 1 if result_node.metric.value > threshold_value else 0
-    #                 getattr(self, flag_attr).append(is_met)
-    #                 true_count = sum(getattr(self, flag_attr))
-    #                 false_count = len(getattr(self, flag_attr)) - true_count
-    #                 table = wandb.Table(
-    #                     data=[[key_suffix.replace('_', ' ').title(), true_count], [f"Not {key_suffix.replace('_', ' ').title()}", false_count]],
-    #                     columns=["label", "count"])
-    #                 step_log_data[f"plots/{key_suffix}_bar"] = wandb.plot.bar(table, "label", "count", title=f"{key_suffix.replace('_', ' ').title()} Steps")
-    #     else:
-    #         step_log_data[f"eval/validation_metric"] = float("nan")
-
-    #     submission_path = submission_dir / "submission.csv"
-    #     submission_exists = submission_path.exists()
-    #     if not result_node.is_buggy and not submission_exists:
-    #         logger.warning(f"{log_prefix_main}: Node {result_node.id} not buggy BUT submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
-    #         result_node.is_buggy = True; result_node.metric = WorstMetricValue()
-    #         step_log_data[f"eval/validation_metric"] = float("nan"); step_log_data[f"eval/is_buggy"] = 1
-    #         if agent_validation_metrics_defined and self._metric_hist and hasattr(result_node.metric, 'original_value_before_reset_to_worst') and \
-    #            result_node.metric.original_value_before_reset_to_worst is not None and self._metric_hist[-1] == result_node.metric.original_value_before_reset_to_worst:
-    #             self._metric_hist.pop()
-    #     step_log_data[f"eval/submission_produced"] = 1 if submission_exists else 0
-
-    #     if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None:
-    #         self._metric_hist.append(result_node.metric.value)
-    #     if self.wandb_logger and self.wandb_logger.wandb_run:
-    #         submission_dir = self.cfg.workspace_dir / "submission"
-    #         self.wandb_logger.log_step_data(
-    #             base_step_log_data=step_log_data,
-    #             result_node=result_node,
-    #             current_step_number=current_step_number,
-    #             current_submission_dir=submission_dir
-    #         )
-    #     if self.wandb_logger:
-    #        try:
-    #            self.wandb_logger.log_step_data(
-    #                 step_log_data, 
-    #                 current_step_number,
-    #                 result_node=result_node, # Pass the result_node
-    #                 competition_benchmarks=self.competition_benchmarks # Pass benchmarks
-    #             )
-    #        except Exception as e_wandb: logger.error(f"{log_prefix_main}: Error logging to W&B: {e_wandb}", exc_info=True, extra={"verbose": True})
-
-    #     result_node.stage = node_stage
-    #     result_node.exec_time = exec_duration
-    #     self.journal.append(result_node)
-    #     logger.info(f"{log_prefix_main}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}", extra={"verbose": True})
-
-    #     best_node = self.journal.get_best_node()
-    #     if best_node and best_node.id == result_node.id:
-    #         logger.info(f"{log_prefix_main}: Node {result_node.id} is new best (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f}). Caching.", extra={"verbose": True})
-    #         best_solution_dir = self.cfg.workspace_dir / "best_solution"
-    #         best_solution_dir.mkdir(exist_ok=True, parents=True)
-    #         if submission_exists: shutil.copy(submission_path, best_solution_dir / "submission.csv")
-    #         with open(best_solution_dir / "solution.py", "w") as f: f.write(result_node.code)
-    #         with open(best_solution_dir / "node_id.txt", "w") as f: f.write(str(result_node.id))
-    #     elif best_node:
-    #         logger.info(f"{log_prefix_main}: Current best node is {best_node.id} (Metric: {best_node.metric.value if best_node.metric else 'N/A':.4f})", extra={"verbose": True})
-
-    #     log_step(
-    #         step=current_step_number, total=self.acfg.steps, stage=node_stage,
-    #         is_buggy=result_node.is_buggy, exec_time=exec_duration,
-    #         metric=(result_node.metric.value if result_node.metric and result_node.metric.value is not None else None)
-    #     )
