@@ -13,9 +13,8 @@ from rich.logging import RichHandler
 import wandb
 console = Console() 
 
-# Ensure these are correctly imported if used by other parts of the file
+
 from .utils import copytree 
-from .utils.wandb_retreival import save_logs_to_wandb # This seems like a separate utility now
 from aide.utils.metrics_calculator import generate_all_metrics
 from .utils.wandb_logger import WandbLogger 
 from .agent import Agent, PlannerAgent
@@ -205,12 +204,10 @@ def run():
         logger.info("Interpreter cleanup initiated.")
         interpreter.cleanup_session()
 
-        # --- Step 1: Generate all local metrics reports. ---
+
         active_wandb_run_id = None
         if wandb_logger_instance and wandb_logger_instance.wandb_run:
             try:
-                # Directly try to get the ID. If wandb_run is None or doesn't have id, it will raise AttributeError.
-                # The 'state' check can be secondary or for more detailed logging if needed.
                 active_wandb_run_id = wandb_logger_instance.wandb_run.id
                 if active_wandb_run_id:
                     logger.info(f"Successfully obtained active W&B run ID for metrics calculation: {active_wandb_run_id}")
@@ -224,6 +221,11 @@ def run():
             logger.info("WandbLogger or its run object is not available. Proceeding without W&B run ID for metrics calculation.")
 
 
+        # --- Step 2: Finalize the W&B run ---
+        logger.info("W&B finalization initiated.")
+        if wandb_logger_instance: 
+            wandb_logger_instance.finalize_run(journal) 
+
         try:
             logger.info("Calculating comprehensive metrics locally (before W&B finalization)...")
             generate_all_metrics(
@@ -233,12 +235,6 @@ def run():
             # comprehensive_metrics_report.json is now in logs/{exp_name}/
         except Exception as e:
             logger.error(f"Error calculating comprehensive metrics: {e}", exc_info=True)
-        
-        # --- Step 2: Finalize the W&B run ---
-        logger.info("W&B finalization initiated.")
-        if wandb_logger_instance: 
-            wandb_logger_instance.finalize_run(journal) 
-
         
         # --- Step 3: Local Workspace Cleanup ---
         if global_step == 0 or global_step == cfg.agent.steps :
