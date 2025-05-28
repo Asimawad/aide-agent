@@ -12,16 +12,16 @@ CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 # ${O4_MODEL} #"RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
-competition_name="house_prices"
-data_dir="aide/example_tasks/house_prices"
-GOAL="Predict the house price" 
-EVAL="Use the RMSE metric between the predicted and observed values." 
+competition_name="leaf-classification"
+data_dir="data/leaf-classification"
+GOAL="Predict the leaf species" 
+EVAL="Use the accuracy score metric between the predicted and observed values." 
 aide \
     data_dir="${data_dir}/" \
-    desc_file="aide/example_tasks/house_prices.md" \
+    desc_file="${data_dir}/leaf-classification.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
-    agent.steps=5 \
+    agent.steps=3 \
     agent.time_limit=36000 \
     agent.obfuscate=False \
     agent.ITS_Strategy="Baseline" \

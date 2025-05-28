@@ -1,24 +1,30 @@
+# aide/agent.py
 import shutil
 import logging
 import random
 import json
 import time
+from pathlib import Path # Ensure Path is imported
 from rich.syntax import Syntax 
 from rich.console import Console 
 from typing import Any, Callable, cast, Optional, Dict 
-from .backend import FunctionSpec, query
+from .backend import FunctionSpec, query # Use the aliased backend_query if it was intended
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
 from .utils import data_preview
 from .utils.config import Config
 from .utils.pretty_logging import log_step 
-from .utils.wandb_logger import WandbLogger # Ensure this is imported
+from .utils.wandb_logger import WandbLogger 
 from .utils.prompt_utils import (
     get_agent_draft_user_prompt,
     get_agent_improve_user_prompt,
     get_agent_debug_user_prompt,
     get_agent_system_prompt,
     get_agent_draft_system_prompt,
+    # get_agent_debug_system_prompt, # Assuming this is defined in prompt_utils
+    # get_agent_improve_system_prompt, # Assuming this is defined
+    AGENT_DEBUG_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+    AGENT_IMPROVE_SYSTEM_PROMPT_DICT, # If you are directly using the dict
     get_planner_agent_draft_plan_user_prompt,
     get_planner_agent_draft_code_user_prompt,
     get_planner_agent_improve_plan_user_prompt,
@@ -27,6 +33,7 @@ from .utils.prompt_utils import (
     get_planner_agent_debug_code_user_prompt,
     get_planner_agent_plan_system_prompt,
     get_planner_agent_code_system_prompt,
+    review_func_spec, # Moved review_func_spec here from Agent class body
     wrap_code as prompt_utils_wrap_code
 )
 from .utils.response import (
@@ -43,73 +50,10 @@ from .utils.self_reflection import (
 )
 from .utils.metric import MetricValue, WorstMetricValue 
 
-try:
-    import wandb # wandb is imported in wandb_logger, but keep here for type hints if needed
-except ImportError:
-    wandb = None
-
-
-from .utils.wandb_logger import WandbLogger
-
-logger = logging.getLogger("aide") # Assuming "aide" is the main logger from pretty_logging
+logger = logging.getLogger("aide") 
 console = Console()
 
-
-def format_time(time_in_sec: int): # Should be float for more precision
-    time_in_sec = int(time_in_sec) # Cast to int if original signature is intended
-    return f"{time_in_sec // 3600}hrs {(time_in_sec % 3600) // 60}mins {time_in_sec % 60}secs"
-
-
 ExecCallbackType = Callable[[str, bool], ExecutionResult]
-
-review_func_spec = FunctionSpec(
-    name="submit_review",
-    json_schema={
-        "type": "object",
-        "properties": {
-            "is_bug": {
-                "type": "boolean",
-                "description": "true if the output log shows that the execution failed or has some bug, otherwise false.",
-            },
-            "has_csv_submission": {
-                "type": "boolean",
-                "description": "true if the code saves the predictions on the test data"
-                " in a `submission.csv` file in the `./submission/` directory, otherwise false."
-                " Note that the file MUST be saved in the ./submission/ directory for this to be evaluated as true."
-                " Otherwise, it should be evaluated as false."
-                " You can assume the ./submission/ directory exists and is writable.",
-            },
-            "summary": {
-                "type": "string",
-                "description": "write a short summary (2-3 sentences) describing "
-                " the empirical findings. Alternatively mention if there is a bug or"
-                " the submission.csv was not properly produced."
-                " DO NOT suggest fixes or improvements.",
-            },
-            "metric": {
-                "type": "number",
-                "description": "If the code ran successfully, report the value of the validation metric. Otherwise, leave it null.",
-            },
-            "lower_is_better": {
-                "type": "boolean",
-                "description": "true if the metric should be minimized (i.e. a lower metric value is better, such as with MSE), false if the metric should be maximized (i.e. a higher metric value is better, such as with accuracy).",
-            },
-            "code_quality": {
-                "type": "number",
-                "description": "give a score between 0-10 on the quality of the code, where 0 is a terrible code/ non-code at all, and 9-10 is a clean code with a great value for the evaluation metric.",
-            },
-        },
-        "required": [
-            "is_bug",
-            "has_csv_submission",
-            "summary",
-            "metric",
-            "lower_is_better",
-            "code_quality",
-        ],
-    },
-    description="Submit a review evaluating the output of the training script.",
-)
 
 class Agent:
     def __init__(
@@ -118,7 +62,7 @@ class Agent:
         cfg: Config,
         journal: Journal,
         wandb_logger: Optional[WandbLogger] = None, 
-        competition_benchmarks: Optional[Dict[str, Any]] = None, # Accept benchmarks
+        competition_benchmarks: Optional[Dict[str, Any]] = None,
     ):
         if isinstance(task_desc, dict):
             from .backend import compile_prompt_to_md
@@ -130,17 +74,19 @@ class Agent:
         self.acfg = cfg.agent
         self.journal = journal
         self.wandb_logger = wandb_logger 
-        self.competition_benchmarks = competition_benchmarks # Store benchmarks
+        self.competition_benchmarks = competition_benchmarks
         self.competition_name = self.cfg.competition_name
         
         self.data_preview: str | None = None
         self.start_time = time.time()
         self.current_step = 0
-        self._prev_buggy: bool = False
-        self._code_quality: float = 0.0 
+        self._prev_buggy: bool = False # Tracks buggy status *before* reflection for current step logic
+        self._code_quality: float = 0.0 # Set by parse_exec_result
 
-
-     # ... (search_policy as in your provided code) ...
+    # search_policy, _draft, _improve, _debug, reflect, update_data_preview
+    # plan_and_code_query - Ensure these methods from your NEW agent.py are used.
+    # I'm assuming they are correct as per your latest codebase.
+    # If changes are needed there for logging or functionality, let me know.
     def search_policy(self) -> Node | None:
         log_prefix_base = f"{self.__class__.__name__.upper()}_SEARCH_POLICY_STEP{self.current_step}"
         search_cfg = self.acfg.search
@@ -164,74 +110,63 @@ class Agent:
             return None
         greedy_node = self.journal.get_best_node()
         if greedy_node:
-            if greedy_node.is_buggy: # If the best node is buggy, debug it
+            if greedy_node.is_buggy:
                  logger.info(f"{log_prefix_base}: Selected: Debug BEST node {greedy_node.id} (it was marked buggy).", extra={"verbose": True})
                  return greedy_node
             metric_display = f"{greedy_node.metric.value:.3f}" if greedy_node.metric and greedy_node.metric.value is not None else 'N/A'
             logger.info(f"{log_prefix_base}: Selected: Improve BEST node {greedy_node.id} (metric: {metric_display}).", extra={"verbose": True})
             return greedy_node
-        else: # Should not happen if good_nodes is not empty, but as a fallback
+        else: 
             logger.warning(f"{log_prefix_base}: No greedy node found despite good_nodes existing. Drafting new.", extra={"verbose": True})
             return None
-    # These are now handled by functions in prompt_utils.py
 
     def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict=None, retries: int = 3) -> tuple[str, str, str]: 
-        """Generate a natural language plan + code in the same LLM call and split them apart."""
-        if system_prompt_dict is None:
-            system_prompt_dict = get_agent_system_prompt()
+        if system_prompt_dict is None: system_prompt_dict = get_agent_system_prompt()
         log_prefix = f"AGENT_PLAN_CODE_QUERY_STEP->{self.current_step}" 
         completion_text = None
         for attempt in range(retries):
             logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request.", extra={"verbose": True})
             try:
                 completion_text = query(
-                    system_message=system_prompt_dict,
-                    user_message=user_prompt_dict,
-                    model=self.acfg.code.model,
-                    temperature=self.acfg.code.temp,
-                    max_tokens=self.acfg.code.max_new_tokens,
-                    current_step=self.current_step,
+                    system_message=system_prompt_dict, user_message=user_prompt_dict,
+                    model=self.acfg.code.model, temperature=self.acfg.code.temp,
+                    max_tokens=self.acfg.code.max_new_tokens, current_step=self.current_step,
                     inference_engine=self.cfg.inference_engine,
                     num_responses=self.acfg.code.num_return_sequences,
-                    convert_system_to_user=self.acfg.convert_system_to_user,
-                )
-            except Exception as e:
+                    convert_system_to_user=self.acfg.convert_system_to_user)
+            except Exception as e: # Catching a more general exception, can be specified
+                # ContextLengthExceededError needs to be defined or imported, e.g., from .backend.utils
+                # For now, using general Exception
+                if "ContextLengthExceededError" in str(type(e)) or "context length" in str(e).lower(): # Heuristic check
+                    logger.error(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Context length exceeded: {e}. Failing this operation.", extra={"verbose": True})
+                    return "", f"LLM Query Error: Context Length Exceeded - {str(e)}", "CONTEXT_LENGTH_EXCEEDED"
                 logger.error(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Query failed: {e}", exc_info=True, extra={"verbose": True})
                 if attempt == retries - 1: return "", f"LLM Query Error: {e}", "LLM_QUERY_ERROR"
-                time.sleep(2)
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5)) # Make delay configurable
                 continue
+            
             code = extract_code(completion_text)
             nl_text = extract_text_up_to_code(completion_text)
             if code and nl_text:
                 logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Successfully extracted plan and code.", extra={"verbose": True})
-                return nl_text, code, "execution_summary_placeholder"
+                return nl_text, code, "execution_summary_placeholder" 
             logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Plan or code extraction failed. Raw text: '{trim_long_string(completion_text)}'", extra={"verbose": True})
         logger.error(f"{log_prefix}: All {retries} attempts for plan+code extraction failed.", extra={"verbose": True})
         return "", completion_text or "No LLM response received", "EXTRACTION_FAILED"
 
-
     def _draft(self, parent_node=None) -> Node:
-        log_prefix_base = f"{self.__class__.__name__}_DRAFT_STEP:{self.current_step}" # Generic prefix
+        log_prefix_base = f"{self.__class__.__name__}_DRAFT_STEP:{self.current_step}" 
         logger.info(f"{log_prefix_base}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
         draft_sys_prompt=get_agent_draft_system_prompt()
         journal_summary=self.journal.generate_summary(include_code=False)
-        logger.info(f"{log_prefix_base}: Journal summary: {journal_summary}", extra={"verbose": True})
-        prompt_user_message = get_agent_draft_user_prompt( # Agent uses its specific prompt structure
-            task_desc=self.task_desc,
-            journal_summary=journal_summary,
-            competition_name=self.competition_name,
-            obfuscate=self.acfg.obfuscate,
-            acfg_data_preview=self.acfg.data_preview,
-            data_preview_content=self.data_preview
-        )
+        prompt_user_message = get_agent_draft_user_prompt( 
+            task_desc=self.task_desc, journal_summary=journal_summary,
+            competition_name=self.competition_name, obfuscate=self.acfg.obfuscate,
+            acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
         agent_plan_for_step, generated_code, exec_summary = (
-            self.plan_and_code_query(user_prompt_dict=prompt_user_message, excute=False,system_prompt_dict = draft_sys_prompt, retries=self.acfg.get('query_retries', 1))
-        )
-        
+            self.plan_and_code_query(user_prompt_dict=prompt_user_message, excute=False,system_prompt_dict = draft_sys_prompt, retries=self.acfg.get('query_retries', 1)))
         if not agent_plan_for_step: agent_plan_for_step = "PLAN_GENERATION_FAILED"
         if not generated_code: generated_code = "# CODE_GENERATION_FAILED"
-        logger.debug(f"{log_prefix_base}_DRAFT_PLAN_START\n{agent_plan_for_step}\n{log_prefix_base}_DRAFT_PLAN_END", extra={"verbose": True})
-        logger.debug(f"{log_prefix_base}_DRAFT_CODE_RAW_START\n{generated_code}\n{log_prefix_base}_DRAFT_CODE_RAW_END", extra={"verbose": True})
         new_node = Node(plan=agent_plan_for_step, code=generated_code, summary=exec_summary)
         if parent_node: new_node.parent = parent_node
         logger.info(f"{log_prefix_base}: Drafted new node {new_node.id}.", extra={"verbose": True})
@@ -240,109 +175,53 @@ class Agent:
     def _improve(self, parent_node: Node) -> Node:
         log_prefix_base = f"{self.__class__.__name__.upper()}_IMPROVE_STEP{self.current_step}"
         logger.info(f"{log_prefix_base}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
-        prompt_user_message = get_agent_improve_user_prompt( # Agent uses its specific prompt
-            task_desc=self.task_desc,
-            journal_summary=self.journal.generate_summary(include_code=False),
-            competition_name=self.competition_name,
-            parent_node_code=parent_node.code,
-        )
-        plan, code, _ = self.plan_and_code_query(prompt_user_message, excute=False, retries=self.acfg.get('query_retries', 1))
-
+        improve_sys_prompt = AGENT_IMPROVE_SYSTEM_PROMPT_DICT # From prompt_utils
+        prompt_user_message = get_agent_improve_user_prompt(
+            task_desc=self.task_desc, journal_summary=self.journal.generate_summary(include_code=False),
+            competition_name=self.competition_name, parent_node_code=parent_node.code)
+        plan, code, _ = self.plan_and_code_query(prompt_user_message, excute=False, system_prompt_dict=improve_sys_prompt, retries=self.acfg.get('query_retries', 1))
         if not plan: plan = "IMPROVEMENT_PLAN_FAILED"
-        if not code: code = parent_node.code
+        if not code: code = parent_node.code 
         new_node = Node(plan=plan, code=code, parent=parent_node)
-        logger.info(f"{log_prefix_base}: Improvement plan for node {parent_node.id}: {trim_long_string(plan)}", extra={"verbose": True})
         logger.info(f"{log_prefix_base}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
-    
     def _debug(self, parent_node: Node) -> Node:
-        log_prefix_base = f"{self.__class__.__name__}_DEBUG_STEP{self.current_step}"
+        log_prefix_base = f"{self.__class__.__name__.upper()}_DEBUG_STEP{self.current_step}"
         logger.info(f"{log_prefix_base}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
-        logger.info(f"Buggy code: {parent_node.code}", extra={"verbose": True})
-        prompt_user_message = get_agent_debug_user_prompt( # Agent uses its specific prompt
-            task_desc=self.task_desc,
-            competition_name=self.competition_name,
-            parent_node_code=parent_node.code,
-            parent_node_feedback=parent_node.analysis,
-            parent_node_term_out=parent_node.term_out,
-            acfg_data_preview=self.acfg.data_preview,
-            data_preview_content=self.data_preview
-        )
-        plan, code, _ = self.plan_and_code_query(prompt_user_message, excute=False, retries=self.acfg.get('query_retries', 1))
-
+        debug_sys_prompt = AGENT_DEBUG_SYSTEM_PROMPT_DICT # Use the new debug system prompt
+        prompt_user_message = get_agent_debug_user_prompt(
+            task_desc=self.task_desc, competition_name=self.competition_name,
+            parent_node_code=parent_node.code, parent_node_term_out=parent_node.term_out,
+            parent_node_feedback=parent_node.analysis, 
+            acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        plan, code, _ = self.plan_and_code_query(prompt_user_message, excute=False, system_prompt_dict=debug_sys_prompt, retries=self.acfg.get('query_retries', 1))
         if not plan: plan = "DEBUG_PLAN_FAILED"
-        if not code: code = parent_node.code
+        if not code: code = parent_node.code 
         new_node = Node(plan=plan, code=code, parent=parent_node)
         logger.info(f"{log_prefix_base}: Debugged node {parent_node.id} to create new node {new_node.id}", extra={"verbose": True})
-        logger.debug(f"{log_prefix_base}_DEBUG_PLAN_START\n{plan}\n{log_prefix_base}_DEBUG_PLAN_END", extra={"verbose": True})
-        logger.debug(f"{log_prefix_base}_DEBUG_CODE_START\n{wrap_code(code)}\n{log_prefix_base}_DEBUG_CODE_END", extra={"verbose": True})
         return new_node
 
     def reflect(self, node: Node) -> tuple[str, str]:
         log_prefix_base = f"{self.__class__.__name__.upper()}_REFLECT_STEP{self.current_step}_NODE{node.id}"
-        # ... (rest of reflect implementation from Agent class) ...
         logger.info(f"{log_prefix_base}: Initiating self-reflection.", extra={"verbose": True})
         try:
             reflection_plan, revised_code = perform_two_step_reflection(
                 code=node.code, analysis=node.analysis, term_out=node.term_out,
-                task_desc=self.task_desc, model_name=self.acfg.code.model,
+                task_desc=self.task_desc, model_name=self.cfg.agent.code.planner_model, 
                 temperature=self.acfg.code.temp, convert_system_to_user=self.acfg.convert_system_to_user,
                 query_func=query, wrap_code_func=prompt_utils_wrap_code, extract_code_func=extract_code,
-                current_step=self.current_step
-            )
+                current_step=self.current_step )
         except Exception as e:
             logger.error(f"{log_prefix_base}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
             return f"REFLECTION_ERROR: {e}", node.code
         if revised_code and revised_code.strip() and revised_code != node.code: logger.info(f"{log_prefix_base}: Self-reflection resulted in code changes.", extra={"verbose": True})
-        elif reflection_plan == "No specific errors found requiring changes.": logger.info(f"{log_prefix_base}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
+        elif "No specific errors found requiring changes." in reflection_plan : logger.info(f"{log_prefix_base}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
         else: logger.warning(f"{log_prefix_base}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
-        return reflection_plan, revised_code
-
-
-
-    def double_reflect(self, code: str) -> tuple[str, str]:
-        """
-        Performs a two-step self-reflection using the external utility function.
-        This version doesn't have `analysis` or `term_out` from a node.
-        Returns: Tuple: (reflection_plan, revised_code)
-        """
-        log_prefix_base = f"AGENT_DOUBLE_REFLECT_STEP{self.current_step}" # No node ID here
-        logger.info(f"{log_prefix_base}: Initiating self-reflection (double_reflect variant).", extra={"verbose": True})
-
-        try:
-            reflection_plan, revised_code = perform_two_step_reflection(
-                code=code, # Original code for reflection
-                analysis="No specific prior analysis available for this reflection.", # Generic analysis
-                term_out="No specific terminal output available for this reflection.", # Generic term_out
-                task_desc=self.task_desc,
-                model_name=self.acfg.code.model,
-                temperature=self.acfg.code.temp,
-                convert_system_to_user=self.acfg.convert_system_to_user,
-                query_func=query,
-                wrap_code_func=prompt_utils_wrap_code,
-                extract_code_func=extract_code,
-                current_step=self.current_step
-            )
-        except Exception as e:
-            logger.error(f"{log_prefix_base}: Error during double_reflect call: {e}", exc_info=True, extra={"verbose": True})
-            return f"DOUBLE_REFLECTION_ERROR: {e}", code
-
-
-        if revised_code and revised_code.strip() and revised_code != code:
-            logger.info(f"{log_prefix_base}: Self-reflection (double_reflect) resulted in code changes.", extra={"verbose": True})
-        elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info(f"{log_prefix_base}: Self-reflection (double_reflect) found no errors requiring changes.", extra={"verbose": True})
-        else:
-            logger.warning(f"{log_prefix_base}: Self-reflection (double_reflect) finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
-
-        logger.debug(f"{log_prefix_base}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix_base}_REFLECTION_PLAN_END", extra={"verbose": True})
-        # logger.debug(f"{log_prefix_base}_REVISED_CODE_BY_DOUBLE_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix_base}_REVISED_CODE_BY_DOUBLE_REFLECTION_END", extra={"verbose": True})
         return reflection_plan, revised_code
 
     def update_data_preview(self):
         log_prefix = f"{self.__class__.__name__.upper()}_DATA_PREVIEW_STEP{self.current_step}"
-
         logger.info(f"{log_prefix}: Updating data preview.", extra={"verbose": True})
         try:
             self.data_preview = data_preview.generate(self.cfg.workspace_dir / "input")
@@ -351,13 +230,29 @@ class Agent:
             logger.error(f"{log_prefix}: Failed to update data preview: {e}", exc_info=True, extra={"verbose": True})
             self.data_preview = "Error generating data preview."
 
-
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
-        log_prefix_main = f"{self.__class__.__name__}_Step: {current_step_number}"
+        log_prefix_main = f"{self.__class__.__name__.upper()}_STEP{current_step_number}"
         logger.info(f"{log_prefix_main}_START: Total Steps Configured: {self.acfg.steps}", extra={"verbose": True})
         t_step_start = time.time()
-        submission_dir = self.cfg.workspace_dir / "submission"
-        shutil.rmtree(submission_dir, ignore_errors=True); submission_dir.mkdir(exist_ok=True)
+        
+        # Define submission_dir for this step
+        submission_dir_this_step = self.cfg.workspace_dir / "submission"
+        
+        # Backup and clear submission directory
+        submission_history_dir_for_run = Path(self.cfg.log_dir) / "submission_history" # Centralized history
+        submission_history_dir_for_run.mkdir(parents=True, exist_ok=True)
+        current_submission_csv = submission_dir_this_step / "submission.csv"
+        if current_submission_csv.exists(): # If a submission from PREVIOUS step exists
+            try:
+                backup_name = f"step_{current_step_number-1}_submission.csv" if current_step_number > 1 else "initial_submission.csv"
+                shutil.copy2(current_submission_csv, submission_history_dir_for_run / backup_name)
+                logger.info(f"{log_prefix_main}: Backed up previous submission to {backup_name}", extra={"verbose": True})
+            except Exception as e_backup:
+                logger.error(f"{log_prefix_main}: Error backing up submission: {e_backup}", extra={"verbose": True})
+
+        shutil.rmtree(submission_dir_this_step, ignore_errors=True)
+        submission_dir_this_step.mkdir(exist_ok=True)
+        
         self.current_step = current_step_number
         if not self.journal.nodes or self.data_preview is None: self.update_data_preview()
         
@@ -371,138 +266,128 @@ class Agent:
         else:
             node_stage = "improve"; result_node = self._improve(parent_node)
         
+        exec_duration_total_for_step = 0.0 # Accumulate execution time for the step
 
         logger.info(f"{log_prefix_main}: Executing code for node {result_node.id} (stage: {node_stage}).", extra={"verbose": True})
         exec_start_time = time.time()
         exec_result = exec_callback(result_node.code, reset_session=True)
-        exec_duration = time.time() - exec_start_time
-        logger.info(f"{log_prefix_main}: Code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
+        exec_duration_initial = time.time() - exec_start_time
+        exec_duration_total_for_step += exec_duration_initial
+        logger.info(f"{log_prefix_main}: Initial code execution for node {result_node.id} finished in {exec_duration_initial:.2f}s.", extra={"verbose": True})
         
         logger.info(f"{log_prefix_main}: Parsing execution results for node {result_node.id}.", extra={"verbose": True})
         result_node = self.parse_exec_result(node=result_node, exec_result=exec_result)
         
-        buggy_status_before_reflection = result_node.is_buggy
-        reflection_applied = False
+        # Store buggy status *after first execution and parsing*, before reflection
+        buggy_status_before_reflection = result_node.is_buggy 
+        reflection_applied_this_step = False 
+        
         if draft_flag and self.acfg.ITS_Strategy == "self-reflection" and result_node.is_buggy:
             logger.info(f"{log_prefix_main}: Condition met for self-reflection on drafted buggy node {result_node.id}.", extra={"verbose": True})
             reflection_plan, reflection_code = self.reflect(node=result_node)
             if reflection_code and reflection_code.strip() and reflection_code != result_node.code:
                 logger.info(f"{log_prefix_main}: Self-reflection yielded new code for node {result_node.id}. Re-executing.", extra={"verbose": True})
-                result_node.code = reflection_code; reflection_applied = True
+                result_node.code = reflection_code
+                reflection_applied_this_step = True # Mark that reflection was applied and changed code
                 
                 exec_start_time_reflect = time.time()
                 exec_result_reflect = exec_callback(result_node.code, reset_session=True)
-                exec_duration_reflect = time.time() - exec_start_time_reflect # Use a different duration variable
+                exec_duration_reflect = time.time() - exec_start_time_reflect 
+                exec_duration_total_for_step += exec_duration_reflect # Add reflection exec time
                 logger.info(f"{log_prefix_main}: Reflected code execution for node {result_node.id} finished in {exec_duration_reflect:.2f}s.", extra={"verbose": True})
                 
-                # Re-parse execution result for the reflected code
                 result_node = self.parse_exec_result(node=result_node, exec_result=exec_result_reflect)
-                # Update exec_duration to the duration of the reflected code if it was executed
-                exec_duration = exec_duration_reflect 
             else:
                 logger.info(f"{log_prefix_main}: Self-reflection did not result in applicable code changes for node {result_node.id}.", extra={"verbose": True})
 
-        # Determine effective_debug_step and effective_reflections
+        # Determine effective_debug_step and effective_reflections based on final node status
         if buggy_status_before_reflection and not result_node.is_buggy:
-            result_node.effective_debug_step = True
-            result_node.effective_reflections = reflection_applied # True only if reflection fixed it
+            result_node.effective_debug_step = True # The step (potentially including reflection) fixed a bug
+            if reflection_applied_this_step: # If reflection was the part that fixed it
+                result_node.effective_reflections = True
+            else: # If the initial debug/improve attempt fixed it before reflection
+                result_node.effective_reflections = False
         else:
             result_node.effective_debug_step = False
-            result_node.effective_reflections = False
+            result_node.effective_reflections = False # If not fixed, or was never buggy, or reflection didn't fix
         
-        self._prev_buggy = result_node.is_buggy # Update based on final status of result_node
-        
-        # Final check for submission file existence AFTER all potential executions
-        submission_path_final = submission_dir / "submission.csv"
+        # Final check for submission file existence AFTER all potential executions for this step
+        submission_path_final = submission_dir_this_step / "submission.csv"
         submission_exists_final = submission_path_final.exists()
+
         if not result_node.is_buggy and not submission_exists_final:
-            logger.warning(f"{log_prefix_main}: Node {result_node.id} was not buggy BUT final submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
-            result_node.is_buggy = True
-            result_node.metric = WorstMetricValue() # Reset metric
-            # If it was an effective debug/reflection, this status change nullifies that for this step's direct outcome
+            logger.warning(f"{log_prefix_main}: Node {result_node.id} was NOT buggy BUT final submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
+            result_node.is_buggy = True 
+            original_metric_val = result_node.metric.value if result_node.metric else None
+            result_node.metric = WorstMetricValue()
+            if original_metric_val is not None and result_node.metric is not None:
+                 result_node.metric.original_value_before_reset_to_worst = original_metric_val
+            
+            # If it became buggy due to missing submission, it wasn't an effective fix/reflection
             result_node.effective_debug_step = False 
             result_node.effective_reflections = False
-            self._prev_buggy = True # Update prev_buggy as it's now considered buggy
 
-        if result_node.is_buggy:
-
-            console.print(f"[bold red]---------[/bold red]\n") # Console output
-            console.print(f"[bold red]stage: {node_stage}[/bold red]") # Console output
-            console.print(f"[bold red]Result: Buggy[/bold red]") # Console output
-            console.print(f"[bold red]Feedback: {result_node.analysis}[/bold red]") # Console output
-        else: 
-            console.print(f"[bold green]---------[/bold green]\n") # Console output
-            console.print(f"[bold green]stage: {node_stage}[/bold green]")
-            console.print(f"[bold green]Result: Not Buggy[/bold green]") # Console output
-            console.print(f"[bold green]Feedback: {result_node.analysis}[/bold green]") # Console output
-        
-                # Prepare basic data for WandbLogger
-        step_log_data = {
-            f"exec/exec_time_s": exec_duration,
+        # Base data for logger, more complex plots will be derived by logger from result_node
+        base_step_log_data = {
+            f"exec/exec_time_s": exec_duration_total_for_step, # Total time for the step
             f"eval/is_buggy": 1 if result_node.is_buggy else 0,
             f"progress/current_step": current_step_number,
             f"progress/competition_name": self.competition_name,
             "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
-            f"code/estimated_quality": int(self._code_quality), # From parse_exec_result
-            f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0,
-            f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0, # Based on final buggy status
-            f"eval/effective_reflection_fix": 1 if result_node.effective_reflections else 0, # Log this too
-            f"eval/validation_metric": result_node.metric.value if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None else float('nan'),
-            f"eval/submission_produced": 1 if submission_exists_final else 0, # Based on final check
+            f"code/estimated_quality": int(result_node.code_quality), # Use node's quality
+            f"eval/reflection_applied_and_successful": 1 if reflection_applied_this_step and not result_node.is_buggy else 0,
+            f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0, 
+            f"eval/effective_reflection_fix_this_step": 1 if result_node.effective_reflections else 0,
+            # eval/validation_metric and eval/submission_produced will be set/overridden by WandbLogger
         }
         
         if self.wandb_logger and self.wandb_logger.wandb_run:
             self.wandb_logger.log_step_data(
-                step_data=step_log_data, 
-                result_node=result_node, 
-                current_step_number=current_step_number
+                base_step_log_data=base_step_log_data, 
+                result_node=result_node, # Pass the finalized node
+                current_step_number=current_step_number,
+                current_submission_dir=submission_dir_this_step # Pass current submission dir
             )
 
-        result_node.stage = node_stage; result_node.exec_time = exec_duration
+        result_node.stage = node_stage
+        result_node.exec_time = exec_duration_total_for_step # Store total exec time on node
         self.journal.append(result_node)
-        logger.info(f"{log_prefix_main}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}", extra={"verbose": True})
-
+        
         best_node = self.journal.get_best_node()
         if best_node and best_node.id == result_node.id :
             best_solution_dir = self.cfg.workspace_dir / "best_solution"
-            best_submission_dir = self.cfg.workspace_dir / "best_submission" # For caching best submission
+            best_submission_dir = self.cfg.workspace_dir / "best_submission" 
             best_solution_dir.mkdir(exist_ok=True, parents=True)
-            best_submission_dir.mkdir(exist_ok=True, parents=True) # Create if not exists
+            best_submission_dir.mkdir(exist_ok=True, parents=True)
 
-            if submission_exists_final: # Use the final check
-                 shutil.copy(submission_path_final, best_submission_dir / "submission.csv")
+            if submission_exists_final: 
+                 shutil.copy2(submission_path_final, best_submission_dir / "submission.csv")
                  logger.info(f"{log_prefix_main}: Cached best submission.csv to {best_submission_dir}")
-            else:
-                 logger.warning(f"{log_prefix_main}: Best node {result_node.id} did not produce final submission.csv, cannot cache submission.")
             
             with open(best_solution_dir / "solution.py", "w") as f: f.write(result_node.code)
             with open(best_solution_dir / "node_id.txt", "w") as f: f.write(str(result_node.id))
             logger.info(f"{log_prefix_main}: Cached best solution code for node {result_node.id}")
 
         log_step(step=current_step_number, total=self.acfg.steps, stage=node_stage,
-                 is_buggy=result_node.is_buggy, exec_time=exec_duration,
+                 is_buggy=result_node.is_buggy, exec_time=exec_duration_total_for_step,
                  metric=(result_node.metric.value if result_node.metric and result_node.metric.value is not None else None))
         t_step_end = time.time()
         logger.info(f"{log_prefix_main}_END: Duration: {t_step_end - t_step_start:.2f}s", extra={"verbose": True})
-    
-    
-    
+
     def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
         log_prefix = f"{self.__class__.__name__.upper()}_PARSE_EXEC_STEP{self.current_step}_NODE{node.id}"
-        # ... (implementation from Agent class) ...
-        # This method is complex and has its own LLM call for feedback.
-        # It should be inheritable directly if Agent's version is suitable.
         logger.info(f"{log_prefix}: Parsing execution result.", extra={"verbose": True})
         node.absorb_exec_result(exec_result)
         introduction = ("You are a Kaggle grandmaster ... evaluate the output ... empirical findings.")
         if self.acfg.obfuscate: introduction = ("You are an expert machine learning engineer ... evaluate the output ... empirical findings.")
+        
         feedback_system_prompt = {
             "Introduction": introduction, "Task Description": self.task_desc,
             "Code Executed": prompt_utils_wrap_code(node.code),
-            "Execution Output Log": prompt_utils_wrap_code(node.term_out, lang=""),
-        }
+            "Execution Output Log": prompt_utils_wrap_code(node.term_out, lang=""),}
         max_retries = self.acfg.feedback.get("retries", 3)
         review_response_dict: Optional[Dict[str, Any]] = None
+        
         for attempt in range(max_retries):
             try:
                 raw_response = query(system_message=feedback_system_prompt, user_message=None,
@@ -510,361 +395,6 @@ class Agent:
                                      temperature=self.acfg.feedback.temp,
                                      convert_system_to_user=self.acfg.convert_system_to_user,
                                      current_step=self.current_step)
-                if not isinstance(raw_response, dict):
-                    if isinstance(raw_response, str):
-                        try: parsed_raw_response = json.loads(raw_response)
-                        except Exception: parsed_raw_response = None
-                        if isinstance(parsed_raw_response, dict): raw_response = parsed_raw_response
-                        else: raw_response = None
-                    else: raw_response = None
-                review_response_dict = cast(Dict[str, Any], raw_response) if isinstance(raw_response, dict) else None
-                if review_response_dict and all(k in review_response_dict for k in review_func_spec.json_schema["required"]): break
-                else: review_response_dict = None
-            except Exception as e: logger.error(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}: Error: {e}", exc_info=True, extra={"verbose": True})
-            if attempt == max_retries - 1 and review_response_dict is None:
-                review_response_dict = {"is_bug": True, "has_csv_submission": False, "summary": "LLM feedback failed.", "metric": None, "lower_is_better": True, "code_quality": 0}; break
-        if review_response_dict is None: review_response_dict = {"is_bug": True, "has_csv_submission": False, "summary": "CRITICAL: review_response_dict None.", "metric": None, "lower_is_better": True, "code_quality": 0}
-        metric_value = review_response_dict.get("metric"); self._code_quality = review_response_dict.get("code_quality", 0)
-        if not isinstance(metric_value, (float, int)): metric_value = None
-        if not isinstance(self._code_quality, (int, float)): self._code_quality = 0
-        node.code_quality = int(self._code_quality)
-        has_csv_submission_actual = (self.cfg.workspace_dir / "submission" / "submission.csv").exists()
-        has_csv_submission_reported = review_response_dict.get("has_csv_submission", False)
-        node.analysis = review_response_dict.get("summary", "Feedback LLM summary missing.")
-        with open("review_response_dict.json", "w") as f: json.dump(review_response_dict, f)
-        node.is_buggy = (review_response_dict.get("is_bug", True) or node.exc_type is not None or metric_value is None or not has_csv_submission_reported or not has_csv_submission_actual)
-        if node.is_buggy:
-            node.metric = WorstMetricValue()
-        else: 
-            node.metric = MetricValue(metric_value, maximize=not review_response_dict.get("lower_is_better", True))
-        return node
-
-#############################################################################
-# PlannerAgent Implementation
-#############################################################################
-class PlannerAgent(Agent):
-    def __init__(
-        self,
-        task_desc: str,
-        cfg: Config,
-        journal: Journal,
-        wandb_logger: Optional[WandbLogger] = None, # Added
-        competition_benchmarks: Optional[Dict[str, Any]] = None, # Added
-    ):
-        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
-    # Override _query_llm_with_retries as it's specific to PlannerAgent's two-model approach
-    def _query_llm_with_retries(
-        self,
-        query_type: str,
-        system_prompt: Dict[str, Any],
-        user_prompt: Dict[str, Any],
-        model: str,
-        temperature: float,
-        planner_flag: bool,
-        convert_system_to_user: bool,
-        retries: int = 3,
-    ) -> Any:
-        # ... (Implementation from your PlannerAgent, ensure logging uses self.current_step) ...
-        completion_text = None
-        log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
-        for attempt in range(retries):
-            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
-            try:
-                completion_text = query(
-                    system_message=system_prompt, user_message=user_prompt,
-                    model=model, temperature=temperature, planner=planner_flag,
-                    current_step=self.current_step, convert_system_to_user=convert_system_to_user,
-                    max_tokens=self.acfg.code.max_new_tokens
-                )
-                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True})
-                return completion_text
-            except Exception as e:
-                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
-                if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
-                time.sleep(2)
-        return None
-
-    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_plan_system_prompt()
-        # ... (rest of implementation from your PlannerAgent) ...
-        log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict,
-                                                       model=self.acfg.code.planner_model, temperature=self.acfg.code.temp,
-                                                       planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
-        if completion_text is None: return "", "", ""
-        summary = extract_summary(completion_text); plan = extract_plan(completion_text)
-        if not (plan and summary): plan = plan or str(completion_text); summary = summary or "SUMMARY_EXTRACTION_FAILED"
-        return summary, plan, ""
-
-
-    def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_code_system_prompt()
-        # ... (rest of implementation from your PlannerAgent) ...
-        log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODER", system_prompt=system_prompt, user_prompt=user_prompt_dict,
-                                                       model=self.acfg.code.model, temperature=self.acfg.code.temp,
-                                                       planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
-        if completion_text is None: return "", "", ""
-        code = extract_code(completion_text)
-        if not code: code = str(completion_text)
-        return "", code, ""
-
-        code = extract_code(completion_text)
-        # nl_text for coder is usually empty with current prompts, but can be extracted if needed:
-        # nl_text = extract_text_up_to_code(completion_text) 
-
-        if code:
-            logger.info(f"{log_prefix}: Successfully extracted code.", extra={"verbose": True})
-            # logger.debug(f"{log_prefix}_EXTRACTED_CODE_START\n{code}\n{log_prefix}_EXTRACTED_CODE_END", extra={"verbose": True})
-        else:
-            logger.warning(f"{log_prefix}: Code extraction failed. Raw text: '{trim_long_string(str(completion_text))}'", extra={"verbose": True})
-            code = str(completion_text) # Fallback to raw text as code
-
-        return "", code, "" # NL (empty), Code, Exec_summary (empty)
-
-
-    def _draft(self, parent_node=None) -> Node:
-
-        log_prefix = f"PLANNER_AGENT_DRAFT_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
-        plan_user_prompt = get_planner_agent_draft_plan_user_prompt(
-            task_desc=self.task_desc, journal_summary=self.journal.generate_summary(include_code=False),
-            competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview,
-            data_preview_content=self.data_preview)
-        task_summary, agent_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
-        if not agent_plan: return Node(plan="PLAN_FAILED", code="#PLAN_FAILED", summary=task_summary or "PLAN_FAILED", parent=parent_node)
-        code_user_prompt = get_planner_agent_draft_code_user_prompt(
-            task_summary_from_planner=task_summary, plan_from_planner=agent_plan,
-            journal_summary=self.journal.generate_summary(include_code=False), competition_name=self.competition_name,
-            acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
-        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
-        if not generated_code: generated_code = "#CODE_FAILED"
-        new_node = Node(plan=agent_plan, code=generated_code, summary=task_summary, task_summary=task_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Drafted new node {new_node.id}.", extra={"verbose": True})
-        return new_node
-
-
-    def _improve(self, parent_node: Node) -> Node:
-        log_prefix = f"PLANNER_AGENT_IMPROVE_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
-        plan_user_prompt = get_planner_agent_improve_plan_user_prompt(
-            task_desc=self.task_desc, parent_node_code=parent_node.code,
-            competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview,
-            data_preview_content=self.data_preview)
-        task_summary, improvement_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
-        if not improvement_plan: return Node(plan="IMPROVE_PLAN_FAILED", code=parent_node.code, summary=task_summary or "IMPROVE_PLAN_FAILED", parent=parent_node)
-        code_user_prompt = get_planner_agent_improve_code_user_prompt(
-            task_summary_from_planner=task_summary, improvement_plan_from_planner=improvement_plan,
-            parent_node_code=parent_node.code, journal_summary=self.journal.generate_summary(include_code=False),
-            competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview,
-            data_preview_content=self.data_preview)
-        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
-        if not generated_code: generated_code = parent_node.code
-        new_node = Node(plan=improvement_plan, code=generated_code, summary=task_summary, task_summary=task_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
-        return new_node
-
-
-    def _debug(self, parent_node: Node) -> Node:
-        log_prefix = f"PLANNER_AGENT_DEBUG_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
-        plan_user_prompt = get_planner_agent_debug_plan_user_prompt(
-            task_desc=self.task_desc, parent_node_code=parent_node.code,
-            parent_node_term_out=parent_node.term_out,
-            acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
-        bug_summary, fix_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
-        if not fix_plan: return Node(plan="DEBUG_PLAN_FAILED", code=parent_node.code, summary=bug_summary or "DEBUG_PLAN_FAILED", parent=parent_node)
-        code_user_prompt = get_planner_agent_debug_code_user_prompt(
-            bug_summary_from_planner=bug_summary, fix_plan_from_planner=fix_plan,
-            parent_node_code=parent_node.code, parent_node_feedback=parent_node.analysis, parent_node_term_out=parent_node.term_out,
-            competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview,
-            data_preview_content=self.data_preview)
-        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
-        if not generated_code: generated_code = parent_node.code
-        new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
-        return new_node
-    def reflect(self, node: Node) -> tuple[str, str]:
-
-
-        log_prefix = f"PLANNER_AGENT_REFLECT_STEP{self.current_step}_NODE{node.id}"
-        logger.info(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
-        try:
-            reflection_plan, revised_code = perform_two_step_reflection(
-                code=node.code,
-                analysis=node.analysis,
-                term_out=node.term_out,
-                task_desc=self.task_desc, # Could use node.task_summary if more specific
-                model_name=self.acfg.code.model, # Coder model for applying edits
-                temperature=self.acfg.code.temp,
-                convert_system_to_user=self.acfg.convert_system_to_user,
-                query_func=query,
-                wrap_code_func=prompt_utils_wrap_code,
-                extract_code_func=extract_code,
-                current_step=self.current_step
-            )
-        except Exception as e:
-            logger.error(f"{log_prefix}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
-            return f"REFLECTION_ERROR: {e}", node.code
-        
-        # Logging of reflection outcome (same as Agent)
-        if revised_code and revised_code.strip() and revised_code != node.code:
-            logger.info(f"{log_prefix}: Self-reflection resulted in code changes.", extra={"verbose": True})
-        elif reflection_plan == "No specific errors found requiring changes.":
-            logger.info(f"{log_prefix}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
-        else:
-            logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
-        
-        logger.debug(f"{log_prefix}_REFLECTION_PLAN_START\n{reflection_plan}\n{log_prefix}_REFLECTION_PLAN_END", extra={"verbose": True})
-        # logger.debug(f"{log_prefix}_REVISED_CODE_BY_REFLECTION_START\n{wrap_code(revised_code)}\n{log_prefix}_REVISED_CODE_BY_REFLECTION_END", extra={"verbose": True})
-        return reflection_plan, revised_code
-
-    def update_data_preview(self): # Identical to Agent
-        log_prefix = f"PLANNER_AGENT_DATA_PREVIEW_STEP-{self.current_step}"
-        logger.info(f"{log_prefix}: \n Updating data preview.", extra={"verbose": True})
-        try:
-            self.data_preview = data_preview.generate(self.cfg.workspace_dir / "input")
-            logger.info(f"{log_prefix}: Data preview updated.", extra={"verbose": True})
-            logger.debug(f"{log_prefix}_DATA_PREVIEW_CONTENT_START\n{self.data_preview}\n{log_prefix}_DATA_PREVIEW_CONTENT_END", extra={"verbose": True})
-        except Exception as e:
-            logger.error(f"{log_prefix}: Failed to update data preview: {e}", exc_info=True, extra={"verbose": True})
-            self.data_preview = "Error generating data preview."
-
-    # step() method is largely the same structure as Agent's step(), just calls PlannerAgent's _draft, _improve, _debug
-    
-    def step(self, exec_callback: ExecCallbackType, current_step_number: int):
-        # This method is almost identical to Agent.step(), ensure it calls PlannerAgent's
-        # _draft, _improve, _debug. The logging parts and wandb_logger call will be the same.
-        log_prefix_main = f"PLANNER_AGENT_STEP{current_step_number}" # Changed prefix
-        logger.info(f"{log_prefix_main}_START: Total Steps Configured: {self.acfg.steps}", extra={"verbose": True})
-        t_step_start = time.time()
-        submission_dir = self.cfg.workspace_dir / "submission"
-        shutil.rmtree(submission_dir, ignore_errors=True); submission_dir.mkdir(exist_ok=True)
-        self.current_step = current_step_number
-        if not self.journal.nodes or self.data_preview is None: self.update_data_preview()
-        
-        parent_node = self.search_policy()
-        result_node: Node; draft_flag = False; node_stage = "unknown"
-        
-        if parent_node is None:
-            draft_flag = True; node_stage = "draft"; result_node = self._draft(parent_node) # Calls PlannerAgent._draft
-        elif parent_node.is_buggy:
-            node_stage = "debug"; result_node = self._debug(parent_node) # Calls PlannerAgent._debug
-        else:
-            node_stage = "improve"; result_node = self._improve(parent_node) # Calls PlannerAgent._improve
-        
-        logger.info(f"{log_prefix_main}: Executing code for node {result_node.id} (stage: {node_stage}).", extra={"verbose": True})
-        exec_start_time = time.time()
-        exec_result = exec_callback(result_node.code, reset_session=True)
-        exec_duration = time.time() - exec_start_time
-        logger.info(f"{log_prefix_main}: Code execution for node {result_node.id} finished in {exec_duration:.2f}s.", extra={"verbose": True})
-        
-        logger.info(f"{log_prefix_main}: Parsing execution results for node {result_node.id}.", extra={"verbose": True})
-        result_node = self.parse_exec_result(node=result_node, exec_result=exec_result) # Calls PlannerAgent.parse_exec_result
-        
-        buggy_status_before_reflection = result_node.is_buggy
-        reflection_applied = False
-        if draft_flag and self.acfg.ITS_Strategy == "self-reflection" and result_node.is_buggy:
-            logger.info(f"{log_prefix_main}: Condition met for self-reflection on drafted buggy node {result_node.id}.", extra={"verbose": True})
-            reflection_plan, reflection_code = self.reflect(node=result_node) # Calls PlannerAgent.reflect
-            if reflection_code and reflection_code.strip() and reflection_code != result_node.code:
-                logger.info(f"{log_prefix_main}: Self-reflection yielded new code for node {result_node.id}. Re-executing.", extra={"verbose": True})
-                result_node.code = reflection_code; reflection_applied = True
-                
-                exec_start_time_reflect = time.time()
-                exec_result_reflect = exec_callback(result_node.code, reset_session=True)
-                exec_duration_reflect = time.time() - exec_start_time_reflect
-                logger.info(f"{log_prefix_main}: Reflected code execution for node {result_node.id} finished in {exec_duration_reflect:.2f}s.", extra={"verbose": True})
-                
-                result_node = self.parse_exec_result(node=result_node, exec_result=exec_result_reflect)
-                exec_duration = exec_duration_reflect 
-            else:
-                logger.info(f"{log_prefix_main}: Self-reflection did not result in applicable code changes for node {result_node.id}.", extra={"verbose": True})
-
-        if buggy_status_before_reflection and not result_node.is_buggy:
-            result_node.effective_debug_step = True
-            result_node.effective_reflections = reflection_applied
-        else:
-            result_node.effective_debug_step = False
-            result_node.effective_reflections = False
-        self._prev_buggy = result_node.is_buggy
-
-        submission_path_final = submission_dir / "submission.csv"
-        submission_exists_final = submission_path_final.exists()
-        if not result_node.is_buggy and not submission_exists_final:
-            logger.warning(f"{log_prefix_main}: Node {result_node.id} not buggy BUT final submission.csv MISSING. Marking as buggy.", extra={"verbose": True})
-            result_node.is_buggy = True; result_node.metric = WorstMetricValue()
-            result_node.effective_debug_step = False; result_node.effective_reflections = False
-            self._prev_buggy = True
-        
-        # Prepare basic data for WandbLogger
-        step_log_data = {
-            f"exec/exec_time_s": exec_duration,
-            f"eval/is_buggy": 1 if result_node.is_buggy else 0,
-            f"progress/current_step": current_step_number,
-            f"progress/competition_name": self.competition_name,
-            "exec/exception_type": result_node.exc_type if result_node.exc_type else "None",
-            f"code/estimated_quality": int(self._code_quality),
-            f"eval/reflection_applied_successfully": 1 if reflection_applied and not result_node.is_buggy else 0,
-            f"eval/effective_fix_this_step": 1 if result_node.effective_debug_step else 0,
-            f"eval/effective_reflection_fix": 1 if result_node.effective_reflections else 0,
-            f"eval/validation_metric": result_node.metric.value if not result_node.is_buggy and result_node.metric and result_node.metric.value is not None else float('nan'),
-            f"eval/submission_produced": 1 if submission_exists_final else 0,
-        }
-        
-        if self.wandb_logger and self.wandb_logger.wandb_run:
-            self.wandb_logger.log_step_data(
-                step_data=step_log_data, 
-                result_node=result_node, 
-                current_step_number=current_step_number
-            )
-
-        result_node.stage = node_stage; result_node.exec_time = exec_duration
-        self.journal.append(result_node)
-        logger.info(f"{log_prefix_main}: Appended node {result_node.id} to journal. Journal size: {len(self.journal.nodes)}", extra={"verbose": True})
-
-        best_node = self.journal.get_best_node()
-        if best_node and best_node.id == result_node.id :
-            best_solution_dir = self.cfg.workspace_dir / "best_solution"
-            best_submission_dir = self.cfg.workspace_dir / "best_submission"
-            best_solution_dir.mkdir(exist_ok=True, parents=True)
-            best_submission_dir.mkdir(exist_ok=True, parents=True)
-            if submission_exists_final: 
-                 shutil.copy(submission_path_final, best_submission_dir / "submission.csv")
-                 logger.info(f"{log_prefix_main}: Cached best submission.csv to {best_submission_dir}")
-            else:
-                 logger.warning(f"{log_prefix_main}: Best node {result_node.id} did not produce final submission.csv, cannot cache submission.")
-            with open(best_solution_dir / "solution.py", "w") as f: f.write(result_node.code)
-            with open(best_solution_dir / "node_id.txt", "w") as f: f.write(str(result_node.id))
-            logger.info(f"{log_prefix_main}: Cached best solution code for node {result_node.id}")
-
-        log_step(step=current_step_number, total=self.acfg.steps, stage=node_stage,
-                 is_buggy=result_node.is_buggy, exec_time=exec_duration,
-                 metric=(result_node.metric.value if result_node.metric and result_node.metric.value is not None else None))
-        t_step_end = time.time()
-        logger.info(f"{log_prefix_main}_END: Duration: {t_step_end - t_step_start:.2f}s", extra={"verbose": True})
-
-    # parse_exec_result is inherited from Agent if not overridden, which seems fine for now.
-    # If PlannerAgent needs a different parse_exec_result, it should be defined here.
-    # For now, assume Agent.parse_exec_result is used.
-    # To be explicit, I'll copy the method here as it was in your provided PlannerAgent code.
-    def parse_exec_result(self, node: Node, exec_result: ExecutionResult) -> Node:
-        # This is identical to Agent.parse_exec_result
-        log_prefix = f"PLANNER_AGENT_PARSE_EXEC_STEP{self.current_step}_NODE{node.id}" # Changed prefix
-        logger.info(f"{log_prefix}: Parsing execution result.", extra={"verbose": True})
-        node.absorb_exec_result(exec_result)
-        introduction = ("You are a Kaggle grandmaster ... evaluate the output ... empirical findings.")
-        if self.acfg.obfuscate: introduction = ("You are an expert machine learning engineer ... evaluate the output ... empirical findings.")
-        feedback_system_prompt = {
-            "Introduction": introduction, "Task Description": self.task_desc,
-            "Code Executed": prompt_utils_wrap_code(node.code),
-            "Execution Output Log": prompt_utils_wrap_code(node.term_out, lang=""),}
-        max_retries = self.acfg.feedback.get("retries", 3)
-        review_response_dict: Optional[Dict[str, Any]] = None
-        for attempt in range(max_retries):
-            logger.info(f"{log_prefix}_FEEDBACK_LLM_ATTEMPT{attempt+1}/{max_retries}: Querying feedback LLM.", extra={"verbose": True})
-            try:
-                raw_response = query(system_message=feedback_system_prompt, user_message=None, func_spec=review_func_spec, model=self.acfg.feedback.model, temperature=self.acfg.feedback.temp, convert_system_to_user=self.acfg.convert_system_to_user, current_step=self.current_step)
                 if not isinstance(raw_response, dict):
                     if isinstance(raw_response, str):
                         try: parsed_raw_response = json.loads(raw_response)
@@ -881,25 +411,147 @@ class PlannerAgent(Agent):
             if attempt == max_retries - 1 and review_response_dict is None:
                 review_response_dict = {"is_bug": True, "has_csv_submission": False, "summary": "LLM feedback failed after retries.", "metric": None, "lower_is_better": True, "code_quality": 0}; break
         if review_response_dict is None: review_response_dict = {"is_bug": True, "has_csv_submission": False, "summary": "CRITICAL: review_response_dict was None after loop.", "metric": None, "lower_is_better": True, "code_quality": 0}
-        metric_value = review_response_dict.get("metric"); self._code_quality = review_response_dict.get("code_quality", 0)
+        
+        metric_value = review_response_dict.get("metric")
+        # self._code_quality is set here, which is used by the logger
+        self._code_quality = review_response_dict.get("code_quality", 0) 
         if not isinstance(metric_value, (float, int)): metric_value = None
-        if not isinstance(self._code_quality, (int, float)): self._code_quality = 0
-        node.code_quality = int(self._code_quality)
-        has_csv_submission_actual = (self.cfg.workspace_dir / "submission" / "submission.csv").exists()
+        if not isinstance(self._code_quality, (int, float)): self._code_quality = 0 
+        node.code_quality = int(self._code_quality) 
+
+        submission_dir_for_check = self.cfg.workspace_dir / "submission" # Use current submission dir
+        has_csv_submission_actual = (submission_dir_for_check / "submission.csv").exists()
         has_csv_submission_reported_by_llm = review_response_dict.get("has_csv_submission", False)
+        
         node.analysis = review_response_dict.get("summary", "Feedback LLM summary missing.")
-        node.is_buggy = (review_response_dict.get("is_bug", True) or node.exc_type is not None or metric_value is None or not has_csv_submission_reported_by_llm or not has_csv_submission_actual)
-        bug_reasons = [];
+        
+        node.is_buggy = (
+            review_response_dict.get("is_bug", True) 
+            or node.exc_type is not None
+            or metric_value is None 
+            or not has_csv_submission_reported_by_llm 
+            or not has_csv_submission_actual 
+        )
+        
+        bug_reasons = []
         if review_response_dict.get("is_bug", True): bug_reasons.append("LLM judged buggy")
         if node.exc_type is not None: bug_reasons.append(f"Exception ({node.exc_type})")
         if metric_value is None: bug_reasons.append("Metric missing/invalid")
         if not has_csv_submission_reported_by_llm: bug_reasons.append("LLM reported no CSV")
         if not has_csv_submission_actual: bug_reasons.append("Actual CSV not found")
+        
         if node.is_buggy:
             logger.info(f"{log_prefix}: Node {node.id} determined as BUGGY. Reasons: {'; '.join(bug_reasons) if bug_reasons else 'None explicitly stated'}", extra={"verbose":True})
             node.metric = WorstMetricValue()
-            if metric_value is not None and node.metric is not None: node.metric.original_value_before_reset_to_worst = metric_value
+            if metric_value is not None and node.metric is not None: 
+                 node.metric.original_value_before_reset_to_worst = metric_value
         else: 
             logger.info(f"{log_prefix}: Node {node.id} determined as NOT BUGGY.", extra={"verbose":True})
             node.metric = MetricValue(metric_value, maximize=not review_response_dict.get("lower_is_better", True))
+        
         return node
+
+class PlannerAgent(Agent):
+    def __init__(
+        self,
+        task_desc: str,
+        cfg: Config,
+        journal: Journal,
+        wandb_logger: Optional[WandbLogger] = None,
+        competition_benchmarks: Optional[Dict[str, Any]] = None,
+    ):
+        # Pass wandb_run as None explicitly if PlannerAgent should use WandbLogger
+        # or pass the actual wandb_run if it's to log directly (matching Agent's pattern)
+        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks, wandb_run=wandb_logger.wandb_run if wandb_logger else None)
+
+    def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, retries: int = 3,) -> Any:
+        completion_text = None; log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
+        for attempt in range(retries):
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
+            try:
+                completion_text = query(system_message=system_prompt, user_message=user_prompt, model=model, temperature=temperature, planner=planner_flag, current_step=self.current_step, convert_system_to_user=convert_system_to_user, max_tokens=self.acfg.code.max_new_tokens)
+                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True}); return completion_text
+            except Exception as e:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
+                if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+        return None
+    
+    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        if completion_text is None: return "", "", ""
+        task_summary = extract_summary(completion_text,task=True); plan = extract_plan(completion_text) 
+        if not (plan and task_summary): 
+            plan = plan or str(completion_text) 
+            task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
+            logger.warning(f"{log_prefix}: Plan or summary extraction failed/partial. Raw: {trim_long_string(completion_text)}", extra={"verbose":True})
+        return task_summary, plan, ""
+
+    def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_code_system_prompt(); log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODER", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.model, temperature=self.acfg.code.temp, planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        if completion_text is None: return "", "", "" 
+        code = extract_code(completion_text)
+        if not code: code = str(completion_text) 
+        return "", code, "" 
+
+    def _draft(self, parent_node=None) -> Node:
+        log_prefix = f"PLANNER_AGENT_DRAFT_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
+        plan_user_prompt = get_planner_agent_draft_plan_user_prompt(task_desc=self.task_desc, journal_summary=self.journal.generate_summary(include_code=False), competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        task_summary, agent_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
+        if not agent_plan: agent_plan = "PLAN_FAILED_IN_DRAFT"
+        if not task_summary: task_summary = "TASK_SUMMARY_FAILED_IN_DRAFT_PLAN_QUERY"
+        code_user_prompt = get_planner_agent_draft_code_user_prompt(task_summary_from_planner=task_summary, plan_from_planner=agent_plan, journal_summary=self.journal.generate_summary(include_code=False), competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
+        if not generated_code: generated_code = "#CODE_FAILED_IN_DRAFT"
+        new_node = Node(plan=agent_plan, code=generated_code, summary=task_summary, task_summary=task_summary, parent=parent_node)
+        logger.info(f"{log_prefix}: Drafted new node {new_node.id}.", extra={"verbose": True})
+        return new_node
+
+    def _improve(self, parent_node: Node) -> Node:
+        log_prefix = f"PLANNER_AGENT_IMPROVE_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
+        plan_user_prompt = get_planner_agent_improve_plan_user_prompt(task_desc=self.task_desc, parent_node_code=parent_node.code, competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        task_summary, improvement_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
+        if not improvement_plan: improvement_plan = "IMPROVE_PLAN_FAILED"
+        if not task_summary: task_summary = "TASK_SUMMARY_FAILED_IN_IMPROVE_PLAN_QUERY"
+        code_user_prompt = get_planner_agent_improve_code_user_prompt(task_summary_from_planner=task_summary, improvement_plan_from_planner=improvement_plan, parent_node_code=parent_node.code, journal_summary=self.journal.generate_summary(include_code=False), competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
+        if not generated_code: generated_code = parent_node.code 
+        new_node = Node(plan=improvement_plan, code=generated_code, summary=task_summary, task_summary=task_summary, parent=parent_node)
+        logger.info(f"{log_prefix}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
+        return new_node
+
+    def _debug(self, parent_node: Node) -> Node:
+        log_prefix = f"PLANNER_AGENT_DEBUG_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
+        plan_user_prompt = get_planner_agent_debug_plan_user_prompt(task_desc=self.task_desc, parent_node_code=parent_node.code, parent_node_term_out=parent_node.term_out, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        bug_summary, fix_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
+        if not fix_plan: fix_plan = "DEBUG_PLAN_FAILED"
+        if not bug_summary: bug_summary = "BUG_SUMMARY_FAILED_IN_DEBUG_PLAN_QUERY"
+        code_user_prompt = get_planner_agent_debug_code_user_prompt(bug_summary_from_planner=bug_summary, fix_plan_from_planner=fix_plan, parent_node_code=parent_node.code, parent_node_feedback=parent_node.analysis, parent_node_term_out=parent_node.term_out, competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
+        _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
+        if not generated_code: generated_code = parent_node.code 
+        new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
+        logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
+        return new_node
+    
+    def reflect(self, node: Node) -> tuple[str, str]:
+        log_prefix = f"PLANNER_AGENT_REFLECT_STEP{self.current_step}_NODE{node.id}"
+        logger.info(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
+        try:
+            reflection_plan, revised_code = perform_two_step_reflection(
+                code=node.code, analysis=node.analysis, term_out=node.term_out,
+                task_desc=self.task_desc, model_name=self.cfg.agent.code.planner_model, 
+                temperature=self.acfg.code.temp, convert_system_to_user=self.acfg.convert_system_to_user,
+                query_func=query, wrap_code_func=prompt_utils_wrap_code, extract_code_func=extract_code,
+                current_step=self.current_step )
+        except Exception as e:
+            logger.error(f"{log_prefix}: Error during self-reflection call: {e}", exc_info=True, extra={"verbose": True})
+            return f"REFLECTION_ERROR: {e}", node.code
+        if revised_code and revised_code.strip() and revised_code != node.code: logger.info(f"{log_prefix}: Self-reflection resulted in code changes.", extra={"verbose": True})
+        elif "No specific errors found requiring changes." in reflection_plan: logger.info(f"{log_prefix}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
+        else: logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
+        return reflection_plan, revised_code

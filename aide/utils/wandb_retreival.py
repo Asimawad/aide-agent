@@ -13,7 +13,7 @@ from pathlib import Path
 
 WANDB_ENTITY = "asim_awad"
 
-WANDB_PROJECT = "MLE_BENCH_AIDE"
+WANDB_PROJECT = "MLE_BENCH_AIDE_VM"
 
 WANDB_RUN_NAME = cfg.wandb.run_name
 

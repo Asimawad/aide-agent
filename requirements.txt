@@ -87,3 +87,4 @@ igraph # For tree visualization (tree_export.py) - can be python-igraph or cairo
 cairocffi # Often needed for igraph plotting capabilities
 pandas-stubs # For type hinting with pandas (development) - optional
 
+radon
