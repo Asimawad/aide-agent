@@ -3,6 +3,7 @@ import random
 from typing import Any, Dict, List,Optional
 import copy # For deepcopying system prompts
 from ..backend import FunctionSpec
+from copy import deepcopy
 
 # --- Helper for wrapping code (already in your codebase) ---
 def wrap_code(code_str: str, lang: str = "python") -> str:
@@ -1277,3 +1278,87 @@ def get_segment_reflection_user_prompt(
         )
     }
     return prompt
+
+
+
+# -----------------------------------------------------------------------------
+# Chunk-level reflection prompts
+# -----------------------------------------------------------------------------
+CHUNK_REFLECTION_SYSTEM_PROMPT: Dict[str, Any] = {
+    "SYSTEM": (
+        "You are an expert Python Code Reviewer and Refinement Specialist for Kaggle competition solutions. "
+        "The solution is organized into multiple segments (e.g. Setup & Imports, Data Loading, etc.). "
+        "Now you will be given a *chunk* of these segments together, along with:\n"
+        "  - The overall 'Master Plan'.\n"
+        "  - The individual 'Task Summaries' for each segment in the chunk.\n"
+        "  - The full code generated *before* this chunk.\n"
+        "  - The concatenated 'Initial Chunk Code' for all segments in the chunk.\n\n"
+        "Your job is to reflect on this entire chunk at once:  \n"
+        "1. **Correctness & Bugs:** Identify any syntax, runtime or logical errors across *any* of the segments in this chunk.  \n"
+        "2. **Plan Adherence:** Does each segment accurately implement its part of the Master Plan?  \n"
+        "3. **Inter-Segment Consistency:** Do the segments in this chunk integrate seamlessly with one another and with the prior code?  \n"
+        "4. **Best Practices & Clarity:** Is the combined code clean, readable, and well-commented?  \n"
+        "5. **Boundary Conditions:** Are there missing imports or variable definitions needed by later segments?\n\n"
+        "Then produce:\n"
+        "  - A single **Reflection Summary** covering the chunk as a whole.\n"
+        "  - A single **Revised Code Snippet** (a unified code block replacing the entire chunk)."
+    ),
+    "user_instructions": {
+        "Review Focus Areas for the Initial Chunk Code": [
+            "1. Correctness & Bugs across all segments in the chunk.",
+            "2. Each segment’s adherence to the Master Plan.",
+            "3. Integration among the chunk’s segments and with preceding code.",
+            "4. Cleanliness, readability, and appropriate '# Thought:' commentary.",
+            "5. Completeness (no missing imports, variables, or function definitions needed later)."
+        ],
+        "Output Requirements (Strict Adherence Mandatory)": (
+            "Your response **MUST** be exactly in two parts, clearly demarcated:\n\n"
+            "Reflection Summary:\n"
+            "[A concise paragraph or bullet-list summarizing issues or confirmations across the chunk.]\n\n"
+            "---\n\n"
+            "Revised Code Snippet:\n"
+            "```python\n"
+            "# Thought: [Your updated, chunk-level reasoning]\n"
+            "[The full, corrected Python code covering all segments in this chunk]\n"
+            "```"
+        )
+    }
+}
+
+def get_chunked_reflection_system_prompt() -> Dict[str, Any]:
+    return deepcopy(CHUNK_REFLECTION_SYSTEM_PROMPT)
+
+
+def get_chunked_reflection_user_prompt(
+    task_summary: str,
+    master_plan: str,
+    segment_names: List[str],
+    code_before_chunk: str,
+    initial_chunk_code: str
+) -> Dict[str, Any]:
+    """
+    Builds the user prompt for chunk-level reflection.
+    - task_summaries: one per segment in the chunk, in same order as segment_names.
+    - master_plan: the full plan text.
+    - code_before_chunk: everything generated so far, before this chunk.
+    - initial_chunk_code: the concatenated code snippets for this chunk.
+    """
+
+
+    return {
+        "Context for Chunk Review": {
+            "Overall Task Summary": task_summary,
+            "Full Master Plan": master_plan,
+            "Segments in This Chunk": segment_names,
+            "Python Code Generated Before This Chunk": wrap_code(
+                code_before_chunk or "# No prior code generated."
+            ),
+        },
+        "Initial Chunk Code to Review": wrap_code(initial_chunk_code),
+        "Your Chunk Reflection Task": (
+            f"Please review the above 'Initial Chunk Code to Review' for segments "
+            f"{', '.join(segment_names)} as a single unit.  \n"
+            "Address the focus areas listed in the system prompt, then produce your "
+            "**Reflection Summary** and **Revised Code Snippet** exactly in the format specified."
+        )
+    }

@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path # Ensure Path is imported
 from rich.console import Console # Keep for console output
-from typing import Any, Callable, cast, Optional, Dict # Added Dict
+from typing import Any, Callable, cast, Optional, Dict ,List# Added Dict
 from .backend import query
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
@@ -54,6 +54,8 @@ from .utils.prompt_utils import (
     wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
     AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
     AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+    get_chunked_reflection_system_prompt,
+    get_chunked_reflection_user_prompt
 )
 
 
@@ -839,19 +841,73 @@ class CodeChainAgent(Agent): # Inherit from Agent
             "Training & Validation", 
             "Prediction & Submission"
         ]
-        chain_reflection = True if self.acfg.ITS_Strategy == "codechain_v2" else False 
-        for segment_name in segments_order:
-            code_snippet = self._generate_code_segment(
-                segment_name, task_summary, master_plan_text, code_accumulator, chain_reflection
-            )
-            code_accumulator += code_snippet + "\n\n" # Add two newlines for separation
-            if f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}" in code_snippet:
-                logger.warning(f"{log_prefix_chain}: Halting chain due to failure in segment: {segment_name}")
-                break # Optional: decide if you want to continue or halt on segment failure
 
-        logger.info(f"{log_prefix_chain}: Chained code generation process complete.")
+        chunked_reflection = (self.acfg.ITS_Strategy == "codechain_v3")
+        chunk_size = 2
+        if chunked_reflection:
+            return self._generate_chuncked_code(task_summary, master_plan_text, chunk_size, code_accumulator)
+        else:
+            chain_reflection = True if self.acfg.ITS_Strategy == "codechain_v2" else False 
+            for segment_name in segments_order:
+                code_snippet = self._generate_code_segment(
+                    segment_name, task_summary, master_plan_text, code_accumulator, chain_reflection
+                )
+                code_accumulator += code_snippet + "\n\n" # Add two newlines for separation
+                if f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}" in code_snippet:
+                    logger.warning(f"{log_prefix_chain}: Halting chain due to failure in segment: {segment_name}")
+                    break # Optional: decide if you want to continue or halt on segment failure
+
+            logger.info(f"{log_prefix_chain}: Chained code generation process complete.")
+            return code_accumulator.strip()
+
+
+
+    def _generate_chuncked_code(self, task_summary: str, master_plan_text: str, chunk_size: int = 2, code_accumulator: str = "") -> str:
+        log_prefix_chain = f"CodeChainAgent_Chained_Draft_Step: {self.current_step}"
+
+        segments_order = [
+            "Setup & Imports",
+            "Data Loading",
+            "Data Preprocessing",
+            "Modeling",
+            "Training & Validation", 
+            "Prediction & Submission"
+        ]
+        i = 0
+        while i < len(segments_order):
+            chunk = segments_order[i : i + chunk_size]
+            code_before = code_accumulator
+            combined_chunk = ""
+
+            # 1) generate each segment in this chunk
+            for seg in chunk:
+                snippet = self._generate_code_segment(
+                    seg, task_summary, master_plan_text, code_accumulator
+                )
+                combined_chunk += snippet + "\n\n"
+                code_accumulator += snippet + "\n\n"
+                if f"# FAILED TO GENERATE CODE FOR SEGMENT: {seg}" in snippet:
+                    logger.warning(f"{log_prefix_chain}: failure in {seg}, skipping reflection for this chunk.")
+                    break
+
+            # 2) if configured, reflect on the whole chunk of `chunk_size` segments
+            if len(combined_chunk.strip()) > 0:
+                # for now we just duplicate the same task_summary per segment
+
+                _, revised_chunk = self._reflect_on_chunk(
+                    task_summary,
+                    master_plan_text,
+                    chunk,
+                    code_before,
+                    combined_chunk
+                )
+                # splice out the old chunk and replace with revised
+                code_accumulator = code_before + revised_chunk + "\n\n"
+
+            i += chunk_size
+
+        logger.info(f"{log_prefix_chain}: Chained code generation complete.")
         return code_accumulator.strip()
-
 
     def _reflect_on_segment(self,
                             task_summary: str,
@@ -905,6 +961,61 @@ class CodeChainAgent(Agent): # Inherit from Agent
             # logger.debug(f"{log_prefix_reflect}_REVISED_SNIPPET_START\n{revised_snippet}\n{log_prefix_reflect}_REVISED_SNIPPET_END")
 
         return reflection_summary, revised_snippet
+
+    def _reflect_on_chunk(
+            self,
+            task_summary: str,
+            master_plan_text: str,
+            segment_names: List[str],
+            code_before_chunk: str,
+            chunk_code: str
+        ) -> tuple[str, str]:
+            """
+            Reflect on a whole chunk of segments at once.
+            Returns (reflection_summary, revised_chunk_code)
+            """
+            tag = "_".join(s.replace(" ", "_") for s in segment_names)
+            log_prefix = f"CodeChainAgent_ChunkReflect_Step:{self.current_step}_Segments_{tag}"
+            logger.info(f"{log_prefix}: Reflecting on chunk of segments {segment_names}")
+
+            system_prompt = get_chunked_reflection_system_prompt()   # your placeholder
+            user_prompt = get_chunked_reflection_user_prompt(
+                task_summary=task_summary,
+                master_plan=master_plan_text,
+                segment_names=segment_names,
+                code_before_chunk=code_before_chunk,
+                initial_chunk_code=chunk_code
+
+            )
+
+            completion = self._query_llm_with_retries(
+                query_type=f"Chunk-Reflection_{tag}",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=self.acfg.code.model,
+                temperature=self.acfg.code.temp,
+                convert_system_to_user=self.acfg.convert_system_to_user,
+                retries=self.acfg.get('reflection_retries', 1),
+                max_tokens=self.acfg.code.max_new_tokens,
+            )
+            if not completion:
+                logger.warning(f"{log_prefix}: No response; returning original chunk.")
+                return "", chunk_code
+
+            summary, revised = extract_reflection_summary_and_revised_code(completion)
+            if not revised.strip() or revised.strip() == "# FAILED TO FIND 'Revised Code Snippet:' SECTION":
+                logger.warning(f"{log_prefix}: Empty revised chunk; using original.")
+                return summary, chunk_code
+
+            logger.info(f"{log_prefix}: Chunk reflection produced revised code.")
+            logger.debug(f"-----------------------------------------------------------------")
+            logger.debug(f"{log_prefix}: Summary: {summary}", extra={"verbose": True})
+            logger.debug(f"-----------------------------------------------------------------")
+            logger.debug(f"{log_prefix}: Revised chunk: {revised}", extra={"verbose": True})
+            logger.debug(f"-----------------------------------------------------------------")
+
+            return summary, revised
+
 
     # Modify the existing _draft method to use this chained approach
     def _draft(self, parent_node=None) -> Node:
