@@ -17,7 +17,7 @@ console = Console()
 from .utils import copytree 
 from aide.utils.metrics_calculator import generate_all_metrics
 from .utils.wandb_logger import WandbLogger 
-from .agent import Agent, PlannerAgent
+from .agent import Agent, PlannerAgent, CodeChainAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node 
 from omegaconf import OmegaConf
@@ -149,6 +149,10 @@ def run():
     if cfg.agent.ITS_Strategy == "planner":
         logger.info("Initializing PlannerAgent.")
         agent = PlannerAgent(**agent_instance_args)
+    elif cfg.agent.ITS_Strategy == "codechain" or cfg.agent.ITS_Strategy == "codechain_v2":
+        logger.info("Initializing CodeChainAgent.")
+        agent = CodeChainAgent(**agent_instance_args)
+
     else:
         logger.info("Initializing Agent.")
         agent = Agent(**agent_instance_args)
