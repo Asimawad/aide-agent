@@ -180,7 +180,7 @@ def query(
         )
 
     logger.debug(
-        f"{log_identifier}_FINAL_MODEL_KWARGS: {final_model_kwargs}",
+        f"Model arguments: {final_model_kwargs}",
         extra={"verbose": True},
     )
 

@@ -6,15 +6,15 @@ import os
 from typing import Optional, Dict, Any, Tuple
 import openai
 from omegaconf import OmegaConf
-
+from funcy import notnone, once, select_values
 from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
-
+from aide.backend.utils import ContextLengthExceededError # Add this import at the top of agent.py
 logger = logging.getLogger("aide")
 
 
 _client1: openai.OpenAI = None
 _vllm_config1: dict = {
-    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8001/v1"),
+    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8000/v1"),
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"),
 }
 
@@ -32,42 +32,40 @@ VLLM_API_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-
+@once
 def _setup_vllm_client():
     """Sets up the OpenAI client for vLLM server."""
     global _client
-    if _client is None:
-        logger.info(
-            f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}",
-            extra={"verbose": True},
+    logger.info(
+        f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}",
+        extra={"verbose": True},
+    )
+    try:
+        _client = openai.OpenAI(
+            base_url=_vllm_config["base_url"],
+            api_key=_vllm_config["api_key"],
+            max_retries=0,  # Rely on backoff_create for retries
         )
-        try:
-            _client = openai.OpenAI(
-                base_url=_vllm_config["base_url"],
-                api_key=_vllm_config["api_key"],
-                max_retries=0,  # Rely on backoff_create for retries
-            )
 
-        except Exception as e:
-            logger.error(f"Failed to setup vLLM client: {e}")
-            raise
+    except Exception as e:
+        logger.error(f"Failed to setup vLLM client: {e}")
+        raise
 
-
+@once
 def _setup_vllm_client1():
     """Sets up the OpenAI client for vLLM server."""
     global _client1
-    if _client1 is None:
-        logger.info(
-            f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}",
-            extra={"verbose": True},
-        )
-        try:
+    logger.info(
+        f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}",
+        extra={"verbose": True},
+    )
+    try:
             _client1 = openai.OpenAI(
                 base_url=_vllm_config1["base_url"],
                 api_key=_vllm_config1["api_key"],
                 max_retries=0,  # Rely on backoff_create for retries
             )
-        except Exception as e:
+    except Exception as e:
             logger.error(f"Failed to setup vLLM client: {e}")
             raise
 
@@ -105,7 +103,7 @@ def query(
     Implements backoff retries and drops system_message after 2 retries.
     """
     logger.info("activated vllm backend...", extra={"verbose": True})
-
+    model_kwargs = select_values(notnone, model_kwargs)
     # Prepare messages list for OpenAI API format
     def prepare_messages(sys_msg):
         return opt_messages_to_list(sys_msg, user_message, convert_system_to_user=False)
@@ -139,10 +137,7 @@ def query(
                     **filtered_api_params,
                 )
             else:
-                logger.debug(
-                    f"Calling vLLM planner API>>>>> {model}", extra={"verbose": True}
-                )
-                logger.info(f"Calling vLLM planner API>>>>> {model}")
+                logger.info(f"{model} is generating using vLLM backend ...")
                 _setup_vllm_client1()
                 t0 = time.time()
                 completion = backoff_create(
@@ -179,7 +174,9 @@ def query(
             }
             logger.debug(f"No of tokens {output_tokens}")
             return output, req_time, input_tokens, output_tokens, info
-
+        except ContextLengthExceededError as cle: # Catch specific error
+            logger.error(f"Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True}) # exc_info=False as CLE is already logged well
+            return f"Exceeded context length limit", 0, 0, 0, {"error": str(cle)}
         except Exception as e:
             logger.error(
                 f"vLLM query failed (attempt {retries + 1}): {e}", exc_info=True
