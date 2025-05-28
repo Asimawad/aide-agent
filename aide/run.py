@@ -149,7 +149,7 @@ def run():
     if cfg.agent.ITS_Strategy == "planner":
         logger.info("Initializing PlannerAgent.")
         agent = PlannerAgent(**agent_instance_args)
-    elif cfg.agent.ITS_Strategy == "codechain" or cfg.agent.ITS_Strategy == "codechain_v2":
+    elif cfg.agent.ITS_Strategy == "codechain" or cfg.agent.ITS_Strategy == "codechain_v2" or cfg.agent.ITS_Strategy == "codechain_v3":
         logger.info("Initializing CodeChainAgent.")
         agent = CodeChainAgent(**agent_instance_args)
 
