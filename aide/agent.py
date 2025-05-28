@@ -51,6 +51,7 @@ from .utils.self_reflection import (
 from .utils.metric import MetricValue, WorstMetricValue 
 
 logger = logging.getLogger("aide") 
+logger.setLevel(logging.INFO)
 console = Console()
 
 ExecCallbackType = Callable[[str, bool], ExecutionResult]
@@ -83,10 +84,8 @@ class Agent:
         self._prev_buggy: bool = False # Tracks buggy status *before* reflection for current step logic
         self._code_quality: float = 0.0 # Set by parse_exec_result
 
-    # search_policy, _draft, _improve, _debug, reflect, update_data_preview
-    # plan_and_code_query - Ensure these methods from your NEW agent.py are used.
-    # I'm assuming they are correct as per your latest codebase.
-    # If changes are needed there for logging or functionality, let me know.
+
+
     def search_policy(self) -> Node | None:
         log_prefix_base = f"{self.__class__.__name__.upper()}_SEARCH_POLICY_STEP{self.current_step}"
         search_cfg = self.acfg.search
@@ -441,17 +440,18 @@ class Agent:
         if not has_csv_submission_actual: bug_reasons.append("Actual CSV not found")
         
         if node.is_buggy:
-            logger.info(f"{log_prefix}: Node {node.id} determined as BUGGY. Reasons: {'; '.join(bug_reasons) if bug_reasons else 'None explicitly stated'}", extra={"verbose":True})
+            logger.info(f"{log_prefix}:\n\n determined as BUGGY. \n\nReasons: {'; '.join(bug_reasons) if bug_reasons else 'None explicitly stated'}", extra={"verbose":True})
             node.metric = WorstMetricValue()
             if metric_value is not None and node.metric is not None: 
                  node.metric.original_value_before_reset_to_worst = metric_value
         else: 
-            logger.info(f"{log_prefix}: Node {node.id} determined as NOT BUGGY.", extra={"verbose":True})
+            logger.info(f"{log_prefix}:\n\n determined as NOT BUGGY. \n\nReasons: {'; '.join(bug_reasons) if bug_reasons else 'None explicitly stated'}", extra={"verbose":True})
             node.metric = MetricValue(metric_value, maximize=not review_response_dict.get("lower_is_better", True))
         
         return node
 
 class PlannerAgent(Agent):
+
     def __init__(
         self,
         task_desc: str,
@@ -460,9 +460,8 @@ class PlannerAgent(Agent):
         wandb_logger: Optional[WandbLogger] = None,
         competition_benchmarks: Optional[Dict[str, Any]] = None,
     ):
-        # Pass wandb_run as None explicitly if PlannerAgent should use WandbLogger
-        # or pass the actual wandb_run if it's to log directly (matching Agent's pattern)
-        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks, wandb_run=wandb_logger.wandb_run if wandb_logger else None)
+
+        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
 
     def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, retries: int = 3,) -> Any:
         completion_text = None; log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
@@ -479,6 +478,9 @@ class PlannerAgent(Agent):
     
     def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
         system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
         completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
         if completion_text is None: return "", "", ""
         task_summary = extract_summary(completion_text,task=True); plan = extract_plan(completion_text) 
@@ -486,14 +488,19 @@ class PlannerAgent(Agent):
             plan = plan or str(completion_text) 
             task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
             logger.warning(f"{log_prefix}: Plan or summary extraction failed/partial. Raw: {trim_long_string(completion_text)}", extra={"verbose":True})
+        logger.debug(f"{log_prefix}: Plan query completed. Task summary: {task_summary}\n\nPlan: {plan}", extra={"verbose": True})
         return task_summary, plan, ""
 
     def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
         system_prompt = get_planner_agent_code_system_prompt(); log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODER", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.model, temperature=self.acfg.code.temp, planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        logger.debug(f"{log_prefix}: Sending PLANNER_CODE query to LLM.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODE", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.model, temperature=self.acfg.code.temp, planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
         if completion_text is None: return "", "", "" 
         code = extract_code(completion_text)
         if not code: code = str(completion_text) 
+        logger.debug(f"{log_prefix}\n\nCode query completed. Code: {code}", extra={"verbose": True})
         return "", code, "" 
 
     def _draft(self, parent_node=None) -> Node:
@@ -507,12 +514,12 @@ class PlannerAgent(Agent):
         _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
         if not generated_code: generated_code = "#CODE_FAILED_IN_DRAFT"
         new_node = Node(plan=agent_plan, code=generated_code, summary=task_summary, task_summary=task_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Drafted new node {new_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: Drafted new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
     def _improve(self, parent_node: Node) -> Node:
         log_prefix = f"PLANNER_AGENT_IMPROVE_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: Starting improvement for node {parent_node.id}.", extra={"verbose": True})
         plan_user_prompt = get_planner_agent_improve_plan_user_prompt(task_desc=self.task_desc, parent_node_code=parent_node.code, competition_name=self.competition_name, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
         task_summary, improvement_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
         if not improvement_plan: improvement_plan = "IMPROVE_PLAN_FAILED"
@@ -521,12 +528,12 @@ class PlannerAgent(Agent):
         _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
         if not generated_code: generated_code = parent_node.code 
         new_node = Node(plan=improvement_plan, code=generated_code, summary=task_summary, task_summary=task_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
 
     def _debug(self, parent_node: Node) -> Node:
         log_prefix = f"PLANNER_AGENT_DEBUG_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: Starting debugging for node {parent_node.id}.", extra={"verbose": True})
         plan_user_prompt = get_planner_agent_debug_plan_user_prompt(task_desc=self.task_desc, parent_node_code=parent_node.code, parent_node_term_out=parent_node.term_out, acfg_data_preview=self.acfg.data_preview, data_preview_content=self.data_preview)
         bug_summary, fix_plan, _ = self.plan_query(plan_user_prompt, retries=self.acfg.get('query_retries', 3))
         if not fix_plan: fix_plan = "DEBUG_PLAN_FAILED"
@@ -535,12 +542,12 @@ class PlannerAgent(Agent):
         _, generated_code, _ = self.code_query(code_user_prompt, retries=self.acfg.get('query_retries', 3))
         if not generated_code: generated_code = parent_node.code 
         new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
-        logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
     
     def reflect(self, node: Node) -> tuple[str, str]:
         log_prefix = f"PLANNER_AGENT_REFLECT_STEP{self.current_step}_NODE{node.id}"
-        logger.info(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: Initiating self-reflection.", extra={"verbose": True})
         try:
             reflection_plan, revised_code = perform_two_step_reflection(
                 code=node.code, analysis=node.analysis, term_out=node.term_out,
