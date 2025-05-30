@@ -1,28 +1,37 @@
 # python/backend_vllm.py
+
 import logging
-import re
 import time
 import os
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, List, Tuple, Dict, Any
+
 import openai
-from omegaconf import OmegaConf
 from funcy import notnone, once, select_values
-from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
-from aide.backend.utils import ContextLengthExceededError # Add this import at the top of agent.py
+
+from aide.backend.utils import (
+    OutputType,
+    opt_messages_to_list,
+    backoff_create,
+    ContextLengthExceededError,
+)
+
 logger = logging.getLogger("aide")
 
+# two separate clients for coder vs planner
+_client_coder: openai.OpenAI = None
+_client_planner: openai.OpenAI = None
 
-_client1: openai.OpenAI = None
-_vllm_config1: dict = {
-    "base_url": os.getenv("VLLM_BASE_URL2", f"http://localhost:8000/v1"),
-    "api_key": os.getenv("VLLM_API_KEY", "EMPTY"),
-}
+# defaults; tweak via env
+# python/backend_vllm.py
+# python/backend_vllm.py
+# python/backend_vllm.py
+# backend_vllm.py  – keep the /v1 suffix
+_VLLM_CODER_URL  = os.getenv("VLLM_BASE_URL",  "http://localhost:8000/v1")
+_VLLM_PLAN_URL   = os.getenv("VLLM_BASE_URL2", "http://localhost:8001/v1")
 
-_client: openai.OpenAI = None
-_vllm_config: dict = {
-    "base_url": os.getenv("VLLM_BASE_URL", f"http://localhost:8000/v1"),
-    "api_key": os.getenv("VLLM_API_KEY", "EMPTY"),
-}
+
+_VLLM_CODER_APIKEY = os.getenv("VLLM_API_KEY",     "")
+_VLLM_PLAN_APIKEY  = os.getenv("VLLM_API_KEY",     "")
 
 VLLM_API_EXCEPTIONS = (
     openai.APIConnectionError,
@@ -33,163 +42,135 @@ VLLM_API_EXCEPTIONS = (
 )
 
 @once
-def _setup_vllm_client():
-    """Sets up the OpenAI client for vLLM server."""
-    global _client
-    logger.info(
-        f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}",
-        extra={"verbose": True},
+def _setup_coder_client():
+    global _client_coder
+    logger.info(f"Setting up vLLM coder client @ {_VLLM_CODER_URL}")
+    _client_coder = openai.OpenAI(
+        base_url=_VLLM_CODER_URL,
+        api_key=_VLLM_CODER_APIKEY,
+        max_retries=0,
     )
-    try:
-        _client = openai.OpenAI(
-            base_url=_vllm_config["base_url"],
-            api_key=_vllm_config["api_key"],
-            max_retries=0,  # Rely on backoff_create for retries
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to setup vLLM client: {e}")
-        raise
 
 @once
-def _setup_vllm_client1():
-    """Sets up the OpenAI client for vLLM server."""
-    global _client1
-    logger.info(
-        f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}",
-        extra={"verbose": True},
+def _setup_planner_client():
+    global _client_planner
+    logger.info(f"Setting up vLLM planner client @ {_VLLM_PLAN_URL}")
+    _client_planner = openai.OpenAI(
+        base_url=_VLLM_PLAN_URL,
+        api_key=_VLLM_PLAN_APIKEY,
+        max_retries=0,
     )
-    try:
-            _client1 = openai.OpenAI(
-                base_url=_vllm_config1["base_url"],
-                api_key=_vllm_config1["api_key"],
-                max_retries=0,  # Rely on backoff_create for retries
-            )
-    except Exception as e:
-            logger.error(f"Failed to setup vLLM client: {e}")
-            raise
-
-
-# Only needed if you configure base_url/api_key via a central OmegaConf object passed to it. Remove if config is purely via env vars or static. >>>
-def set_vllm_config(cfg: OmegaConf):
-    """Update planner vLLM config from OmegaConf."""
-    global _vllm_config
-    if cfg.get("vllm"):
-        _vllm_config.update(
-            {
-                "base_url": cfg.vllm.get("base_url", _vllm_config["base_url"]),
-                "api_key": cfg.vllm.get("api_key", _vllm_config["api_key"]),
-            }
-        )
-    logger.debug(
-        f"Updated vLLM config: base_url={_vllm_config['base_url']}",
-        extra={"verbose": True},
-    )
-
 
 def query(
     system_message: Optional[str] = None,
     user_message: Optional[str] = None,
+    *,
     model: str = "Qwen/Qwen2-0.5B-Instruct",
     temperature: float = 0.7,
-    planner=False,
-    func_spec=None,
-    convert_system_to_user=False,
-    max_retries=3,
-    **model_kwargs: Any,
-) -> Tuple[OutputType, float, int, int, Dict[str, Any]]:
+    num_responses: int = 1,
+    planner: bool = False,
+    max_retries: int = 3,
+    **unused_kwargs: Any,
+) -> Tuple[List[OutputType], float, int, int, Dict[str, Any]]:
     """
-    Query a vLLM-hosted model using OpenAI-compatible API.
-    Implements backoff retries and drops system_message after 2 retries.
+    Query a vLLM-hosted model, returning up to `n` completions.
+    Returns (outputs, elapsed_s, prompt_tokens, completion_tokens, info).
     """
-    logger.info("activated vllm backend...", extra={"verbose": True})
-    model_kwargs = select_values(notnone, model_kwargs)
-    # Prepare messages list for OpenAI API format
-    def prepare_messages(sys_msg):
-        return opt_messages_to_list(sys_msg, user_message, convert_system_to_user=False)
+    # build messages
+    messages = opt_messages_to_list(system_message, user_message, convert_system_to_user=False)
 
-    current_system_message = system_message
+    # pick client
+    client_setup = _setup_planner_client if planner else _setup_coder_client
+    client_setup()
+    client = _client_planner if planner else _client_coder
+    print(client.base_url)
     retries = 0
+    current_system = system_message
 
-    while retries < max_retries:
-        messages = prepare_messages(current_system_message)
-
-        api_params = {
+    while True:
+        # prepare API args
+        api_kwargs: Dict[str, Any] = {
+            "model": model,
             "temperature": temperature,
-            "max_tokens": model_kwargs.get("max_new_tokens"),
-            "top_p": model_kwargs.get("top_p"),
-            "top_k": model_kwargs.get("top_k"),
-            "stop": model_kwargs.get("stop"),
-            "frequency_penalty": model_kwargs.get("frequency_penalty"),
-            "presence_penalty": model_kwargs.get("presence_penalty"),
+            "n": num_responses,
+            "stop": unused_kwargs.get("stop"),
+            "max_tokens": unused_kwargs.get("max_new_tokens") or unused_kwargs.get("max_tokens"),
+            "top_p": unused_kwargs.get("top_p"),
+            "top_k": unused_kwargs.get("top_k"),
+            "frequency_penalty": unused_kwargs.get("frequency_penalty"),
+            "presence_penalty": unused_kwargs.get("presence_penalty"),
         }
-        filtered_api_params = {k: v for k, v in api_params.items() if v is not None}
-        filtered_api_params["model"] = model
+        # drop None values
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
-            if not planner:
-                _setup_vllm_client()
-                t0 = time.time()
-                completion = backoff_create(
-                    _client.chat.completions.create,
-                    VLLM_API_EXCEPTIONS,
-                    messages=messages,
-                    **filtered_api_params,
-                )
-            else:
-                logger.info(f"{model} is generating using vLLM backend ...")
-                _setup_vllm_client1()
-                t0 = time.time()
-                completion = backoff_create(
-                    _client1.chat.completions.create,
-                    VLLM_API_EXCEPTIONS,
-                    messages=messages,
-                    **filtered_api_params,
-                )
-            # Success, process response
-            req_time = time.time() - t0
-            if not completion or not completion.choices:
-                logger.error(
-                    "vLLM API call returned empty or invalid completion object."
-                )
-                return (
-                    "ERROR: Invalid API response",
-                    req_time,
-                    0,
-                    0,
-                    {"error": "Invalid API response"},
-                )
+            print(f"----------------------------------------------------------\n")
+            print(f"api_kwargs: {api_kwargs}")
+            print(f"messages: {messages}")
+            print(f"----------------------------------------------------------\n")
+            print(f"model: {model}")
+            print(f"----------------------------------------------------------\n")
+            print(f"temperature: {temperature}")
+            print(f"----------------------------------------------------------\n")
+            print(f"num_responses: {num_responses}")
+            print(f"----------------------------------------------------------\n")
+            print(f"planner: {planner}")
+# backend_vllm.py  – right before the API call
+            api_kwargs["max_tokens"] = min(1024, api_kwargs.get("max_tokens") or 1024)
+            # (and if you don’t need multiple samples:)
+            api_kwargs.pop("n", None)
 
-            choice = completion.choices[0]
-            output = choice.message.content or ""
-            input_tokens = completion.usage.prompt_tokens if completion.usage else 0
-            output_tokens = (
-                completion.usage.completion_tokens if completion.usage else 0
+            t0 = time.time()
+            completion = backoff_create(
+                client.chat.completions.create,
+                VLLM_API_EXCEPTIONS,
+                stream=True,
+                model="RedHatAI/DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic",
+                messages=[{"role": "user", "content": "ping"}],
             )
+            print(f"------------------###########----------------------------------------\n")
+            print(f"completion: {completion}")
+            print(f"-----------------######################-----------------------------------------\n")
+            elapsed = time.time() - t0
+
+            # sanity
+            if not completion or not completion.choices:
+                raise RuntimeError("Empty completion")
+
+            # collect outputs
+            outputs: List[OutputType] = []
+            for choice in completion.choices:
+                text = choice.message.content or ""
+                outputs.append(text)
+
+            # pad if fewer than requested
+            while len(outputs) < num_responses:
+                outputs.append("")
+
+            # token usage
+            prompt_toks = getattr(completion.usage, "prompt_tokens", 0)
+            comp_toks   = getattr(completion.usage, "completion_tokens", 0)
+
             info = {
                 "model": completion.model,
-                "finish_reason": choice.finish_reason,
-                "id": completion.id,
-                "created": completion.created,
+                "n_requested": num_responses,
+                "n_returned": len(completion.choices),
+                "finish_reasons": [c.finish_reason for c in completion.choices],
+                "id": getattr(completion, "id", None),
+                "created": getattr(completion, "created", None),
             }
-            logger.debug(f"No of tokens {output_tokens}")
-            return output, req_time, input_tokens, output_tokens, info
-        except ContextLengthExceededError as cle: # Catch specific error
-            logger.error(f"Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True}) # exc_info=False as CLE is already logged well
-            return f"Exceeded context length limit", 0, 0, 0, {"error": str(cle)}
-        except Exception as e:
-            logger.error(
-                f"vLLM query failed (attempt {retries + 1}): {e}", exc_info=True
-            )
-            retries += 1
-            if retries == 2:
-                # After 2 retries, drop the system message to shorten prompt
-                logger.warning(
-                    "Dropping system message after 2 failed attempts to mitigate long prompt issues."
-                )
-                current_system_message = None
-            if retries >= max_retries:
-                return f"ERROR: {e}", 0, 0, 0, {"error": str(e)}
+            return outputs, elapsed, prompt_toks, comp_toks, info
 
-    # Should not reach here
-    return "ERROR: Unknown failure", 0, 0, 0, {"error": "Unknown failure"}
+        except ContextLengthExceededError as cle:
+            logger.error(f"Context length exceeded: {cle}")
+            return ["ERROR: context length"] * num_responses, 0.0, 0, 0, {"error": str(cle)}
+
+        except Exception as e:
+            retries += 1
+            logger.warning(f"vLLM call failed (attempt {retries}/{max_retries}): {e}", exc_info=True)
+            if retries >= max_retries:
+                return [f"ERROR: {e}"] * num_responses, 0.0, 0, 0, {"error": str(e)}
+            if retries == 2:
+                logger.info("Dropping system_message to reduce context size")
+                messages = opt_messages_to_list(None, user_message, convert_system_to_user=False)
+            continue

@@ -17,7 +17,7 @@ console = Console()
 from .utils import copytree 
 from aide.utils.metrics_calculator import generate_all_metrics
 from .utils.wandb_logger import WandbLogger 
-from .agent import Agent, PlannerAgent, CodeChainAgent
+from .agent import Agent, PlannerAgent, CodeChainAgent, SelfConsistencyAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node 
 from omegaconf import OmegaConf
@@ -152,7 +152,9 @@ def run():
     elif cfg.agent.ITS_Strategy == "codechain" or cfg.agent.ITS_Strategy == "codechain_v2" or cfg.agent.ITS_Strategy == "codechain_v3":
         logger.info("Initializing CodeChainAgent.")
         agent = CodeChainAgent(**agent_instance_args)
-
+    elif cfg.agent.ITS_Strategy == "self_consistency":
+        logger.info("Initializing SelfConsistencyAgent.")
+        agent = SelfConsistencyAgent(**agent_instance_args)
     else:
         logger.info("Initializing Agent.")
         agent = Agent(**agent_instance_args)

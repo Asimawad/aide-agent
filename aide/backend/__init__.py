@@ -132,8 +132,7 @@ def query(
     func_spec: Optional[FunctionSpec] = None,
     convert_system_to_user: bool = False,
     inference_engine: Optional[str] = None,
-    planner: bool = False,
-    current_step: int = 0,  # Already present, good!
+    current_step: int = 0, 
     reasoning_effort: Optional[str] = None,
     **model_kwargs: Any,
 ) -> OutputType:
@@ -152,8 +151,6 @@ def query(
     compiled_user_message = compile_prompt_to_md(user_message) if user_message else None
 
     # Enhanced Logging
-
-    # Use json.dumps for better readability of dicts/lists in log files
     if compiled_system_message:
         try:
             system_log_content = json.dumps(system_message, indent=2) if isinstance(system_message, (dict, list)) else compiled_system_message
@@ -201,16 +198,13 @@ def query(
         {},
     )  # Defaults
     try:
-        print(f"Querying {provider_name} with model {model}...")
 
         raw_responses, latency, input_tokens, output_tokens, info = query_func(
             system_message=compiled_system_message,
             user_message=compiled_user_message,
             func_spec=func_spec,
-            planner=planner,
             convert_system_to_user=convert_system_to_user,
             step_identifier=f"Prov_{provider_name}_Step{current_step}_M_{model.replace('/', '_')}",  # More specific for backend
-            # current_step=current_step, # If backend functions accept it
             **final_model_kwargs,
         )
     except Exception as e:
@@ -227,22 +221,22 @@ def query(
         extra={"verbose": True},
     )
     if func_spec:
+        output_response = raw_responses[0]
         try:
             response_log_content = (
-                json.dumps(raw_responses, indent=2)
-                if isinstance(raw_responses, (dict, list))
-                else str(raw_responses)
+                json.dumps(output_response, indent=2)
+                if isinstance(output_response, (dict, list))
+                else str(output_response)
             )
         except TypeError:
-            response_log_content = str(raw_responses)
+            response_log_content = str(output_response)
         logger.debug(
             f"RAW_FUNCTION_RESPONSE:\n{response_log_content}",
             extra={"verbose": True},
         )
-    # else:
-    #     logger.debug(
-    #         f"{log_identifier}_RAW_TEXT_RESPONSE_START\n{str(raw_responses)}\n{log_identifier}_RAW_TEXT_RESPONSE_END",
-    #         extra={"verbose": True},
-    #     )
-
-    return raw_responses
+        return output_response
+    
+    if type(raw_responses) == list and len(raw_responses) == 1:
+        return raw_responses[0]
+    else:
+        return raw_responses
