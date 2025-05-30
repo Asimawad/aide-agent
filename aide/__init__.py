@@ -51,7 +51,7 @@ class Experiment:
                 cfg=self.cfg,
                 journal=self.journal,
             )
-        elif self.cfg.agent.ITS_Strategy == "self-consistency": # ADD THIS BLOCK
+        elif self.cfg.agent.ITS_Strategy == "self_consistency": # ADD THIS BLOCK
             self.agent = SelfConsistencyAgent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,
