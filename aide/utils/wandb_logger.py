@@ -294,7 +294,7 @@ class WandbLogger:
 
             # Log Journal as an artifact
             if (wandb_artifacts_staging_dir / "journal.json").exists():
-                artifact_journal = wandb.Artifact(f"{sanitized_exp_name}_run_journal", type="run-journal")
+                artifact_journal = wandb.Artifact(f"{sanitized_exp_name[:100]}_run_journal", type="run-journal")
                 artifact_journal.add_file(str(wandb_artifacts_staging_dir / "journal.json"))
                 self.wandb_run.log_artifact(artifact_journal)
                 self.app_logger.info(f"W&B: Logged run_journal artifact.")
@@ -302,7 +302,7 @@ class WandbLogger:
             # Log Best Solution Code package as an artifact
             best_solution_pkg_path = wandb_artifacts_staging_dir / "best_solution_code"
             if best_solution_pkg_path.exists() and any(best_solution_pkg_path.iterdir()):
-                artifact_code = wandb.Artifact(f"{sanitized_exp_name}_best_solution_package", type="solution-package")
+                artifact_code = wandb.Artifact(f"{sanitized_exp_name[:100]}_best_solution_package", type="solution-package")
                 artifact_code.add_dir(str(best_solution_pkg_path))
                 self.wandb_run.log_artifact(artifact_code)
                 self.app_logger.info(f"W&B: Logged best_solution_package artifact.")
@@ -310,7 +310,7 @@ class WandbLogger:
             # Log Best Submission File(s) package as an artifact
             best_submission_pkg_path = wandb_artifacts_staging_dir / "best_submission_file" # Name matches staging
             if best_submission_pkg_path.exists() and any(best_submission_pkg_path.iterdir()):
-                artifact_submission = wandb.Artifact(f"{sanitized_exp_name}_best_submission_package", type="submission-package")
+                artifact_submission = wandb.Artifact(f"{sanitized_exp_name[:100]}_best_submission_package", type="submission-package")
                 artifact_submission.add_dir(str(best_submission_pkg_path)) 
                 self.wandb_run.log_artifact(artifact_submission)
                 self.app_logger.info(f"W&B: Logged best_submission_package artifact.")
@@ -318,7 +318,7 @@ class WandbLogger:
             # Log Submission History (all CSVs from non-buggy steps) as an artifact
             all_submissions_history_path = wandb_artifacts_staging_dir / "all_step_submissions_history"
             if all_submissions_history_path.exists() and any(all_submissions_history_path.iterdir()):
-                artifact_all_subs = wandb.Artifact(f"{sanitized_exp_name}_all_step_submissions", type="all-submissions")
+                artifact_all_subs = wandb.Artifact(f"{sanitized_exp_name[:100]}_all_step_submissions", type="all-submissions")
                 artifact_all_subs.add_dir(str(all_submissions_history_path))
                 self.wandb_run.log_artifact(artifact_all_subs)
                 self.app_logger.info(f"W&B: Logged all_step_submissions artifact.")

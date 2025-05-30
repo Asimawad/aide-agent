@@ -67,7 +67,6 @@ def _resolve_provider(
     )
 
     # VLLM engine override:
-    # If VLLM is the chosen engine AND the model isn't one that should stick to OpenAI's API directly
     # (like o3, o4, gpt- which might have special handling or features not via a generic VLLM endpoint)
     is_openai_direct_model = any(
         model_name.startswith(p)
@@ -207,6 +206,7 @@ def query(
             step_identifier=f"Prov_{provider_name}_Step{current_step}_M_{model.replace('/', '_')}",  # More specific for backend
             **final_model_kwargs,
         )
+
     except Exception as e:
         logger.error(
             f"{log_identifier}: Error during actual provider query: {e}",
@@ -236,7 +236,9 @@ def query(
         )
         return output_response
     
-    if type(raw_responses) == list and len(raw_responses) == 1:
+    if type(raw_responses) == list and model_kwargs.get("num_responses", 1) == 1:
         return raw_responses[0]
     else:
+        print(f"type(raw_responses): {type(raw_responses)}")
+        print(f"len(raw_responses): {len(raw_responses)}")
         return raw_responses
