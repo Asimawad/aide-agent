@@ -88,7 +88,7 @@ def copy_best_solution_and_submission():
         shutil.copy(os.path.join(best_submission_dir, "submission.csv"), os.path.join(logs_dir, "submission.csv"))
         logger.info(f"Copied best_submission directory to {logs_dir}")
     except Exception as e:
-        logger.error(f"Error copying best_submission directory to {logs_dir}: {e}", exc_info=True)
+        logger.error(f"Error copying best_submission directory to {logs_dir}")
 
 
 def save_logs_to_wandb():

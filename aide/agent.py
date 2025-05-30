@@ -30,7 +30,8 @@ from .utils.self_reflection import (
 )
 from .utils.metric import MetricValue, WorstMetricValue # Moved here for clarity
 
-from .utils.prompt_utils import (
+from .utils.prompt_utils import *
+"""(
     get_agent_draft_user_prompt,
     get_agent_improve_user_prompt,
     review_func_spec,
@@ -51,12 +52,12 @@ from .utils.prompt_utils import (
     get_planner_agent_debug_code_user_prompt,
     get_planner_agent_plan_system_prompt,
     get_planner_agent_code_system_prompt,
-    wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
-    AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-    AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+    prompt_utils_wrap_code, 
+    AGENT_debug_SYSTEM_PROMPT_DICT, 
+    AGENT_improve_SYSTEM_PROMPT_DICT, 
     get_chunked_reflection_system_prompt,
     get_chunked_reflection_user_prompt
-)
+)"""
 
 
 try:
@@ -104,21 +105,19 @@ class Agent:
 
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
-        # console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Search Policy")
+        console.rule(f"[cyan]Agent Step {self.current_step} - Stage : Search Policy")
 
         log_prefix_base = f"Search_Policy-Step: {self.current_step}"
-        search_cfg = self.acfg.search
+        num_drafts = self.acfg.search.num_drafts
 
-        search_cfg = self.acfg.search
-
-        if len(self.journal.draft_nodes) < search_cfg.num_drafts:
-            logger.info(f"{log_prefix_base}: Selected: Draft new node (drafts: {len(self.journal.draft_nodes)} < {search_cfg.num_drafts}).", extra={"verbose": True})
+        if len(self.journal.draft_nodes) < num_drafts:
+            logger.info(f"{log_prefix_base}: Selected: Draft new node (drafts: {len(self.journal.draft_nodes)} < {num_drafts}).", extra={"verbose": True})
             return None
 
-        if random.random() < search_cfg.debug_prob:
+        if random.random() < self.acfg.search.debug_prob:
             debuggable_nodes = [
                 n for n in self.journal.buggy_nodes
-                if (n.is_leaf and n.debug_depth <= search_cfg.max_debug_depth)
+                if (n.is_leaf and n.debug_depth <= self.acfg.search.max_debug_depth)
             ]
             if debuggable_nodes:
                 node_to_debug = random.choice(debuggable_nodes)
@@ -144,7 +143,7 @@ class Agent:
         metric_display = f"{greedy_node.metric.value:.3f}" if greedy_node.metric and greedy_node.metric.value is not None else 'N/A'
         logger.info(f"{log_prefix_base}: Selected: Improve greedy node {greedy_node.id} (metric: {metric_display}).", extra={"verbose": True})
         return greedy_node
-
+    
     def plan_and_code_query(self, user_prompt_dict: Dict[str, Any], excute: bool, system_prompt_dict=None, retries: int = 3) -> tuple[str, str, str]: 
         if system_prompt_dict is None: system_prompt_dict = get_agent_system_prompt()
         log_prefix = f"Step: {self.current_step}" 
@@ -193,36 +192,30 @@ class Agent:
         model: str,
         convert_system_to_user: bool,
         retries: int = 3,
-        max_tokens: Optional[int] = 4096, # Use Optional here
-        num_responses: int = 1, # Number of desired completions
-        **kwargs 
+        max_tokens: int = None,
+        num_responses: int = 1,
+        temperature: float=0.7,
+        planner_flag: bool=False, # Number of desired completions
     ) -> Union[OutputType, List[OutputType], None]: # Return type can be single, list, or None on total failure
         
-        log_prefix = f"AGENT_QUERY_LLM_{query_type.upper()}_Step{self.current_step}"
-        
-        actual_max_tokens = (
-        max_tokens                      # explicit argument
-        if isinstance(max_tokens, int) and max_tokens > 0
-        else self.acfg.code.max_new_tokens  # from config
-)
+        completion_text = None
+        log_prefix = f"" 
         for attempt in range(retries):
-            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Model={model}, Temp={kwargs.get('temperature', self.acfg.code.temp)}, N={num_responses}", extra={"verbose": True})
-     
-            raw_llm_output_from_backend: Union[OutputType, List[OutputType], None] = None
-            
+            logger.info(f"Generation Attempt {attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
             try:
-  
+                raw_llm_output_from_backend: Union[OutputType, List[OutputType], None] = None
                 raw_llm_output_from_backend = query(
                     system_message=system_prompt,
                     user_message=user_prompt,
                     model=model,
+                    temperature=temperature,
+                    planner=planner_flag,
                     current_step=self.current_step,
                     convert_system_to_user=convert_system_to_user,
-                    num_responses=num_responses, # Pass N here
-                    max_tokens=actual_max_tokens, # Pass resolved max_tokens
+                    max_tokens=max_tokens if max_tokens is not None else self.acfg.code.max_new_tokens,
+                    num_responses=num_responses,
                 )
 
-           
                 if isinstance(raw_llm_output_from_backend, str) and \
                    ("Exceeded context length limit" in raw_llm_output_from_backend or \
                     "CONTEXT_LENGTH_EXCEEDED" in raw_llm_output_from_backend): # Check common error strings
@@ -239,35 +232,35 @@ class Agent:
                             logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Item {item_idx} in list from backend signals Context Length Exceeded: {item_content}")
                             raise ContextLengthExceededError(f"CLE in list item from backend: {item_content}")
                 
-                if num_responses == 1:
-                    if not isinstance(raw_llm_output_from_backend, (str, dict)):
+                if num_responses == 1 : 
+                    if not isinstance(raw_llm_output_from_backend, (str)) :
                         logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Expected single str/dict from backend (n=1), got {type(raw_llm_output_from_backend)}. Content: {str(raw_llm_output_from_backend)[:200]}")
-                        # This is an unexpected state, likely indicates an issue in backend.query dispatcher
                         if attempt == retries -1 : return None # Total failure
                         time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
                         continue # Retry
 
-                    single_completion_text = cast(OutputType, raw_llm_output_from_backend)
+                    single_completion_text = cast(OutputType, raw_llm_output_from_backend)  
 
                     if query_type == "Segment-Generation":
-                        if not isinstance(single_completion_text, str):
-                            logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation expected string, got {type(single_completion_text)}. Cannot extract code.")
-                            if attempt == retries -1: return None
-                            time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-                            continue # Retry
+                            if not isinstance(single_completion_text, str):
+                                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation expected string, got {type(single_completion_text)}. Cannot extract code.")
+                                if attempt == retries -1: return None
+                                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                                continue # Retry
+                            
+                            code_snippet = extract_code(single_completion_text)
+                            if not code_snippet or not code_snippet.strip():
+                                logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation - extracted empty code. Raw: '{trim_long_string(single_completion_text)}'. Retrying...")
+                                if attempt == retries -1: return "#EMPTY_CODE_SNIPPET_AFTER_RETRIES" # Or None
+                                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                                continue # Retry
+                            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation successful.", extra={"verbose": True})
+                            return code_snippet.strip()
                         
-                        code_snippet = extract_code(single_completion_text)
-                        if not code_snippet or not code_snippet.strip():
-                            logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation - extracted empty code. Raw: '{trim_long_string(single_completion_text)}'. Retrying...")
-                            if attempt == retries -1: return "#EMPTY_CODE_SNIPPET_AFTER_RETRIES" # Or None
-                            time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-                            continue # Retry
-                        logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation successful.", extra={"verbose": True})
-                        return code_snippet.strip()
-                    
-                    # For other query types when n=1, return the single completion
+                        # For other query types when n=1, return the single completion
                     logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Query successful (n=1).", extra={"verbose": True})
                     return single_completion_text
+
 
                 else: 
                     if not isinstance(raw_llm_output_from_backend, list):
@@ -295,14 +288,15 @@ class Agent:
         logger.error(f"{log_prefix}: All {retries} attempts failed for query type {query_type}. Returning None.")
         return None
 
-    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
+    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3, planner_flag: bool=True) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"Plan_Step: {self.current_step}"
+
         logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
         logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
         logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt="system_prompt", user_prompt=user_prompt_dict,
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict,
                                                model=self.acfg.code.planner_model, temperature=self.acfg.code.temp,
-                                               convert_system_to_user=self.acfg.convert_system_to_user, retries=retries,)
+                                               convert_system_to_user=self.acfg.convert_system_to_user, retries=retries, planner_flag=planner_flag)
         if completion_text is None: return "", "", ""
 
         summary, plan = extract_summary_and_plan(completion_text)
@@ -314,7 +308,7 @@ class Agent:
                    user_prompt_dict: Dict[str, Any], 
                    retries: int = 3, 
                    num_responses: int = 1, # Add num_responses here
-                   **kwargs) -> Union[Tuple[str, str, str], List[Tuple[str, str, str]]]: # Return can be single or list of (plan, code, summary)
+                   temperature: float = 0.7) -> Union[Tuple[str, str, str], List[Tuple[str, str, str]]]: # Return can be single or list of (plan, code, summary)
                                                                                       # For code_query, plan and summary are empty strings.
         system_prompt = get_planner_agent_code_system_prompt() # This system prompt is for generating ONLY code
         log_prefix = f"AGENT_CODE_QUERY_Step:{self.current_step}"
@@ -325,12 +319,12 @@ class Agent:
             query_type="PLANNER_CODER", # Or a more generic "CODE_GENERATION"
             system_prompt=system_prompt, 
             user_prompt=user_prompt_dict,
+            temperature=temperature,
             model=self.acfg.code.model, # Use the primary coder model
             planner_flag=False, # It's a coder model call
             convert_system_to_user=self.acfg.convert_system_to_user, 
             retries=retries,
             num_responses=num_responses, # Pass N here
-            **kwargs
         )
 
         if raw_llm_output is None: # Indicates total failure in _query_llm_with_retries
@@ -357,7 +351,8 @@ class Agent:
                     logger.info(f"{log_prefix}: Successfully extracted code from one of N responses.", extra={"verbose": True})
                     extracted_codes_tuples.append(("", code, "code_candidate_summary_placeholder"))
                 else:
-                    logger.warning(f"{log_prefix}: Code extraction failed for one of N responses. Raw: '{trim_long_string(text_item)}'")
+                    print(f"{log_prefix}: Code extraction failed for one of N responses.'")
+                    logger.debug(f"{log_prefix}: Code extraction failed for one of N responses. Raw: '{trim_long_string(text_item)}'", extra={"verbose": True})
                     extracted_codes_tuples.append(("", f"#CODE_EXTRACTION_FAILED\n#Raw:\n#{text_item.replace(chr(10), '#')}", "Code extraction failed"))
             return extracted_codes_tuples
         
@@ -684,8 +679,6 @@ class Agent:
         
         node.is_buggy = (
             review_response_dict.get("is_bug", True) 
-            or node.exc_type is not None
-            or metric_value is None 
             or not has_csv_submission_reported_by_llm 
             or not has_csv_submission_actual 
         )
@@ -785,6 +778,7 @@ class PlannerAgent(Agent):
 #############################################################################
 # CodeChainAgent Implementation
 #############################################################################
+
 class CodeChainAgent(Agent): # Inherit from Agent
     def __init__(
         self,
@@ -1066,17 +1060,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
             if not revised.strip() or revised.strip() == "# FAILED TO FIND 'Revised Code Snippet:' SECTION":
                 logger.warning(f"{log_prefix}: Empty revised chunk; using original.")
                 return summary, chunk_code
-
-            # logger.info(f"{log_prefix}: Chunk reflection produced revised code.")
-            # logger.debug(f"-----------------------------------------------------------------")
-            # logger.debug(f"{log_prefix}: Summary: {summary}", extra={"verbose": True})
-            # logger.debug(f"-----------------------------------------------------------------")
-            # logger.debug(f"{log_prefix}: Revised chunk: {revised}", extra={"verbose": True})
-            # logger.debug(f"-----------------------------------------------------------------")
-
             return summary, revised
-
-
     # Modify the existing _draft method to use this chained approach
     def _draft(self, parent_node=None) -> Node:
         log_prefix = f""
@@ -1180,128 +1164,134 @@ class SelfConsistencyAgent(Agent):
             f"Strategy='{self.acfg.self_consistency.selection_strategy}'"
         )
 
-    # def plan_and_code_query(self,
-    #                         user_prompt_dict: Dict[str, Any],
-    #                         system_prompt_dict: Optional[Dict[str, Any]] = None,
-    #                         retries: int = 3,
-    #                         return_all_responses: bool = False, 
-    #                         num_responses: int = 1,
-    #                         planner_flag: bool = False
-    #                        ) -> Union[Tuple[str, str, str], List[Tuple[str, str, str]]]:
-    #     if system_prompt_dict is None:
-    #         system_prompt_dict = get_agent_system_prompt()
+    def plan_and_code_query(self,
+                            user_prompt_dict: Dict[str, Any],
+                            system_prompt_dict: Optional[Dict[str, Any]] = None,
+                            retries: int = 3,
+                            return_all_responses: bool = False, 
+                            num_responses: int = 1,
+                           ) -> Union[Tuple[str, str, str], List[Tuple[str, str, str]]]:
+        if system_prompt_dict is None:
+            system_prompt_dict = get_agent_system_prompt()
         
-    #     log_prefix = f"AGENT_PNC_QUERY_Step:{self.current_step}"
+        log_prefix = f"AGENT_PNC_QUERY_Step:{self.current_step}"
         
-    #     n_to_request_from_backend = num_responses
+        n_to_request_from_backend = num_responses
         
-    #     default_single_logical_error: Tuple[str,str,str] = ("", "LLM Query Error: Unknown failure", "LLM_QUERY_FAILED_AGENT")
+        default_single_logical_error: Tuple[str,str,str] = ("", "LLM Query Error: Unknown failure", "LLM_QUERY_FAILED_AGENT")
 
-    #     for attempt in range(retries):
-    #         logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Calling backend.query (requesting n={n_to_request_from_backend}).", extra={"verbose": True})
+        for attempt in range(retries):
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Calling backend.query (requesting n={n_to_request_from_backend}).", extra={"verbose": True})
             
-    #         raw_llm_outputs_list, req_time, in_tokens, out_tokens, info_from_backend = query(
-    #             system_message=system_prompt_dict,
-    #             user_message=user_prompt_dict,
-    #             model=self.acfg.code.model,
-    #             temperature=0.95,
-    #             max_tokens=self.acfg.code.max_new_tokens,
-    #             current_step=self.current_step,
-    #             inference_engine=self.cfg.inference_engine,
-    #             num_responses=n_to_request_from_backend,
-    #             convert_system_to_user=self.acfg.convert_system_to_user,
-    #         )
+            raw_llm_outputs_list= query(
+                system_message=system_prompt_dict,
+                user_message=user_prompt_dict,
+                model=self.acfg.code.model,
+                temperature=0.95,
+                max_tokens=self.acfg.code.max_new_tokens,
+                current_step=self.current_step,
+                inference_engine=self.cfg.inference_engine,
+                num_responses=n_to_request_from_backend,
+                convert_system_to_user=self.acfg.convert_system_to_user,
+            )
+            if isinstance(raw_llm_outputs_list, str) and \
+                ("Exceeded context length limit" in raw_llm_outputs_list or \
+                "CONTEXT_LENGTH_EXCEEDED" in raw_llm_outputs_list): # Check common error strings
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Backend returned Context Length Exceeded string: {raw_llm_outputs_list}")
 
-    #         # 1. Check for critical errors from the backend.query wrapper itself
-    #         if info_from_backend.get("context_length_exceeded"):
-    #             error_msg = f"LLM Query Error: Context Length Exceeded - {info_from_backend.get('error', 'N/A')}"
-    #             error_tuple_cle: Tuple[str,str,str] = ("", error_msg, "CONTEXT_LENGTH_EXCEEDED")
-    #             logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Backend reported critical CLE. Failing operation.", extra={"verbose":True})
-    #             return [error_tuple_cle] * n_to_request_from_backend if return_all_responses else error_tuple_cle
+                raise ContextLengthExceededError(f"CLE from backend: {raw_llm_outputs_list}")
 
-    #         if info_from_backend.get("error") and not raw_llm_outputs_list: # If backend.query itself failed
-    #             error_msg = f"LLM Query Error: Backend query failed - {info_from_backend.get('error')}"
-    #             error_tuple_backend: Tuple[str,str,str] = ("", error_msg, "LLM_BACKEND_QUERY_ERROR")
-    #             logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Backend query failed critically: {info_from_backend.get('error')}", extra={"verbose":True})
-    #             if attempt == retries - 1:
-    #                 return [error_tuple_backend] * n_to_request_from_backend if return_all_responses else error_tuple_backend
-    #             time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-    #             continue
+            if isinstance(raw_llm_outputs_list, list):
 
-    #         # 2. Validate the list structure from backend.query
-    #         if not isinstance(raw_llm_outputs_list, list) or len(raw_llm_outputs_list) != n_to_request_from_backend:
-    #             logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Backend.query returned malformed response. Expected list of size {n_to_request_from_backend}, got {type(raw_llm_outputs_list)} of size {len(raw_llm_outputs_list) if isinstance(raw_llm_outputs_list, list) else 'N/A'}.")
-    #             error_tuple_malformed: Tuple[str,str,str] = ("", "LLM Query Error: Malformed backend response structure", "LLM_MALFORMED_BACKEND_STRUCTURE")
-    #             if attempt == retries - 1:
-    #                 return [error_tuple_malformed] * n_to_request_from_backend if return_all_responses else error_tuple_malformed
-    #             time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-    #             continue
+                for item_idx, item_content in enumerate(raw_llm_outputs_list):
+                    if isinstance(item_content, str) and \
+                        ("Exceeded context length limit" in item_content or \
+                        "CONTEXT_LENGTH_EXCEEDED" in item_content):
+                        logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Item {item_idx} in list from backend signals Context Length Exceeded: {item_content}")
+                        raise ContextLengthExceededError(f"CLE in list item from backend: {item_content}")
             
-    #         # 3. Process each item in the raw_llm_outputs_list
-    #         processed_candidates: List[Tuple[str, str, str]] = []
-    #         any_item_had_unrecoverable_error = False
-
-    #         for idx, raw_text_item in enumerate(raw_llm_outputs_list):
-    #             if not isinstance(raw_text_item, str):
-    #                 logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Item {idx} is not a string ({type(raw_text_item)}). Marking as extraction error.")
-    #                 processed_candidates.append(("", "Non-string item in response", "EXTRACTION_FAILED_TYPE"))
-    #                 continue # Still add placeholder, but this item is bad
-
-    #             if "ERROR: context length exceeded" in raw_text_item or "Exceeded context length limit" in raw_text_item:
-    #                 logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Item {idx} content indicates Context Length Exceeded. Failing entire operation.")
-    #                 any_item_had_unrecoverable_error = True
-    #                 default_single_logical_error = ("", "LLM Query Error: Context Length Exceeded in item content", "CONTEXT_LENGTH_EXCEEDED_CONTENT")
-    #                 break 
-
-    #             if raw_text_item.startswith("ERROR:"): # Generic error message content from provider
-    #                 logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Item {idx} is an error message: '{trim_long_string(raw_text_item)}'.")
-    #                 processed_candidates.append(("", f"# {raw_text_item}", raw_text_item))
-    #                 continue
-
-    #             code = extract_code(raw_text_item)
-    #             nl_text = extract_text_up_to_code(raw_text_item)
-
-    #             if code and nl_text:
-    #                 processed_candidates.append((nl_text, code, "plan_code_summary_placeholder")) # Changed summary
-    #             else:
-    #                 logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Plan or code extraction failed for item {idx}. Raw: '{trim_long_string(raw_text_item)}'")
-    #                 processed_candidates.append((nl_text or "EXTRACTION_FAILED_PLAN", 
-    #                                              code or "# EXTRACTION_FAILED_CODE", 
-    #                                              "Extraction of plan/code failed for this candidate"))
+            if num_responses == 1 : 
+                if not isinstance(raw_llm_outputs_list, (str)) :
+                    logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Expected single str/dict from backend (n=1), got {type(raw_llm_outputs_list)}. Content: {str(raw_llm_outputs_list)[:200]}")
+                    if attempt == retries -1 : return None # Total failure
+                    time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                    continue # Retry 
+ 
+            # 2. Validate the list structure from backend.query
+            if not isinstance(raw_llm_outputs_list, list) or len(raw_llm_outputs_list) != n_to_request_from_backend:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Backend.query returned malformed response. Expected list of size {n_to_request_from_backend}, got {type(raw_llm_outputs_list)} of size {len(raw_llm_outputs_list) if isinstance(raw_llm_outputs_list, list) else 'N/A'}.")
+                error_tuple_malformed: Tuple[str,str,str] = ("", "LLM Query Error: Malformed backend response structure", "LLM_MALFORMED_BACKEND_STRUCTURE")
+                if attempt == retries - 1:
+                    return [error_tuple_malformed] * n_to_request_from_backend if return_all_responses else error_tuple_malformed
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                continue
             
-    #         if any_item_had_unrecoverable_error:
-    #             logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Unrecoverable error (like CLE in item) encountered. Failing this attempt.")
-    #             if return_all_responses:
-    #                 return [default_single_logical_error] * n_to_request_from_backend
-    #             else:
-    #                 return default_single_logical_error
+            # 3. Process each item in the raw_llm_outputs_list
+            processed_candidates: List[Tuple[str, str, str]] = []
+            any_item_had_unrecoverable_error = False
 
-    #         # 4. Check if any valid extractions occurred
-    #         has_at_least_one_good_extraction = any(
-    #             not (cand_plan.startswith("EXTRACTION_FAILED") or cand_code.startswith("# EXTRACTION_FAILED")) 
-    #             for cand_plan, cand_code, _ in processed_candidates
-    #         )
+            for idx, raw_text_item in enumerate(raw_llm_outputs_list):
+                if not isinstance(raw_text_item, str):
+                    logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Item {idx} is not a string ({type(raw_text_item)}). Marking as extraction error.")
+                    processed_candidates.append(("", "Non-string item in response", "EXTRACTION_FAILED_TYPE"))
+                    continue # Still add placeholder, but this item is bad
 
-    #         if not processed_candidates or not has_at_least_one_good_extraction:
-    #             logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: No valid plan/code could be extracted from any of the {len(raw_llm_outputs_list)} responses. Retrying if attempts left.")
-    #             if attempt == retries - 1:
-    #                 logger.error(f"{log_prefix}: All retries failed to yield any valid plan/code extraction.")
-    #                 return [default_single_logical_error] * n_to_request_from_backend if return_all_responses else default_single_logical_error
-    #             time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-    #             continue # Go to next attempt
+                if "ERROR: context length exceeded" in raw_text_item or "Exceeded context length limit" in raw_text_item:
+                    logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Item {idx} content indicates Context Length Exceeded. Failing entire operation.")
+                    any_item_had_unrecoverable_error = True
+                    default_single_logical_error = ("", "LLM Query Error: Context Length Exceeded in item content", "CONTEXT_LENGTH_EXCEEDED_CONTENT")
+                    break 
 
-    #         logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Successfully processed LLM outputs into {len(processed_candidates)} candidate tuples.", extra={"verbose":True})
-    #         if return_all_responses:
-    #             return processed_candidates # Return the list of (plan,code,summary) tuples
-    #         else:
-    #             for p_nl, p_code, p_sum in processed_candidates:
-    #                 if not (p_nl.startswith("EXTRACTION_FAILED") or p_code.startswith("# EXTRACTION_FAILED")):
-    #                     return p_nl, p_code, p_sum
-    #             logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Logic error - has_at_least_one_good_extraction was true, but no good extraction found in loop.")
-    #             return processed_candidates[0]
+                if raw_text_item.startswith("ERROR:"): # Generic error message content from provider
+                    logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Item {idx} is an error message: '{trim_long_string(raw_text_item)}'.", extra={"verbose": True})
+                    processed_candidates.append(("", f"# {raw_text_item}", raw_text_item))
+                    continue
+                code = extract_code(raw_text_item)
+                nl_text = extract_text_up_to_code(raw_text_item)
 
-    #     logger.error(f"{log_prefix}: All {retries} query attempts failed.", extra={"verbose": True})
-    #     return [default_single_logical_error] * n_to_request_from_backend if return_all_responses else default_single_logical_error
+                if code and nl_text:
+                    processed_candidates.append((nl_text, code, "plan_code_summary_placeholder")) # Changed summary
+                    print(f"Candidate {idx+1}: for plan and code extraction is extracted successfully: ✅")
+
+                else:
+                    logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Plan or code extraction failed for item {idx}. Raw: '{trim_long_string(raw_text_item)}'", extra={"verbose": True})
+                    processed_candidates.append((nl_text or "EXTRACTION_FAILED_PLAN", 
+                                                 code or "# EXTRACTION_FAILED_CODE", 
+                                                 "Extraction of plan/code failed for this candidate"))
+            
+            if any_item_had_unrecoverable_error:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Unrecoverable error (like CLE in item) encountered. Failing this attempt.")
+                if return_all_responses:
+                    return [default_single_logical_error] * n_to_request_from_backend
+                else:
+                    return default_single_logical_error
+
+            # 4. Check if any valid extractions occurred
+            has_at_least_one_good_extraction = any(
+                not (cand_plan.startswith("EXTRACTION_FAILED") or cand_code.startswith("# EXTRACTION_FAILED")) 
+                for cand_plan, cand_code, _ in processed_candidates
+            )
+
+            if not processed_candidates or not has_at_least_one_good_extraction:
+                logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: No valid plan/code could be extracted from any of the {len(raw_llm_outputs_list)} responses. Retrying if attempts left.")
+                if attempt == retries - 1:
+                    logger.error(f"{log_prefix}: All retries failed to yield any valid plan/code extraction.")
+                    return [default_single_logical_error] * n_to_request_from_backend if return_all_responses else default_single_logical_error
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                continue # Go to next attempt
+
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Successfully processed LLM outputs into {len(processed_candidates)} candidate tuples.", extra={"verbose":True})
+            if return_all_responses:
+                return processed_candidates # Return the list of (plan,code,summary) tuples
+            else:
+                for p_nl, p_code, p_sum in processed_candidates:
+                    if not (p_nl.startswith("EXTRACTION_FAILED") or p_code.startswith("# EXTRACTION_FAILED")):
+                        return p_nl, p_code, p_sum
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Logic error - has_at_least_one_good_extraction was true, but no good extraction found in loop.")
+                return processed_candidates[0]
+
+        logger.error(f"{log_prefix}: All {retries} query attempts failed.", extra={"verbose": True})
+        return [default_single_logical_error] * n_to_request_from_backend if return_all_responses else default_single_logical_error
 
     def _get_master_plan(self) -> Tuple[str, str]: # Returns (task_summary, master_plan_text)
         """
@@ -1346,7 +1336,6 @@ class SelfConsistencyAgent(Agent):
         """
         log_prefix = f"SC_AGENT_GET_N_CODES_Step:{self.current_step}"
         N = self.acfg.self_consistency.num_responses
-        print(f"N: {N}")
         print(f"self.acfg.self_consistency: {self.acfg.self_consistency}")
         logger.info(f"{log_prefix}: Generating {N} code candidates for the master plan.", extra={"verbose": True})
 
@@ -1377,7 +1366,6 @@ class SelfConsistencyAgent(Agent):
             
         logger.info(f"{log_prefix}: Generated {len(code_candidate_tuples)} raw code candidate tuples.", extra={"verbose":True})
         for i, (_, code_cand, _) in enumerate(code_candidate_tuples):
-             print(f"Candidate {i+1}: Success: ✅")
              logger.debug(f"{log_prefix}_CANDIDATE_{i+1}_CODE_START\n{code_cand}\n{log_prefix}_CANDIDATE_{i+1}_CODE_END", extra={"verbose":True})
         
         return code_candidate_tuples
@@ -1435,7 +1423,8 @@ class SelfConsistencyAgent(Agent):
                code_str.startswith("#CODE_QUERY_MISSING_ITEM") or \
                "#CODE_EXTRACTION_FAILED" in code_str or \
                code_str.startswith("#ERROR:"):
-                logger.warning(f"{candidate_log_prefix}: Candidate is an error placeholder. Marking as buggy without execution. Code: {code_str[:100]}...")
+                print(f"Candidate is an error placeholder. Marking as buggy without execution....")
+                logger.debug(f"{candidate_log_prefix}: Candidate is an error placeholder. Marking as buggy without execution. Code: {code_str[:100]}...", extra={"verbose": True})
                 temp_node.is_buggy = True
                 temp_node.metric = WorstMetricValue()
                 temp_node.analysis = f"Candidate generation/extraction failed: {code_str.splitlines()[0] if code_str else 'Unknown reason'}"
@@ -1538,7 +1527,8 @@ class SelfConsistencyAgent(Agent):
 
         evaluated_temp_nodes: List[Node] = []
 
-        for i, (plan_str, code_str, original_summary_placeholder) in enumerate(candidate_plan_code_summary_tuples):
+        for i, output_tuple in enumerate(candidate_plan_code_summary_tuples):
+            plan_str, code_str, original_summary_placeholder = output_tuple 
             candidate_log_prefix = f"{log_prefix_eval_select}_CANDIDATE_PAIR_{i+1}"
             logger.info(f"{candidate_log_prefix}: Processing.", extra={"verbose": True})
             
@@ -1609,7 +1599,6 @@ class SelfConsistencyAgent(Agent):
         
         return chosen_evaluated_node
 
-
     def _draft(self, parent_node: Optional[Node] = None) -> Node: 
         """
         Generates N code candidates for a single master plan, evaluates them, 
@@ -1636,12 +1625,14 @@ class SelfConsistencyAgent(Agent):
             error_node.analysis = "Self-consistency draft failed: Master plan could not be generated."
             return error_node
 
+        print(f"finished getting master plan, now getting code candidates\n\n")
         # 2. Get N Code Candidates for this Master Plan
         code_candidate_tuples = self._get_N_code_candidates_for_plan(
             task_summary=task_summary,
             master_plan_text=master_plan_text
         )
-
+        print(f"finished getting code candidates, now evaluating and selecting the best code candidate\n\n")
+        print(f"number of code candidates: {len(code_candidate_tuples)}")
         # Check if candidate generation itself failed critically (e.g., all N attempts returned errors)
         if not code_candidate_tuples:
              logger.error(f"{log_prefix_draft}: Failed to generate any viable code candidates for the master plan.")
@@ -1703,7 +1694,7 @@ class SelfConsistencyAgent(Agent):
             task_desc=self.task_desc,
             journal_summary=self.journal.generate_summary(include_code=False), # Memory
             competition_name=self.competition_name,
-            parent_node_code=parent_node.code # Base code to improve
+            parent_node_code=parent_node.code 
         )
 
         # 2. Call Agent.plan_and_code_query to get N (plan,code,summary) tuples
@@ -1712,6 +1703,7 @@ class SelfConsistencyAgent(Agent):
             system_prompt_dict=improve_sys_prompt,
             retries=3,
             num_responses=self.acfg.self_consistency.num_responses,  # Tell it to ask backend for N
+            return_all_responses=True
         )
 
         if not candidate_plan_code_summary_tuples or \
@@ -1728,7 +1720,9 @@ class SelfConsistencyAgent(Agent):
             error_node.is_buggy = True; error_node.metric = WorstMetricValue()
             error_node.analysis = "Self-consistency improve failed: No improvement candidates generated."
             return error_node
-
+        logger.info(f"{log_prefix_improve}: Finished generating improvement candidate pairs. Number of candidates: {len(candidate_plan_code_summary_tuples)}", extra={"verbose": True})
+        print(f"finished generating improvement candidate pairs, now evaluating and selecting the best one\n\n")
+   
         # 3. Evaluate these N pairs and select the best one
         chosen_evaluated_temp_node = self._evaluate_and_select_plan_code_pairs(
             candidate_plan_code_summary_tuples=candidate_plan_code_summary_tuples,
@@ -1777,14 +1771,13 @@ class SelfConsistencyAgent(Agent):
             acfg_data_preview=self.acfg.data_preview,
             data_preview_content=self.data_preview
         )
-
+        
         candidate_plan_code_summary_tuples: List[Tuple[str, str, str]] = self.plan_and_code_query(
             user_prompt_dict=debug_user_prompt_dict,
-            excute=False,
             system_prompt_dict=debug_sys_prompt,
-            retries=self.acfg.get('query_retries', 3),
+            retries=3,
             return_all_responses=True,
-            num_sequences_to_generate=self.acfg.self_consistency.num_responses
+            num_responses=self.acfg.self_consistency.num_responses
         )
 
         if not candidate_plan_code_summary_tuples or \
@@ -1802,7 +1795,6 @@ class SelfConsistencyAgent(Agent):
             error_node.analysis = "Self-consistency debug failed: No debug candidates generated."
             return error_node
 
-        # 3. Evaluate these N pairs and select the best one
         chosen_evaluated_temp_node = self._evaluate_and_select_plan_code_pairs(
             candidate_plan_code_summary_tuples=candidate_plan_code_summary_tuples,
             parent_node_for_lineage=parent_node,
