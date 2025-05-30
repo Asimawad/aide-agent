@@ -22,6 +22,7 @@ reflection_draafts.py
 downloads/
 test_api.py
 eggs/
+helpers/
 .eggs/
 finetuning/
 lib/
