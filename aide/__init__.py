@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from .backend import compile_prompt_to_md
 
-from .agent import Agent, CodeChainAgent
+from .agent import Agent, CodeChainAgent, PlannerAgent, SelfConsistencyAgent 
 from .interpreter import Interpreter
 from .journal import Journal
 from omegaconf import OmegaConf
@@ -45,13 +45,25 @@ class Experiment:
             prep_agent_workspace(self.cfg)
 
         self.journal = Journal()
-        if self.cfg.agent.ITS_Strategy == "codechain" or self.cfg.agent.ITS_Strategy == "codechain_v2":
+        if self.cfg.agent.ITS_Strategy == "codechain" or self.cfg.agent.ITS_Strategy == "codechain_v2" or self.cfg.agent.ITS_Strategy == "codechain_v3": # Adjusted condition
             self.agent = CodeChainAgent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,
                 journal=self.journal,
             )
-        else:
+        elif self.cfg.agent.ITS_Strategy == "self-consistency": # ADD THIS BLOCK
+            self.agent = SelfConsistencyAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+            )
+        elif self.cfg.agent.ITS_Strategy == "planner": # Assuming you have a PlannerAgent
+             self.agent = PlannerAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+             )
+        else: # Default base Agent
             self.agent = Agent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,

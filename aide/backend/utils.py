@@ -1,4 +1,3 @@
-
 import logging
 from dataclasses import dataclass
 from typing import Callable, Optional, Dict, Any, Tuple, Type # Added Type
@@ -53,11 +52,11 @@ def backoff_create(
                 raise ContextLengthExceededError(f"Context length exceeded: {full_error_str}") from e
         
 
-        logger.info(f"Backoff-eligible exception: {e}. Retrying...")
+        logger.info(f"Backoff-eligible exception: {type(e).__name__}: {str(e)}. Full error details: {repr(e)}. Retrying...")
         return False #
     except Exception as e: 
-        logger.error(f"Non-retryable exception during create_fn: {e}", exc_info=True)
-        raise 
+        logger.error(f"Non-retryable exception during create_fn: {type(e).__name__}: {str(e)}. Full error: {repr(e)}", exc_info=True)
+        raise
 
 def opt_messages_to_list(
     system_message: str | None,
@@ -74,21 +73,6 @@ def opt_messages_to_list(
         messages.append({"role": "user", "content": user_message})
     return messages
 
-
-# def compile_prompt_to_md(prompt: PromptType, _header_depth: int = 1) -> str:
-#     if isinstance(prompt, str):
-#         return prompt.strip() + "\n"
-#     elif isinstance(prompt, list):
-#         return "\n".join([f"- {s.strip()}" for s in prompt] + ["\n"])
-
-#     out = []
-#     header_prefix = "#" * _header_depth
-#     for k, v in prompt.items():
-#         out.append(f"{header_prefix} {k}\n")
-#         out.append(compile_prompt_to_md(v, _header_depth=_header_depth + 1))
-#     return "\n".join(out)
-
-# aide/backend/utils.py
 
 def compile_prompt_to_md(prompt: PromptType, _header_depth: int = 1, is_list_item: bool = False) -> str:
     if isinstance(prompt, str):

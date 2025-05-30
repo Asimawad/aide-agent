@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 from typing import Hashable, cast
-
+from dataclasses import field 
 import rich
 from omegaconf import OmegaConf
 from rich.syntax import Syntax
@@ -24,7 +24,11 @@ logger = logging.getLogger("aide")
 """ these dataclasses are just for type hinting, the actual config is in config.yaml """
 
 
-# <<< ADD WANDB CONFIG DATACLASS >>>
+@dataclass
+class SelfConsistencyConfig:
+    num_responses: int = 1  # Number of candidates to generate. Default to 1 (no SC).
+    selection_strategy: str = "interpreter_first_success" # Options: "interpreter_first_success", "interpreter_best_metric"
+
 @dataclass
 class WandbConfig:
     enabled: bool = True
@@ -66,6 +70,8 @@ class AgentConfig:
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
+    self_consistency: SelfConsistencyConfig = field(default_factory=SelfConsistencyConfig) 
+
 
     # # MCTS specific parameters
     # mcts_iterations: int = 10  # Number of MCTS iterations per step
