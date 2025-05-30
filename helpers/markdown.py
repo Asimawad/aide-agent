@@ -18,6 +18,7 @@ def get_py_files(base_dir):
         dirs[:] = [d for d in dirs if d != "__pycache__"]
         dirs[:] = [d for d in dirs if d != ".venv"]
         dirs[:] = [d for d in dirs if d != "data"]
+        dirs[:] = [d for d in dirs if d != "helpers"]
         for f in files:
             if f.endswith(".py") and not f.startswith("."):
                 rel_path = os.path.relpath(os.path.join(root, f), ".")

@@ -24,6 +24,7 @@ logger = logging.getLogger("aide.wandb")
 class WandbLogger:
     def __init__(self, cfg: Config, app_logger: logging.Logger, competition_benchmarks: Optional[Dict[str, Any]] = None):
         self.cfg = cfg
+        self.app_logger = app_logger # Main application logger for internal messages
         self.wandb_run = None
         self.app_logger = app_logger 
         self.competition_benchmarks = competition_benchmarks
@@ -73,8 +74,6 @@ class WandbLogger:
         elif not OmegaConf:
             self.app_logger.error("OmegaConf is not available. Cannot serialize config for W&B.")
             self.wandb_run = None
-        else:
-            self.app_logger.info("W&B logging is disabled in the configuration.")
 
     def log_step_data(self, 
                       base_step_log_data: dict, # Basic scalar data from Agent

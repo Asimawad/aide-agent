@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # set -e                          
 # set -o pipefail   
-# cp -r logs/ logs_old/
-# rm -rf workspaces/ wandb/ logs/
-# mkdir -p logs/
+cp -r logs/ logs_old/
+rm -rf workspaces/ wandb/ logs/
+mkdir -p logs/
+# first check if the data/ is present
+if [ ! -d "data/" ]; then
+    echo "Error: data/ directory not found. downloading it ...."
+    python aide/utils/drive_download.py
+fi
+
 O4_MODEL="o4-mini-2025-04-16"
 O4_MODEL="o3-mini"
 DeepSeek_MODEL="gpt-4-turbo"
@@ -31,7 +37,7 @@ aide \
     agent.code.max_new_tokens=4096 \
     agent.code.num_return_sequences=1 \
     agent.feedback.model="${O4_MODEL}" \
-    agent.search.max_debug_depth=50 \
+    agent.search.max_debug_depth=5 \
     agent.search.debug_prob=0.65 \
     wandb.enabled=True \
     wandb.project="MLE_BENCH_AIDE_VM" \

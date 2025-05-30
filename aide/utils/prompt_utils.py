@@ -1,6 +1,7 @@
 # aide/utils/prompt_utils.py
 import random
 from typing import Any, Dict, List,Optional
+from typing import Any, Dict, List,Optional
 import copy # For deepcopying system prompts
 from ..backend import FunctionSpec
 from copy import deepcopy
@@ -12,6 +13,57 @@ def wrap_code(code_str: str, lang: str = "python") -> str:
     if lang:
         return f"```{lang}\n{code_str}\n```"
     return f"```\n{code_str}\n```"
+
+
+review_func_spec = FunctionSpec(
+    name="submit_review",
+    json_schema={
+        "type": "object",
+        "properties": {
+            "is_bug": {
+                "type": "boolean",
+                "description": "true if the output log shows that the execution failed or has some bug, otherwise false.",
+            },
+            "has_csv_submission": {
+                "type": "boolean",
+                "description": "true if the code saves the predictions on the test data"
+                " in a `submission.csv` file in the `./submission/` directory, otherwise false."
+                " Note that the file MUST be saved in the ./submission/ directory for this to be evaluated as true."
+                " Otherwise, it should be evaluated as false."
+                " You can assume the ./submission/ directory exists and is writable.",
+            },
+            "summary": {
+                "type": "string",
+                "description": "write a short summary (2-3 sentences) describing "
+                " the empirical findings. Alternatively mention if there is a bug or"
+                " the submission.csv was not properly produced."
+                " DO NOT suggest fixes or improvements.",
+            },
+            "metric": {
+                "type": "number",
+                "description": "If the code ran successfully, report the value of the validation metric. Otherwise, leave it null.",
+            },
+            "lower_is_better": {
+                "type": "boolean",
+                "description": "true if the metric should be minimized (i.e. a lower metric value is better, such as with MSE), false if the metric should be maximized (i.e. a higher metric value is better, such as with accuracy).",
+            },
+            "code_quality": {
+                "type": "number",
+                "description": "give a score between 0-10 on the quality of the code, where 0 is a terrible code/ non-code at all, and 9-10 is a clean code with a great value for the evaluation metric.",
+            },
+        },
+        "required": [
+            "is_bug",
+            "has_csv_submission",
+            "summary",
+            "metric",
+            "lower_is_better",
+            "code_quality",
+        ],
+    },
+    description="Submit a review evaluating the output of the training script.",
+)
+
 
 
 review_func_spec = FunctionSpec(
@@ -175,6 +227,28 @@ AGENT_RESPONSE_FORMAT_TEXT: str = (
     "```\n"
     "There should be NO text before 'PLAN:' and NO text after the final '```'."
 )
+
+AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+    "SYSTEM": "You are a Kaggle Grandmaster. You can plan, implement, debug, and improve machine learning engineering code.",
+    "user_instructions": {
+        "Possible Questions you will face": "You will be asked to either come up with a plan and code to solve a Kaggle competition, debug existing code, or improve working code to get better results.",
+        "How to answer the user": (
+            'Whenever you answer, always: '
+            '1. Write a "PLAN:" section in plain text with 7-10*highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
+            'Example plan step: "1. Load \'train.csv\' and \'test.csv\' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets."\n'
+            '2. Then write a "CODE:" section containing exactly one fenced Python block: ```python. Within this code block, *before each major logical section of code*, include a comment explaining your immediate thought process, the specific purpose of that section, and how it relates to your PLAN step. '
+            'Example CODE format: ```python\n'
+            '# Thought: First, I need to load the data using pandas as per step 1 of the plan.\n'
+            'import pandas as pd\n'
+            'train_df = pd.read_csv("./input/train.csv")\n'
+            'test_df = pd.read_csv("./input/test.csv")\n'
+            '# Thought: Now, preprocess the features. Based on preliminary analysis, fill missing numerical values with the mean, as mentioned in the plan.\n'
+            'train_df["Feature"] = train_df["Feature"].fillna(train_df["Feature"].mean())\n'
+        ),
+        "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed."
+    },
+}
+
 
 AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "SYSTEM": "You are a Kaggle Grandmaster. You can plan, implement, debug, and improve machine learning engineering code.",
@@ -455,6 +529,7 @@ def get_agent_improve_user_prompt(
         "Instructions": {
             "Response format": AGENT_RESPONSE_FORMAT_TEXT,
             "Solution improvement sketch guideline": AGENT_improve_SOLUTION_GUIDELINE_LIST,
+            "Solution improvement sketch guideline": AGENT_improve_SOLUTION_GUIDELINE_LIST,
             "Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST,
             "Environment and Packages": get_competition_environment_text(competition_name) # Added for consistency
         },
@@ -720,6 +795,12 @@ def get_planner_agent_draft_plan_user_prompt(
     acfg_data_preview: bool,
     data_preview_content: str = None
 ) -> Dict[str, Any]:
+
+    data_overview = " "
+    if acfg_data_preview and data_preview_content:
+        data_overview = data_preview_content
+
+    
     plan_introduction = f"Given the following task description for a machine learning competition named {competition_name}, develop a complete and detailed plan to solve it."
     prompt_user_message: Dict[str, Any] = {
         "Introduction": plan_introduction,
@@ -729,54 +810,59 @@ def get_planner_agent_draft_plan_user_prompt(
         "Memory": journal_summary,
         "Instructions": {
             "Guidance on Summary": "The summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan.",
-            "Response format": PLANNER_AGENT_PLAN_RESPONSE_FORMAT_TEXT,
+
             "Instructions for generating the plan": [
                 "Every step of the plan should be very detailed and explicit, point exactly how is the steps going to be solved. e.g. 'Use XGBoost to train a model with the following parameters: ...'",
-                "The plan should be detailed in a step by step manner that is easy to follow.",
+                "your aim in this plan is to create a first draft solution that is correct and bug free",
                 "for this particular first solution, propose a relatively simple approach in terms of method used for solving the problem, without ensembling or hyper-parameter optimization, as we are using this as a first draft for future improvements.",
                 "Take the Memory section into consideration when proposing the design.",
-                "The solution plan should be detailed and high quality bullet points that are easy to follow.",
-                "Don't suggest to do EDA.",
                 "The data is already prepared and available in the `./input` directory. There is no need to suggest any unzip for any files.",
             ],
         }
     }
+
 
     return prompt_user_message
 
 def get_planner_agent_draft_code_user_prompt(
     task_summary_from_planner: str, # Summary generated by the planner model
     plan_from_planner: str,         # Plan generated by the planner model
-    journal_summary: str,
+    journal_summary: str,           # This is the "Memory"
     competition_name: str,
-    acfg_data_preview: bool,
-    data_preview_content: str = None
+    acfg_data_preview: bool,        # From agent config
+    data_preview_content: str = None # Actual preview content
 ) -> Dict[str, Any]:
-    code_introduction = f"Given the following task description about a machine learning competition named {competition_name}, and the plan to solve it, develop a complete code to solve it."
+    
+    introduction = (
+        f"You are the Coder implementing a solution for the '{competition_name}' Kaggle competition. "
+        "You have been provided with a Task Summary and a detailed Plan by your Technical Lead. "
+        "Your task is to write the complete Python script based *strictly* on this plan."
+    )
+    
     prompt_user_message: Dict[str, Any] = {
-        "Introduction": code_introduction,
-        "Overall Task Description": task_summary_from_planner,
-        "Plan to implement": plan_from_planner,
-        "Memory (Summary of Previous Attempts on this Task)": journal_summary,
-        "Instructions": {
-            "Environment and Packages": get_competition_environment_text(competition_name),
-            "Solution code guideline": [
-                "Strictly implement the code that implements the plan.",
-                "Provide a single, complete Python script wrapped in a ```python code block.",
-                "Include all necessary imports and load data from './input/' correctly.",
-                "Write clear, concise comments explaining each part of the code.",
-                "Ensure the code adheres to PEP8 style and is easy to read.",
-                "Optimize performance without sacrificing clarity.",
-                "Calculate and print the validation metric in the format: `Validation Metric: {metric_value}`.",
-                "Save test predictions to './submission/submission.csv' exactly as required.",
-                "The code should be between ```python fences",
-                "only write code, do not write any other text",
+        "Introduction": introduction,
+        "Context Provided by Technical Lead": { # Grouping planner's output
+            "Task Summary": task_summary_from_planner if task_summary_from_planner else "No task summary was provided by the planner.",
+            "Plan to Implement": plan_from_planner if plan_from_planner else "CRITICAL ERROR: No plan was provided by the planner. Cannot generate code."
+        },
+        "Data Overview": data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
+        "Environment and Packages": get_competition_environment_text(competition_name),
+        "Memory": journal_summary if journal_summary else "No previous attempts on record for this specific task.",
+        "Key Instructions for Your Code": {
+            "Primary Goal": "Generate a single, complete, runnable Python script that meticulously follows the 'Plan to Implement'.",
+            "Commenting": "MANDATORY: Use '# Thought:' comments before each code block implementing a plan step, as detailed in your system instructions.",
+            "Output Format": "Your response must be *only* the Python code block. No extra text.",
+            "Core Requirements": [ # These are from your AGENT_IMPLEMENTATION_GUIDELINE_LIST, slightly adapted
+                "Include all necessary imports at the beginning.",
+                "Load data from './input/' as specified in the plan.",
+                "Implement the solution proposed in the 'Plan to Implement'.",
+                "Calculate and print the evaluation metric on a validation set (e.g., `print(f'Validation Metric: {metric_value}')`).",
+                "CRITICAL: Generate test predictions and save them EXACTLY to `./submission/submission.csv` in the required format.",
+                "Prioritize correctness and ensure the script runs without errors for this first draft."
             ],
-            "Response format": PLANNER_AGENT_CODE_RESPONSE_FORMAT_TEXT
         }
     }
-    if acfg_data_preview and data_preview_content:
-        prompt_user_message["Data Overview"] = data_preview_content
+    # The PLANNER_AGENT_CODE_RESPONSE_FORMAT_TEXT (```python ... ```) is now heavily reinforced by the system prompt.
     return prompt_user_message
 
 def get_planner_agent_draft_code_user_prompt2(

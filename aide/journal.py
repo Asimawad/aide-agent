@@ -190,6 +190,7 @@ class Journal(DataClassJsonMixin):
         else:
             nodes = self.nodes
         return max(nodes, key=lambda n: n.metric)
+# aide/journal.py -> Journal.generate_summary method
 
     def generate_summary(self, include_code: bool = True, max_nodes_to_summarize: int = 2, 
                          code_threshold: int = 1000, code_k: int = 400,
