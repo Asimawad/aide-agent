@@ -33,12 +33,9 @@ _PROVIDER_QUERY_FUNCTIONS: Dict[
 }
 
 # Configuration for determining provider based on model name prefixes
-# Order matters: more specific prefixes should come before more general ones if overlap is possible.
 _MODEL_PREFIX_TO_PROVIDER_MAP: Dict[str, Tuple[str, ...]] = {
     "openai": ("gpt-", "o4-", "o3-"),
-    "deepseek": ("deepseek", "wojtek/"),
-    # Add other providers and their prefixes here
-    # e.g., "another_provider": ("another-prefix-",)
+    # "deepseek": ("deepseek", "wojtek/"),
 }
 _DEFAULT_MODEL_PROVIDER = "vllm"  # Fallback provider if no prefix matches
 
