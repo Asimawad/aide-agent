@@ -21,16 +21,28 @@ _DEFAULT_CONFIG = load_cfg()
 logger = logging.getLogger("aide.backend")  # Standard logger name
 
 # Mapping from provider names to their query function implementations
+# _PROVIDER_QUERY_FUNCTIONS: Dict[
+#     str, Callable[..., Tuple[OutputType, float, int, int, Dict[str, Any]]]
+# ] = {
+#     "openai": backend_openai.query,
+#     "vllm": backend_vllm.query,
+#     "deepseek": backend_deepseek.query,
+#     "deepseek": backend_vllm.query,
+#     "ollama": backend_ollama.query,  # Assuming Ollama uses OpenAI's API
+#     "hf": backend_local.query,  # Renamed "HF" to "hf" for consistency
+# }
+
+# for now we default to vllm as the main provider, but we can switch to ollama if needed
 _PROVIDER_QUERY_FUNCTIONS: Dict[
     str, Callable[..., Tuple[OutputType, float, int, int, Dict[str, Any]]]
 ] = {
     "openai": backend_openai.query,
     "vllm": backend_vllm.query,
-    # "deepseek": backend_deepseek.query,
     "deepseek": backend_vllm.query,
-    "ollama": backend_ollama.query,  # Assuming Ollama uses OpenAI's API
-    "hf": backend_local.query,  # Renamed "HF" to "hf" for consistency
+    "ollama": backend_vllm.query,  # Assuming Ollama uses OpenAI's API
+    "hf": backend_vllm.query,  # Renamed "HF" to "hf" for consistency
 }
+
 
 # Configuration for determining provider based on model name prefixes
 _MODEL_PREFIX_TO_PROVIDER_MAP: Dict[str, Tuple[str, ...]] = {
