@@ -1,6 +1,6 @@
 """configuration and setup utils"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 import json
 from pathlib import Path
 from typing import Hashable, cast
@@ -52,6 +52,19 @@ class SearchConfig:
     debug_prob: float
     num_drafts: int
 
+@dataclass
+class ToTConfig: # New dataclass for ToT specific settings
+    enabled: bool = False # To easily switch ToT on/off for an agent
+    method_generate: str = "propose"  # Choices: "sample", "propose" (from ToT paper)
+    method_evaluate: str = "value"  # Choices: "value", "vote"
+    method_select: str = "greedy"    # Choices: "greedy", "sample" (initially just greedy)
+    n_generate_sample: int = 3      # Number of thoughts to generate from each state (k in paper, but their run.py calls it this)
+    n_evaluate_sample: int = 1      # Number of LLM calls for evaluation per thought (for robustness, 1 is fine to start)
+    n_select_sample: int = 1        # Beam width for BFS (b in paper)
+    max_tot_steps: int = 1          # Number of ToT internal steps (generate-evaluate-select cycles) *within one AIDE agent step*. 
+                                    # For draft, 1 step means: generate k thoughts, evaluate, pick best 1 (if n_select_sample=1).
+                                    # If > 1, it means we'd expand from the selected thoughts. Let's start with 1.
+    # We might add DFS specific params later if needed
 
 @dataclass
 class AgentConfig:
@@ -66,7 +79,8 @@ class AgentConfig:
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
-
+    tot: ToTConfig = field(default_factory=ToTConfig) # Add the new ToTConfig
+    
     # # MCTS specific parameters
     # mcts_iterations: int = 10  # Number of MCTS iterations per step
     # mcts_exploration_weight: float = 1.414  # UCB exploration parameter
