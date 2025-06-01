@@ -1,7 +1,6 @@
 ###############################################################################
 # aide_config.yaml — pre-filled with your current settings
 ###############################################################################
-
 # ─── Core paths ──────────────────────────────────────────────────────────────
 data_dir: null
 desc_file: null
@@ -39,8 +38,8 @@ agent:
 
   # ── LLM settings for coding ───────────────────────────────────────────────
   code:
-    model: "o3-mini"
-    planner_model: "RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
+    model: o3-mini
+    planner_model: o3-mini
     temp: 0.8
     max_new_tokens: 3200
     top_p: 0.9
@@ -49,7 +48,7 @@ agent:
 
   # ── LLM settings for traceback / feedback ────────────────────────────────
   feedback:
-    model: "o4-mini-2025-04-16"
+    model: o4-mini-2025-04-16
     temp: 0.5
 
   # ── Tree-search / debugging heuristics ───────────────────────────────────
@@ -57,7 +56,16 @@ agent:
     max_debug_depth: 50
     debug_prob: 0.65
     num_drafts: 5
-
+  # ── ToT settings ───────────────────────────────────────────────────────────
+  tot:
+    enabled: true
+    method_generate: "propose"
+    method_evaluate: "value"
+    method_select: "greedy"
+    n_generate_sample: 3       # Number of thoughts to generate from each state (k in paper, but their run.py calls it this)
+    n_evaluate_sample: 1       # Number of LLM calls for evaluation per thought (for robustness, 1 is fine to start)
+    n_select_sample: 1         # Beam width for BFS (b in paper)
+    max_steps: 1
 # ─── W&B experiment tracking ────────────────────────────────────────────────
 wandb:
   enabled: true

@@ -2,18 +2,19 @@
 import shutil
 import logging
 import random
+import re
 import json
 import time
-from pathlib import Path # Ensure Path is imported
-from rich.console import Console # Keep for console output
-from typing import Any, Callable, cast, Optional, Dict ,List# Added Dict
+from pathlib import Path 
+from rich.console import Console 
+from typing import Any, Callable, cast, Optional, Dict ,List, Tuple
 from .backend import query
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
-from .utils import data_preview # data_preview.generate
+from .utils import data_preview 
 from .utils.config import Config
-from .utils.pretty_logging import log_step # logger from pretty_logging might conflict, be careful
-from .backend.utils import ContextLengthExceededError # Add this import at the top of agent.py
+from .utils.pretty_logging import log_step 
+from .backend.utils import ContextLengthExceededError 
 from .utils.wandb_logger import WandbLogger
 from .utils.response import (
     extract_code,
@@ -28,14 +29,14 @@ from .utils.response import (
 from .utils.self_reflection import (
     perform_two_step_reflection,
 )
-from .utils.metric import MetricValue, WorstMetricValue # Moved here for clarity
+from .utils.metric import MetricValue, WorstMetricValue 
 
 from .utils.prompt_utils import (
     get_agent_draft_user_prompt,
     get_agent_improve_user_prompt,
     review_func_spec,
     get_agent_debug_user_prompt,
-    CHAINED_CODER_USER_PROMPT_CONSTRUCTORS, # New
+    CHAINED_CODER_USER_PROMPT_CONSTRUCTORS, 
     CHAINED_CODER_SYSTEM_PROMPT_GETTERS,
     get_segment_reflection_system_prompt,
     get_segment_reflection_user_prompt,
@@ -51,11 +52,15 @@ from .utils.prompt_utils import (
     get_planner_agent_debug_code_user_prompt,
     get_planner_agent_plan_system_prompt,
     get_planner_agent_code_system_prompt,
-    wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
-    AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-    AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+    wrap_code as prompt_utils_wrap_code, 
+    AGENT_debug_SYSTEM_PROMPT_DICT, 
+    AGENT_improve_SYSTEM_PROMPT_DICT, 
     get_chunked_reflection_system_prompt,
-    get_chunked_reflection_user_prompt
+    get_chunked_reflection_user_prompt,
+    get_tot_generate_initial_master_plans_user_prompt,
+    get_tot_evaluate_master_plan_textual_user_prompt,
+    get_tot_evaluator_system_prompt,
+    get_tot_planner_system_prompt,
 )
 
 
@@ -64,11 +69,11 @@ try:
 except ImportError:
     wandb = None
 
-logger = logging.getLogger("aide") # Assuming "aide" is the main logger from pretty_logging
+logger = logging.getLogger("aide")
 console = Console()
 
-def format_time(time_in_sec: int): # Should be float for more precision
-    time_in_sec = int(time_in_sec) # Cast to int if original signature is intended
+def format_time(time_in_sec: int): 
+    time_in_sec = int(time_in_sec) 
     return f"{time_in_sec // 3600}hrs {(time_in_sec % 3600) // 60}mins {time_in_sec % 60}secs"
 
 ExecCallbackType = Callable[[str, bool], ExecutionResult]
@@ -184,6 +189,46 @@ class Agent:
             logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Plan or code extraction failed. Raw text: '{trim_long_string(completion_text)}'", extra={"verbose": True})
         logger.error(f"{log_prefix}: All {retries} attempts for plan+code extraction failed.", extra={"verbose": True})
         return "", completion_text or "No LLM response received", "EXTRACTION_FAILED"
+    
+    def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, retries: int = 3,) -> Any:
+        completion_text = None; log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
+        for attempt in range(retries):
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
+            try:
+                completion_text = query(system_message=system_prompt, user_message=user_prompt, model=model, temperature=temperature, planner=planner_flag, current_step=self.current_step, convert_system_to_user=convert_system_to_user, max_tokens=self.acfg.code.max_new_tokens)
+                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True}); return completion_text
+            except Exception as e:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
+                if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+        return None
+    
+    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        if completion_text is None: return "", "", ""
+        task_summary, plan = extract_summary_and_plan(completion_text,task=True); 
+        if not (plan and task_summary): 
+            plan = plan or str(completion_text) 
+            task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
+            logger.warning(f"{log_prefix}: Plan or summary extraction failed/partial. Raw: {trim_long_string(completion_text)}", extra={"verbose":True})
+        logger.debug(f"{log_prefix}: Plan query completed. Task summary: {task_summary}\n\nPlan: {plan}", extra={"verbose": True})
+        return task_summary, plan, ""
+
+    def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_code_system_prompt(); log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
+        logger.debug(f"{log_prefix}: Sending PLANNER_CODE query to LLM.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODE", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.model, temperature=self.acfg.code.temp, planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        if completion_text is None: return "", "", "" 
+        code = extract_code(completion_text)
+        if not code: code = str(completion_text) 
+        logger.debug(f"{log_prefix}\n\nCode query completed. Code: {code}", extra={"verbose": True})
+        return "", code, "" 
 
 
     def _draft(self, parent_node=None) -> Node:
@@ -513,45 +558,6 @@ class PlannerAgent(Agent):
 
         super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
 
-    def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, retries: int = 3,) -> Any:
-        completion_text = None; log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
-        for attempt in range(retries):
-            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
-            try:
-                completion_text = query(system_message=system_prompt, user_message=user_prompt, model=model, temperature=temperature, planner=planner_flag, current_step=self.current_step, convert_system_to_user=convert_system_to_user, max_tokens=self.acfg.code.max_new_tokens)
-                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True}); return completion_text
-            except Exception as e:
-                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
-                if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
-                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-        return None
-    
-    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
-        logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
-        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
-        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
-        if completion_text is None: return "", "", ""
-        task_summary, plan = extract_summary_and_plan(completion_text,task=True); 
-        if not (plan and task_summary): 
-            plan = plan or str(completion_text) 
-            task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
-            logger.warning(f"{log_prefix}: Plan or summary extraction failed/partial. Raw: {trim_long_string(completion_text)}", extra={"verbose":True})
-        logger.debug(f"{log_prefix}: Plan query completed. Task summary: {task_summary}\n\nPlan: {plan}", extra={"verbose": True})
-        return task_summary, plan, ""
-
-    def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_code_system_prompt(); log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
-        logger.debug(f"{log_prefix}: Sending PLANNER_CODE query to LLM.", extra={"verbose": True})
-        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
-        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODE", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.model, temperature=self.acfg.code.temp, planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
-        if completion_text is None: return "", "", "" 
-        code = extract_code(completion_text)
-        if not code: code = str(completion_text) 
-        logger.debug(f"{log_prefix}\n\nCode query completed. Code: {code}", extra={"verbose": True})
-        return "", code, "" 
 
     def _draft(self, parent_node=None) -> Node:
         log_prefix = f"PLANNER_AGENT_DRAFT_STEP{self.current_step}"
@@ -613,23 +619,175 @@ class PlannerAgent(Agent):
         else: logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
         return reflection_plan, revised_code
 
-#############################################################################
-# CodeChainAgent Implementation
-#############################################################################
-class CodeChainAgent(Agent): # Inherit from Agent
+############################################################################3
+# Tree of Thoughts Agent Implementation (TOT)   
+############################################################################3
+class TOTAgent(Agent):
     def __init__(
         self,
         task_desc: str,
         cfg: Config,
         journal: Journal,
-        wandb_run=None, # Replaced by wandb_logger
+        wandb_logger: Optional[WandbLogger] = None,
+        competition_benchmarks: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
+
+    def parse_tot_response(self, eval_response: str) -> Tuple[str, str]:
+        """
+        Parses the response from the LLM and returns a tuple of the plan and the code.
+        """
+        score_match = re.search(r"Score:\s*(\d+)", eval_response, re.IGNORECASE)
+        if score_match:
+            try:
+                return float(score_match.group(1))
+            except ValueError:
+                logger.warning(f"Could not parse score from evaluation: {eval_response}")
+                return 0.0 
+        logger.warning(f"Could not find score in evaluation: {eval_response}")
+        return 0.0
+
+
+
+    def _parse_multiple_master_plans(self, llm_response_text: str, num_expected: int) -> List[str]:
+        plans = []
+        raw_plans = re.split(r"Master Plan \d+:", llm_response_text, flags=re.IGNORECASE)
+        for plan_text in raw_plans:
+            plan_text = plan_text.strip()
+            if plan_text:
+                plans.append(plan_text)
+        
+        if not plans and llm_response_text.strip():
+            logger.warning("Could not find 'Master Plan X:' delimiters, treating entire response as a single plan or multiple undelimited plans.")
+            potential_plans = [p.strip() for p in llm_response_text.strip().split('\n\n') if p.strip()]
+            if len(potential_plans) >= num_expected and len(potential_plans) <= num_expected + 2 : # Heuristic
+                logger.info(f"Treating response as {len(potential_plans)} plans separated by double newlines.")
+                return potential_plans
+            elif potential_plans:
+                logger.info("Treating entire response as a single plan due to lack of clear delimiters for multiple.")
+                return [llm_response_text.strip()] 
+            
+        return plans[:num_expected] 
+    
+
+    def _generate_master_plan_with_tot(self, aide_input_context: Dict) -> str: 
+        cfg_planning_tot = self.cfg.agent.tot.planning
+        log_prefix = f"ToTAgent_MasterPlanToT_Step_{self.current_step}"
+
+        if not cfg_planning_tot.enabled:
+            logger.info(f"{log_prefix}: ToT for planning is disabled. Falling back to standard planner.")
+            plan_user_prompt = get_planner_agent_draft_plan_user_prompt( 
+                task_desc=aide_input_context.get("task_desc"),
+                journal_summary=aide_input_context.get("journal_summary"),
+                competition_name=aide_input_context.get("competition_name"),
+                acfg_data_preview=self.acfg.data_preview, 
+                data_preview_content=aide_input_context.get("data_preview_content")
+            )
+            _summary, single_plan, _err = self.plan_query(plan_user_prompt) 
+            return single_plan if single_plan else "FALLBACK_PLAN_GENERATION_FAILED"
+        
+        logger.info(f"{log_prefix}: Starting ToT for Master Plan generation. Config: {cfg_planning_tot}")
+       
+        logger.info(f"{log_prefix}: Generating {cfg_planning_tot.n_generate_sample} initial Master Plan thoughts.")
+        user_prompt_gen = get_tot_generate_initial_master_plans_user_prompt(
+            aide_input_context, 
+            cfg_planning_tot.n_generate_sample
+        )
+        raw_generated_plans_text = self._query_llm_with_retries( 
+            query_type="TOT_PLAN_GEN",
+            system_prompt=get_tot_planner_system_prompt(), 
+            user_prompt=user_prompt_gen,
+            model=self.acfg.code.planner_model, 
+            temperature=self.acfg.code.temp, 
+            planner_flag=True, 
+            convert_system_to_user=self.acfg.convert_system_to_user,
+        )
+
+        candidate_plan_strings = self._parse_multiple_master_plans(raw_generated_plans_text, cfg_planning_tot.n_generate_sample)
+        
+        if not candidate_plan_strings:
+            logger.error(f"{log_prefix}: Failed to generate or parse any Master Plan thoughts.")
+            return "MASTER_PLAN_TOT_GENERATION_FAILED"
+
+        logger.info(f"{log_prefix}: Generated {len(candidate_plan_strings)} plan thoughts.")
+        for i, p_text in enumerate(candidate_plan_strings):
+            logger.debug(f"{log_prefix}_GeneratedPlan_{i+1}_START\n{p_text}\n{log_prefix}_GeneratedPlan_{i+1}_END", extra={"verbose": True})
+
+
+        evaluated_plans = [] 
+        logger.info(f"{log_prefix}: Evaluating {len(candidate_plan_strings)} plan thoughts.")
+        for i, plan_text in enumerate(candidate_plan_strings):
+            user_prompt_eval = get_tot_evaluate_master_plan_textual_user_prompt(
+                aide_input_context, 
+                plan_text
+            )
+            evaluator_model_name = self.cfg.agent.tot.planning.get("evaluator_model_name") or self.cfg.agent.feedback.model 
+            
+            logger.info(f"{log_prefix}: Evaluating Plan {i+1} with model {evaluator_model_name}")
+            logger.debug(f"{log_prefix}_PlanToEvaluate_{i+1}_START\n{plan_text}\n{log_prefix}_PlanToEvaluate_{i+1}_END", extra={"verbose": True})
+
+            textual_eval_response = self._query_llm_with_retries(
+                query_type="TOT_PLAN_EVAL",
+                system_prompt=get_tot_evaluator_system_prompt(), 
+                user_prompt=user_prompt_eval,
+                model=evaluator_model_name, 
+                temperature=self.cfg.agent.feedback.temp, 
+                planner_flag=False, 
+                convert_system_to_user=self.acfg.convert_system_to_user,
+            )
+            
+            score = self._parse_textual_plan_evaluation(textual_eval_response)
+            evaluated_plans.append({"plan_text": plan_text, "score": score, "raw_eval_response": textual_eval_response})
+            logger.info(f"{log_prefix}: Plan {i+1} received score: {score}. Raw eval: {textual_eval_response[:100]}...")
+            logger.debug(f"{log_prefix}_Plan_{i+1}_Score:{score}_RawEval:\n{textual_eval_response}\n", extra={"verbose": True})
+
+
+
+        if not evaluated_plans:
+            logger.error(f"{log_prefix}: No plans were successfully evaluated.")
+            return "MASTER_PLAN_TOT_EVALUATION_FAILED"
+
+        evaluated_plans.sort(key=lambda x: x["score"], reverse=True)
+        
+        best_n_plans_data = evaluated_plans[:cfg_planning_tot.n_select_sample]
+        
+        if not best_n_plans_data:
+            logger.error(f"{log_prefix}: No plans selected after ToT process.")
+            return "MASTER_PLAN_TOT_SELECTION_FAILED"
+
+        chosen_plan_data = best_n_plans_data[0]
+        logger.info(f"{log_prefix}: Selected Master Plan with score {chosen_plan_data['score']}.")
+        logger.debug(f"{log_prefix}_CHOSEN_MASTER_PLAN_START\n{chosen_plan_data['plan_text']}\n{log_prefix}_CHOSEN_MASTER_PLAN_END", extra={"verbose":True})
+        logger.debug(f"{log_prefix}_CHOSEN_MASTER_PLAN_RAW_EVAL_START\n{chosen_plan_data['raw_eval_response']}\n{log_prefix}_CHOSEN_MASTER_PLAN_RAW_EVAL_END", extra={"verbose":True})
+
+        return chosen_plan_data["plan_text"]
+
+
+
+    def _draft(self):
+        aide_input_context = self._prepare_aide_input_for_tot(parent_node_being_expanded=None)
+        selected_master_plan_text = self._generate_master_plan_with_tot(aide_input_context)
+        
+        draft_node = Node(plan=selected_master_plan_text, 
+                        code=f"# Master Plan Selected by ToT:\n# {selected_master_plan_text.replace('\n', '\n# ')}\nprint('Plan selected, code generation TODO.')",
+                        summary="Master Plan generated via ToT planning phase.")
+        return draft_node
+
+#############################################################################
+# CodeChainAgent Implementation
+#############################################################################
+class CodeChainAgent(Agent): 
+    def __init__(
+        self,
+        task_desc: str,
+        cfg: Config,
+        journal: Journal,
         wandb_logger: Optional['WandbLogger'] = None,
         competition_benchmarks=None,
     ):
         super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
 
 
-    # Override _query_llm_with_retries as it's specific to CodeChainAgent's two-model approach
     def _query_llm_with_retries(
         self,
         query_type: str,
@@ -687,15 +845,15 @@ class CodeChainAgent(Agent): # Inherit from Agent
                     retries += 1
                     continue
                 return completion_text
-            except ContextLengthExceededError as cle: # Catch specific error
-                logger.error(f"{log_prefix} Attempt {attempt+1}: Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True}) # exc_info=False as CLE is already logged well
+            except ContextLengthExceededError as cle: 
+                logger.error(f"{log_prefix} Attempt {attempt+1}: Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True}) 
                 return None #
             except Exception as e:
                 logger.error(f"{log_prefix} Attempt {attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
                 if attempt == retries - 1: 
                     logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True})
                     return None 
-                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5)) # Make delay configurable
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5)) 
         return ""
 
 
@@ -736,16 +894,16 @@ class CodeChainAgent(Agent): # Inherit from Agent
         return "", code, "" 
 
     def _code_segment_query(self, 
-                                user_prompt_dict: Dict[str, Any], 
-                                system_prompt_dict: Dict[str, Any], # Specific system prompt for the segment
-                                retries: int = 3
-                              ) -> str: # Returns only the code snippet string
+                            user_prompt_dict: Dict[str, Any], 
+                            system_prompt_dict: Dict[str, Any], 
+                            retries: int = 3
+                            ) -> str: 
 
             completion_text = self._query_llm_with_retries(
                 query_type="Segment-Generation",
                 system_prompt=system_prompt_dict, 
                 user_prompt=user_prompt_dict,
-                model=self.acfg.code.model, # Coder model
+                model=self.acfg.code.model, 
                 temperature=self.acfg.code.temp,
                 planner_flag=False,
                 convert_system_to_user=self.acfg.convert_system_to_user, 
@@ -783,12 +941,12 @@ class CodeChainAgent(Agent): # Inherit from Agent
         segment_user_prompt = user_prompt_constructor(
             task_summary=task_summary,
             master_plan_text=master_plan_text,
-            current_code_so_far=code_accumulator, # Pass the code built so far
+            current_code_so_far=code_accumulator, 
             competition_name=self.competition_name,
             data_preview_content=self.data_preview
         )
         
-        code_snippet = self._code_segment_query( # Call the new specialized method
+        code_snippet = self._code_segment_query( 
             user_prompt_dict=segment_user_prompt,
             system_prompt_dict=segment_system_prompt,
             retries=self.acfg.get('coder_segment_retries', 3) 
@@ -801,10 +959,8 @@ class CodeChainAgent(Agent): # Inherit from Agent
         logger.debug(f"{segment_name.replace(' ', '_')} Snippet: \n{code_snippet.strip()}\n ")
 
         if chain_reflection:
-            # Reflecting on the code snippet
             logger.info(f"{log_prefix_segment}: Initial snippet generated. Now reflecting.")
 
-        # Perform self-reflection on the generated snippet
             reflection_summary, code_snippet = self._reflect_on_segment(
                 task_summary=task_summary,
                 master_plan_text=master_plan_text,
@@ -822,13 +978,12 @@ class CodeChainAgent(Agent): # Inherit from Agent
         log_prefix_chain = f"CodeChainAgent_Chained_Draft_Step: {self.current_step}"
         logger.info(f"Starting chained code generation for draft.")
         
-        # Initial boilerplate for the script
         code_accumulator = f"# Script generated by AIDE CodeChainAgent (Chained Coder) - Step {self.current_step}\n"
         code_accumulator += f"# Competition: {self.competition_name}\n"
-        code_accumulator += f"# Task Summary: {task_summary.splitlines()[0]}...\n" # First line of summary
+        code_accumulator += f"# Task Summary: {task_summary.splitlines()[0]}...\n" 
         code_accumulator += "# --- Master Plan ---\n"
         for i, plan_step_line in enumerate(master_plan_text.splitlines()):
-             if plan_step_line.strip() and not plan_step_line.strip().startswith("##"): # Add non-empty lines, skip markdown headers
+            if plan_step_line.strip() and not plan_step_line.strip().startswith("##"): 
                 code_accumulator += f"# {plan_step_line.strip()}\n"
         code_accumulator += "# --- End Master Plan ---\n\n"
 
@@ -852,10 +1007,10 @@ class CodeChainAgent(Agent): # Inherit from Agent
                 code_snippet = self._generate_code_segment(
                     segment_name, task_summary, master_plan_text, code_accumulator, chain_reflection
                 )
-                code_accumulator += code_snippet + "\n\n" # Add two newlines for separation
+                code_accumulator += code_snippet + "\n\n" 
                 if f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}" in code_snippet:
                     logger.warning(f"{log_prefix_chain}: Halting chain due to failure in segment: {segment_name}")
-                    break # Optional: decide if you want to continue or halt on segment failure
+                    break 
 
             logger.info(f"{log_prefix_chain}: Chained code generation process complete.")
             return code_accumulator.strip()
@@ -892,8 +1047,6 @@ class CodeChainAgent(Agent): # Inherit from Agent
 
             # 2) if configured, reflect on the whole chunk of `chunk_size` segments
             if len(combined_chunk.strip()) > 0:
-                # for now we just duplicate the same task_summary per segment
-
                 _, revised_chunk = self._reflect_on_chunk(
                     task_summary,
                     master_plan_text,
@@ -901,7 +1054,6 @@ class CodeChainAgent(Agent): # Inherit from Agent
                     code_before,
                     combined_chunk
                 )
-                # splice out the old chunk and replace with revised
                 code_accumulator = code_before + revised_chunk + "\n\n"
 
             i += chunk_size
@@ -928,15 +1080,14 @@ class CodeChainAgent(Agent): # Inherit from Agent
             initial_code_snippet_for_this_segment=initial_segment_snippet
         )
 
-        # Use a feedback/reflection model, could be o3-mini or same as coder
-        reflection_llm = self.acfg.code.model # Or another config for reflection model
+        reflection_llm = self.acfg.code.model 
         
         reflection_completion_text = self._query_llm_with_retries(
             query_type=f"CodeChainAgent_Reflect_Step: {self.current_step}_Segment_{segment_name.replace(' ', '_')}",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=reflection_llm,
-            temperature=self.acfg.code.temp, # Or a specific reflection temp
+            temperature=self.acfg.code.temp, 
 
             convert_system_to_user=self.acfg.convert_system_to_user,
             retries=self.acfg.get('reflection_retries', 1),
@@ -947,7 +1098,6 @@ class CodeChainAgent(Agent): # Inherit from Agent
             logger.warning(f"{log_prefix_reflect}: Reflection LLM query returned None. Using initial snippet.")
             return "Reflection failed: No LLM response.", initial_segment_snippet
 
-        # You'll need a robust way to parse this output
         reflection_summary, revised_snippet = extract_reflection_summary_and_revised_code(reflection_completion_text)
 
         if not revised_snippet or not revised_snippet.strip():
@@ -978,7 +1128,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
             log_prefix = f"CodeChainAgent_ChunkReflect_Step:{self.current_step}_Segments_{tag}"
             logger.info(f"{log_prefix}: Reflecting on chunk of segments {segment_names}")
 
-            system_prompt = get_chunked_reflection_system_prompt()   # your placeholder
+            system_prompt = get_chunked_reflection_system_prompt()  
             user_prompt = get_chunked_reflection_user_prompt(
                 task_summary=task_summary,
                 master_plan=master_plan_text,
@@ -1007,23 +1157,14 @@ class CodeChainAgent(Agent): # Inherit from Agent
                 logger.warning(f"{log_prefix}: Empty revised chunk; using original.")
                 return summary, chunk_code
 
-            logger.info(f"{log_prefix}: Chunk reflection produced revised code.")
-            logger.debug(f"-----------------------------------------------------------------")
-            logger.debug(f"{log_prefix}: Summary: {summary}", extra={"verbose": True})
-            logger.debug(f"-----------------------------------------------------------------")
-            logger.debug(f"{log_prefix}: Revised chunk: {revised}", extra={"verbose": True})
-            logger.debug(f"-----------------------------------------------------------------")
-
             return summary, revised
 
 
-    # Modify the existing _draft method to use this chained approach
     def _draft(self, parent_node=None) -> Node:
         log_prefix = f""
         logger.info(f"{log_prefix} Starting drafting process. Parent: {parent_node.id if parent_node else 'None'}")
-        memory=self.journal.generate_summary(include_code=False) # Memory
+        memory=self.journal.generate_summary(include_code=False) 
 
-        # 1. Generate Master Plan using the Planner model
         logger.info(f"{log_prefix} Calling Planner for Task Summary and Master Plan.")
         plan_user_prompt = get_planner_agent_draft_plan_user_prompt(
             task_desc=self.task_desc, 
@@ -1047,15 +1188,13 @@ class CodeChainAgent(Agent): # Inherit from Agent
         else:
             logger.info(f"{log_prefix} Master Plan received from Planner. Proceeding to chained code generation.")
 
-            final_plan_text = master_plan_text # Store the full plan text for the node
+            final_plan_text = master_plan_text 
             
-            # 2. Generate Code via Chaining using the Coder model
             generated_code = self._draft_generate_code_chained(task_summary, master_plan_text)
-            final_summary = task_summary # Use the summary from the planner
+            final_summary = task_summary 
 
             if not generated_code or generated_code.strip().startswith("# FAILED TO GENERATE CODE FOR SEGMENT:") or generated_code.strip() == "# SEGMENT 1 (Data Loading & Initial Setup) FAILED TO GENERATE":
-                 logger.error(f"{log_prefix} Chained code generation resulted in failure or predominantly error messages.")
-                 # Keep generated_code as is, it will contain error placeholders
+                logger.error(f"{log_prefix} Chained code generation resulted in failure or predominantly error messages.")
 
         new_node = Node(plan=final_plan_text, code=generated_code, summary=final_summary, task_summary=final_summary, parent=parent_node)
         logger.info(f"{log_prefix} Drafted new node {new_node.id} using ChainedCoder.")

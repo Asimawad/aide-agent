@@ -15,55 +15,30 @@ def wrap_code(code_str: str, lang: str = "python") -> str:
     return f"```\n{code_str}\n```"
 
 
-review_func_spec = FunctionSpec(
-    name="submit_review",
+
+tot_evaluate_plan_func_spec = FunctionSpec(
+    name="submit_master_plan_evaluation",
     json_schema={
         "type": "object",
         "properties": {
-            "is_bug": {
-                "type": "boolean",
-                "description": "true if the output log shows that the execution failed or has some bug, otherwise false.",
+            "plan_score": {
+                "type": "number",
+                "description": "A numerical score from 1 (very unpromising) to 10 (very promising) "
+                               "assessing the potential of the Master Plan to lead to a successful solution.",
             },
-            "has_csv_submission": {
-                "type": "boolean",
-                "description": "true if the code saves the predictions on the test data"
-                " in a `submission.csv` file in the `./submission/` directory, otherwise false."
-                " Note that the file MUST be saved in the ./submission/ directory for this to be evaluated as true."
-                " Otherwise, it should be evaluated as false."
-                " You can assume the ./submission/ directory exists and is writable.",
-            },
-            "summary": {
+            "justification": {
                 "type": "string",
-                "description": "write a short summary (2-3 sentences) describing "
-                " the empirical findings. Alternatively mention if there is a bug or"
-                " the submission.csv was not properly produced."
-                " DO NOT suggest fixes or improvements.",
+                "description": "A brief (1-3 sentences) explanation for the assigned score, highlighting strengths or weaknesses of the plan.",
             },
-            "metric": {
-                "type": "number",
-                "description": "If the code ran successfully, report the value of the validation metric. Otherwise, leave it null.",
-            },
-            "lower_is_better": {
+            "plan_is_complete_for_draft": {
                 "type": "boolean",
-                "description": "true if the metric should be minimized (i.e. a lower metric value is better, such as with MSE), false if the metric should be maximized (i.e. a higher metric value is better, such as with accuracy).",
-            },
-            "code_quality": {
-                "type": "number",
-                "description": "give a score between 0-10 on the quality of the code, where 0 is a terrible code/ non-code at all, and 9-10 is a clean code with a great value for the evaluation metric.",
-            },
+                "description": "True if the plan seems to cover all necessary stages from data loading to submission for a first draft, False otherwise."
+            }
         },
-        "required": [
-            "is_bug",
-            "has_csv_submission",
-            "summary",
-            "metric",
-            "lower_is_better",
-            "code_quality",
-        ],
+        "required": ["plan_score", "justification", "plan_is_complete_for_draft"],
     },
-    description="Submit a review evaluating the output of the training script.",
+    description="Submit an evaluation of a proposed Master Plan.",
 )
-
 
 
 review_func_spec = FunctionSpec(
@@ -787,7 +762,7 @@ def get_planner_agent_code_system_prompt() -> Dict[str, Any]:
 
 def get_planner_agent_plan_generic_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(PLANNER_AGENT_PLAN_generic_SYSTEM_PROMPT_DICT)
-# For PlannerAgent's _draft stage (plan_query part)
+
 def get_planner_agent_draft_plan_user_prompt(
     task_desc: str,
     journal_summary: str,
@@ -1448,3 +1423,182 @@ def get_chunked_reflection_user_prompt(
             "**Reflection Summary** and **Revised Code Snippet** exactly in the format specified."
         )
     }
+
+
+# Tot prompts 
+
+TOT_PLANNING_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+    "SYSTEM": (
+        "You are an expert Kaggle Grandmaster acting as a Strategic Planner. Your current task is to explore and evaluate "
+        "different high-level strategic Master Plans for solving a given machine learning competition. "
+        "You will either be asked to generate multiple diverse strategic plans OR to evaluate the promise of a single given plan."
+    ),
+    "user_instructions": {
+        "Context": "You will receive the competition description, data overview, and potentially a summary of previous attempts.",
+        "If Generating Plans": (
+            "When asked to generate plans, provide the requested number of *distinct and diverse* strategic Master Plans. "
+            "Each plan should be a high-level outline (e.g., 3-7 key strategic bullet points) covering the approach from data loading to submission. "
+            "Focus on *strategic choices* (e.g., model family, core feature engineering ideas, validation strategy) rather than minute implementation details. "
+            "The goal is to explore different viable solution *architectures* or *methodologies*."
+        ),
+        "If Evaluating a Plan": (
+            "When asked to evaluate a single plan, assess its potential for success. Provide a numerical score (e.g., 1-10, higher is better) "
+            "and a brief (1-2 sentences) justification for your score. Consider feasibility, completeness for a first-pass solution, and alignment with the task."
+        ),
+        "Output Format (When Generating Multiple Plans)": ( # This might be better handled by parsing the response
+            "If generating multiple plans, clearly separate them, for example:\n"
+            "Plan 1:\n"
+            "- Strategy A, Step 1\n"
+            "- Strategy A, Step 2\n\n"
+            "Plan 2:\n"
+            "- Strategy B, Step 1\n"
+            "- Strategy B, Step 2\n"
+            # We will parse this in the agent; the LLM just needs to produce separable plans.
+        ),
+         "Output Format (When Evaluating a Single Plan - Using Function Call)": (
+            "When evaluating a single plan, you will be expected to call a function to submit your evaluation."
+
+        )
+    }
+}
+
+def get_tot_planning_system_prompt() -> Dict[str, Any]:
+    return copy.deepcopy(TOT_PLANNING_SYSTEM_PROMPT_DICT)
+
+
+def get_tot_generate_initial_master_plans_user_prompt(
+    aide_context: Dict[str, Any], # Will contain task_desc, data_preview, journal_summary, competition_name
+    num_plans_to_generate: int
+) -> Dict[str, Any]:
+    """
+    Generates the user prompt for asking the LLM to propose multiple initial Master Plans.
+    """
+    introduction = (
+        f"For the machine learning competition '{aide_context.get('competition_name', 'N/A')}', "
+        f"please propose {num_plans_to_generate} distinct and diverse high-level strategic Master Plans. These plans will be sent to different Coder agents to generate code and persue different strategies and directions to arrive to the best solution. "
+        "Each plan should be a concise outline of the main steps (e.g., 3-7 key bullet points) from data loading to generating a submission file. "
+        "Focus on different overall approaches, model choices, or core feature engineering strategies."
+    )
+    
+    prompt_user_message: Dict[str, Any] = {
+        "Introduction": introduction,
+        "Overall Task Description": aide_context.get("task_desc", "No task description provided."),
+        "Data Overview": aide_context.get("data_preview_content", "No detailed data overview provided."),
+        "Environment and Packages": get_competition_environment_text(aide_context.get("competition_name", "")), # Re-use existing
+        "Memory of Previous Attempts": aide_context.get("journal_summary", "No previous attempts on record."),
+        "Your Task & Output Instructions": (
+            f"Generate exactly {num_plans_to_generate} diverse Master Plan proposals. "
+            "Each plan should be clearly delineated (e.g., starting with 'Plan 1:', 'Plan 2:', etc.). "
+            "These plans should represent different strategic pathways to a solution. They should be high-level enough to allow for different specific implementations later, "
+            "but concrete enough to guide a Coder agent. Avoid excessive implementation details at this stage."
+        )
+    }
+    return prompt_user_message
+
+
+def get_tot_evaluate_master_plan_user_prompt(
+    aide_context: Dict[str, Any],
+    master_plan_thought_to_evaluate: str
+) -> Dict[str, Any]:
+    """
+    Generates the user prompt for asking the LLM to evaluate a single Master Plan thought.
+    """
+    introduction = (
+        f"For the machine learning competition '{aide_context.get('competition_name', 'N/A')}', "
+        "please evaluate the following proposed Master Plan. Your evaluation should assess its "
+        "potential to lead to a successful first-draft solution."
+    )
+
+    prompt_user_message: Dict[str, Any] = {
+        "Introduction": introduction,
+        "Overall Task Description": aide_context.get("task_desc", "No task description provided."),
+        "Data Overview": aide_context.get("data_preview_content", "No detailed data overview provided."),
+        "Master Plan to Evaluate": master_plan_thought_to_evaluate,
+        "Your Evaluation Task": (
+            "Carefully review the 'Master Plan to Evaluate'. "
+            "Consider its clarity, feasibility, completeness for covering the whole task in detail(data loading to submission), "
+            "and its strategic soundness for achieving a good result in the competition. "
+            "Then, call the 'submit_master_plan_evaluation' function with your assessment."
+        )
+    }
+    return prompt_user_message
+
+TOT_PLANNER_SYSTEM_PROMPT_DICT: Dict[str, Any] = { # Renamed for clarity
+    "SYSTEM": (
+        "You are an expert Kaggle Grandmaster acting as a Strategic Planner. Your current task is to generate "
+        "multiple diverse, high-level strategic Master Plans for solving a given machine learning competition. "
+        "These plans will be evaluated by another specialist later."
+    ),
+    "user_instructions": {
+        "Context": "You will receive the competition description, data overview, and potentially a summary of previous attempts.",
+        "Your Task (Generating Plans)": (
+            "When asked to generate plans, provide the requested number of *distinct and diverse* strategic Master Plans. "
+            "Each plan should be a high-level outline (e.g., 3-7 key strategic bullet points) covering the approach from data loading to submission. "
+            "Focus on *strategic choices* (e.g., model family, core feature engineering ideas, validation strategy) rather than minute implementation details. "
+            "The goal is to explore different viable solution *architectures* or *methodologies*."
+        ),
+        "Output Format (When Generating Multiple Plans)": (
+            "Clearly separate each plan. For example:\n"
+            "Master Plan 1:\n" 
+            "- Strategy A, Step 1\n"
+            "- Strategy A, Step 2\n\n"
+            "Master Plan 2:\n" 
+            "- Strategy B, Step 1\n"
+            "- Strategy B, Step 2\n"
+            )
+    }
+}
+
+def get_tot_planner_system_prompt() -> Dict[str, Any]: # Renamed getter
+    return copy.deepcopy(TOT_PLANNER_SYSTEM_PROMPT_DICT)
+
+
+TOT_EVALUATOR_SYSTEM_PROMPT_DICT: Dict[str, Any] = { # New system prompt for the evaluator
+    "SYSTEM": (
+        "You are a meticulous and critical AI assistant specializing in evaluating strategic plans for machine learning competitions. "
+        "Your role is to assess a given Master Plan and provide a structured textual evaluation."
+    ),
+    "user_instructions": {
+        "Task": "You will be given a Master Plan. Evaluate it based on clarity, feasibility, completeness for a first draft, and strategic soundness.",
+        "Output Format (Strict Adherence Required)": (
+            "Your entire response MUST be structured as follows:\n"
+            "Score: [A single integer score from 1 (very unpromising) to 10 (very promising)]\n"
+            "Justification: [A brief (1-3 sentences) explanation for your score, highlighting strengths or weaknesses.]\n"
+            "Completeness: [True or False - True if the plan seems to cover all necessary stages from data loading to submission for a first draft, False otherwise.]"
+        )
+    }
+}
+
+def get_tot_evaluator_system_prompt() -> Dict[str, Any]: # New getter
+    return copy.deepcopy(TOT_EVALUATOR_SYSTEM_PROMPT_DICT)
+
+def get_tot_evaluate_master_plan_textual_user_prompt( # Renamed for textual output
+    aide_context: Dict[str, Any], # Only competition_name and task_desc might be relevant here
+    master_plan_thought_to_evaluate: str
+) -> Dict[str, Any]:
+    """
+    Generates the user prompt for asking an LLM to evaluate a single Master Plan thought
+    and provide the evaluation as structured text.
+    """
+    introduction = (
+        f"Please evaluate the following proposed Master Plan for the machine learning competition: '{aide_context.get('competition_name', 'N/A')}'. "
+        "Assess its potential to lead to a successful first-draft solution."
+    )
+
+    prompt_user_message: Dict[str, Any] = {
+        "Introduction": introduction,
+        "Overall Task Context (Brief)": aide_context.get("task_desc", "No task description provided."), # Provide some task context
+        "Master Plan to Evaluate": master_plan_thought_to_evaluate,
+        "Your Evaluation Task & Output Format": (
+            "Carefully review the 'Master Plan to Evaluate'. "
+            "Consider its clarity, feasibility, completeness for covering the whole task (data loading to submission), "
+            "and its strategic soundness for achieving a good result. "
+            "Provide your evaluation strictly in the format:\n"
+            "Score: [1-10]\n"
+            "Justification: [Your brief reasoning]\n"
+            "Completeness: [True/False]"
+        )
+    }
+    return prompt_user_message
+
+

@@ -114,3 +114,33 @@ chmod +x run_aide.sh
 chmod +x gc.sh
 echo "Executing command: $@"
 exec "$@"
+
+
+
+
+# # --- Start DPO-tuned coder model ---
+# CODER_BASE_MODEL="deepseek-ai/deepseek-coder-1.3b-instruct"
+# LORA_ADAPTER_PATH="./dpo_coder_1.3b_aide_adapter_v2_chat_template_test" # Your DPO adapter
+# LORA_ADAPTER_NAME="dpo_aide_v1" # A name you give to this adapter for requests
+
+# echo "Starting vLLM server for DPO-tuned coder model with base $CODER_BASE_MODEL and LoRA $LORA_ADAPTER_NAME on port 8000..."
+# touch $first_model_log # Assuming this is your log file
+
+# python -m vllm.entrypoints.openai.api_server \
+#     --model "$CODER_BASE_MODEL" \
+#     --port 8000 \
+#     --dtype bfloat16 \
+#     --device cuda \
+#     --max-model-len 4096 \ # Adjust based on DPO training max_seq_len
+#     --gpu-memory-utilization 0.9 \
+#     --max-num-batched-tokens 16384 \ # You might need to adjust these based on LoRA overhead
+#     --max-num-seqs 3 \
+#     --trust-remote-code \
+#     --enable-lora \
+#     --max-loras 1 \ # If you only plan to serve this one DPO adapter for now
+#     --max-lora-rank 16 \ # Or whatever rank your LoRA adapter is (args.lora_r)
+#     --lora-modules ${LORA_ADAPTER_NAME}=${LORA_ADAPTER_PATH} \
+#     --enforce-eager &> $first_model_log & # enforce-eager might be needed for some LoRA setups initially
+
+# CODER_MODEL_PID=$!
+# # ... (rest of your health check and logging) ...
