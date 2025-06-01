@@ -30,7 +30,7 @@ from .utils.self_reflection import (
 )
 from .utils.metric import MetricValue, WorstMetricValue # Moved here for clarity
 
-from .utils.prompt_utils import (
+from .utils.prompt_base import (
     get_agent_draft_user_prompt,
     get_agent_improve_user_prompt,
     review_func_spec,
@@ -52,11 +52,38 @@ from .utils.prompt_utils import (
     get_planner_agent_plan_system_prompt,
     get_planner_agent_code_system_prompt,
     wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
-    AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-    AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
     get_chunked_reflection_system_prompt,
     get_chunked_reflection_user_prompt
 )
+
+
+# from .utils.prompt_utils import (
+#     get_agent_draft_user_prompt,
+#     get_agent_improve_user_prompt,
+#     review_func_spec,
+#     get_agent_debug_user_prompt,
+#     CHAINED_CODER_USER_PROMPT_CONSTRUCTORS, # New
+#     CHAINED_CODER_SYSTEM_PROMPT_GETTERS,
+#     get_segment_reflection_system_prompt,
+#     get_segment_reflection_user_prompt,
+#     get_agent_system_prompt,
+#     get_agent_draft_system_prompt,
+#     get_agent_improve_system_prompt,
+#     get_agent_debug_system_prompt,
+#     get_planner_agent_draft_plan_user_prompt,
+#     get_planner_agent_draft_code_user_prompt,
+#     get_planner_agent_improve_plan_user_prompt,
+#     get_planner_agent_improve_code_user_prompt,
+#     get_planner_agent_debug_plan_user_prompt,
+#     get_planner_agent_debug_code_user_prompt,
+#     get_planner_agent_plan_system_prompt,
+#     get_planner_agent_code_system_prompt,
+#     wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
+#     AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+#     AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
+#     get_chunked_reflection_system_prompt,
+#     get_chunked_reflection_user_prompt
+# )
 
 
 try:
