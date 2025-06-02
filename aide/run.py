@@ -17,7 +17,7 @@ console = Console()
 from .utils import copytree 
 from aide.utils.metrics_calculator import generate_all_metrics
 from .utils.wandb_logger import WandbLogger 
-from .agent import Agent, PlannerAgent, CodeChainAgent, ToTAgent
+from .agent import Agent, PlannerAgent, CodeChainAgent, TOTAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node 
 from omegaconf import OmegaConf
@@ -154,7 +154,7 @@ def run():
         agent = CodeChainAgent(**agent_instance_args)
     elif cfg.agent.ITS_Strategy == "tot":
         logger.info("Initializing ToTAgent.")
-        agent = ToTAgent(**agent_instance_args)
+        agent = TOTAgent(**agent_instance_args)
     else:
         logger.info("Initializing Agent.")
         agent = Agent(**agent_instance_args)

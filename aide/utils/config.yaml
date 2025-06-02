@@ -58,14 +58,23 @@ agent:
     num_drafts: 5
   # ── ToT settings ───────────────────────────────────────────────────────────
   tot:
-    enabled: true
-    method_generate: "propose"
-    method_evaluate: "value"
-    method_select: "greedy"
-    n_generate_sample: 3       # Number of thoughts to generate from each state (k in paper, but their run.py calls it this)
-    n_evaluate_sample: 1       # Number of LLM calls for evaluation per thought (for robustness, 1 is fine to start)
-    n_select_sample: 1         # Beam width for BFS (b in paper)
-    max_steps: 1
+    planning: # Settings for ToT Phase 1 (Master Plan Generation)
+      enabled: true
+      method_generate: "propose"
+      method_evaluate: "value"
+      method_select: "greedy"
+      n_generate_sample: 3
+      n_evaluate_sample: 1
+      n_select_sample: 1
+      n_high_level_select_for_elaboration: 2
+      max_steps: 1
+      evaluator_model_name: "o3-mini" # Explicitly use o3-mini for evaluating plans
+                                      # If null or not present, ToTAgent will use agent.feedback.model
+
+    segment_coding: # Settings for ToT Phase 2 (Code Segment Generation) - we'll use later
+      enabled: false # Initially false
+      method_generate: "propose"
+      evaluator_model_name: "o3-mini"
 # ─── W&B experiment tracking ────────────────────────────────────────────────
 wandb:
   enabled: true

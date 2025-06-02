@@ -1,4 +1,4 @@
-# aide/agent.py
+# aide/backup.py
 import shutil
 import logging
 import random
@@ -192,40 +192,19 @@ class Agent:
         logger.error(f"{log_prefix}: All {retries} attempts for plan+code extraction failed.", extra={"verbose": True})
         return "", completion_text or "No LLM response received", "EXTRACTION_FAILED"
     
-    def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, func_spec: Optional[Dict[str, Any]] = None, retries: int = 3, max_tokens: Optional[int] = None) -> Any: # Add max_tokens
-        completion_text = None
-        log_prefix_query = f"TOTAGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}" # More specific log prefix
-        effective_max_tokens = max_tokens if max_tokens is not None else self.acfg.code.max_new_tokens
+    def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, retries: int = 3,) -> Any:
+        completion_text = None; log_prefix = f"PLANNER_AGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}"
         for attempt in range(retries):
-            logger.info(f"{log_prefix_query}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
+            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
             try:
-                completion_text = query(
-                    system_message=system_prompt, 
-                    user_message=user_prompt, 
-                    model=model, 
-                    temperature=temperature, 
-                    planner=planner_flag, 
-                    current_step=self.current_step, 
-                    convert_system_to_user=convert_system_to_user,
-                    max_tokens=effective_max_tokens,
-                    func_spec=func_spec
-                )
-                # Log the full LLM output ONCE at debug level (verbose log only)
-                logger.debug(f"{log_prefix_query}_LLM_OUTPUT_START\n{completion_text}\n{log_prefix_query}_LLM_OUTPUT_END", extra={"verbose": True})
-                # Log a concise message to the terminal
-                logger.info(f"{log_prefix_query}_ATTEMPT{attempt+1}: LLM response received.", extra={"verbose": True})
-                return completion_text
-            except ContextLengthExceededError as cle:
-                logger.error(f"{log_prefix_query}_ATTEMPT{attempt+1}: Context Length Exceeded: {cle}. Aborting.", exc_info=False, extra={"verbose": True})
-                return f"ERROR: Context Length Exceeded - {str(cle)}"
+                completion_text = query(system_message=system_prompt, user_message=user_prompt, model=model, temperature=temperature, planner=planner_flag, current_step=self.current_step, convert_system_to_user=convert_system_to_user, max_tokens=self.acfg.code.max_new_tokens)
+                logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True}); return completion_text
             except Exception as e:
-                logger.error(f"{log_prefix_query}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
-                if attempt == retries - 1: 
-                    logger.error(f"{log_prefix_query}: All {retries} retries failed.", extra={"verbose": True})
-                    return f"ERROR: LLM Query Failed after {retries} retries - {str(e)}"
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
+                if attempt == retries - 1: logger.error(f"{log_prefix}: All {retries} retries failed.", extra={"verbose": True}); return None
                 time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-        return "ERROR: LLM Query failed and exhausted retries without throwing specific exception."
-
+        return None
+    
     def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
         system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
         logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
@@ -242,21 +221,17 @@ class Agent:
         return task_summary, plan, ""
 
     def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_code_system_prompt(); log_prefix = f"CoderAgent_Code_QUERY_STEP: {self.current_step}"
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODER", system_prompt=system_prompt, user_prompt=user_prompt_dict,
-                                                       model=self.acfg.code.model, temperature=self.acfg.code.temp,
-                                                       planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
-        if completion_text is None:
-            return "", "", ""
+        system_prompt = get_planner_agent_code_system_prompt(); log_prefix = f"PLANNER_AGENT_CODE_QUERY_STEP{self.current_step}"
+        logger.debug(f"{log_prefix}: Sending PLANNER_CODE query to LLM.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_CODE", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.model, temperature=self.acfg.code.temp, planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        if completion_text is None: return "", "", "" 
         code = extract_code(completion_text)
-        if not code:
-            code = str(completion_text)
-            logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{code}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
-            logger.info(f"{log_prefix}: LLM response received, but code extraction failed.", extra={"verbose": True})
-            return "", code, ""
-        logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{code}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
-        logger.info(f"{log_prefix}: LLM response received and code extracted.", extra={"verbose": True})
-        return "", code, ""
+        if not code: code = str(completion_text) 
+        logger.debug(f"{log_prefix}\n\nCode query completed. Code: {code}", extra={"verbose": True})
+        return "", code, "" 
+
 
     def _draft(self, parent_node=None) -> Node:
         log_prefix_base = f"{self.__class__.__name__}_DRAFT_STEP:{self.current_step}" 
@@ -666,36 +641,53 @@ class TOTAgent(Agent):
     def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, func_spec: Optional[Dict[str, Any]] = None, retries: int = 3, max_tokens: Optional[int] = None) -> Any: # Add max_tokens
         completion_text = None
         log_prefix_query = f"TOTAGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}" # More specific log prefix
+        
+        # Use self.acfg.code.max_new_tokens if max_tokens is not provided to this function
         effective_max_tokens = max_tokens if max_tokens is not None else self.acfg.code.max_new_tokens
+
         for attempt in range(retries):
             logger.info(f"{log_prefix_query}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
             try:
-                completion_text = query(
+                # Call your main backend query function
+                completion_text = query( # This is the global query from aide.backend
                     system_message=system_prompt, 
                     user_message=user_prompt, 
                     model=model, 
                     temperature=temperature, 
-                    planner=planner_flag, 
+                    planner=planner_flag, # This flag might influence model choice in VLLM backend if dual setup
                     current_step=self.current_step, 
                     convert_system_to_user=convert_system_to_user,
                     max_tokens=effective_max_tokens,
                     func_spec=func_spec
                 )
-                # Log the full LLM output ONCE at debug level (verbose log only)
-                logger.debug(f"{log_prefix_query}_LLM_OUTPUT_START\n{completion_text}\n{log_prefix_query}_LLM_OUTPUT_END", extra={"verbose": True})
-                # Log a concise message to the terminal
-                logger.info(f"{log_prefix_query}_ATTEMPT{attempt+1}: LLM response received.", extra={"verbose": True})
-                return completion_text
+                logger.info(f"{log_prefix_query}_ATTEMPT{attempt+1}: Received response.", extra={"verbose": True})
+                # logger.debug(f"{log_prefix_query}_RawResponse:\n{str(completion_text)[:500]}...", extra={"verbose": True})
+                return completion_text # query from aide.backend directly returns the string or dict
             except ContextLengthExceededError as cle:
                 logger.error(f"{log_prefix_query}_ATTEMPT{attempt+1}: Context Length Exceeded: {cle}. Aborting.", exc_info=False, extra={"verbose": True})
-                return f"ERROR: Context Length Exceeded - {str(cle)}"
+                return f"ERROR: Context Length Exceeded - {str(cle)}" # Return an error string
             except Exception as e:
                 logger.error(f"{log_prefix_query}_ATTEMPT{attempt+1}: Error during LLM query: {e}", exc_info=True, extra={"verbose": True})
                 if attempt == retries - 1: 
                     logger.error(f"{log_prefix_query}: All {retries} retries failed.", extra={"verbose": True})
-                    return f"ERROR: LLM Query Failed after {retries} retries - {str(e)}"
-                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
-        return "ERROR: LLM Query failed and exhausted retries without throwing specific exception."
+                    return f"ERROR: LLM Query Failed after {retries} retries - {str(e)}" # Return an error string
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5)) # From base Agent config
+        return "ERROR: LLM Query failed and exhausted retries without throwing specific exception." # Should ideally not be reached
+
+    def _parse_textual_plan_evaluation(self, eval_response: str) -> float:
+        """
+        Parses the response from the LLM and returns a tuple of the plan and the code.
+        """
+        score_match = re.search(r"Score:\s*(\d+)", eval_response, re.IGNORECASE)
+        if score_match:
+            try:
+                return float(score_match.group(1))
+            except ValueError:
+                logger.warning(f"Could not parse score from evaluation: {eval_response}")
+                return 0.0 
+        logger.warning(f"Could not find score in evaluation: {eval_response}")
+        return 0.0
+
 
     def code_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
         system_prompt = get_planner_agent_code_system_prompt()
@@ -703,38 +695,47 @@ class TOTAgent(Agent):
         completion_text = self._query_llm_with_retries(query_type="PLANNER_CODER", system_prompt=system_prompt, user_prompt=user_prompt_dict,
                                                        model=self.acfg.code.model, temperature=self.acfg.code.temp,
                                                        planner_flag=False, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
-        if completion_text is None:
-            return "", "", ""
+        if completion_text is None: return "", "", ""
         code = extract_code(completion_text)
         if not code:
             code = str(completion_text)
-            logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{code}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
-            logger.info(f"{log_prefix}: LLM response received, but code extraction failed.", extra={"verbose": True})
             return "", code, ""
-        logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{code}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
-        logger.info(f"{log_prefix}: LLM response received and code extracted.", extra={"verbose": True})
-        return "", code, ""
+
+        code = extract_code(completion_text)
+
+        if code:
+            logger.info(f"{log_prefix}: Successfully extracted code.", extra={"verbose": True})
+            logger.debug(f"{log_prefix} \n EXTRACTED_CODE_START\n ----------- \n {code}\n ----------- \n EXTRACTED_CODE_END", extra={"verbose": True})
+        else:
+            logger.warning(f"{log_prefix}: Code extraction failed. Raw text: '{trim_long_string(str(completion_text))}'", extra={"verbose": True})
+            code = str(completion_text) 
+
+        return "", code, "" 
 
     def _code_segment_query(self, 
                             user_prompt_dict: Dict[str, Any], 
                             system_prompt_dict: Dict[str, Any], 
                             retries: int = 3
                             ) -> str: 
-        completion_text = self._query_llm_with_retries(
-            query_type="Segment-Generation",
-            system_prompt=system_prompt_dict, 
-            user_prompt=user_prompt_dict,
-            model=self.acfg.code.model, 
-            temperature=self.acfg.code.temp,
-            planner_flag=False,
-            convert_system_to_user=self.acfg.convert_system_to_user, 
-            retries=retries
-        )
-        if completion_text is None:
-            logger.error(f"LLM query returned None.")
-            return "#LLM_QUERY_RETURNED_NONE_FOR_SEGMENT"
-        logger.debug(f"Segment-Generation_LLM_OUTPUT_START\n{completion_text}\nSegment-Generation_LLM_OUTPUT_END", extra={"verbose": True})
-        return completion_text.strip() if completion_text else ""
+
+            completion_text = self._query_llm_with_retries(
+                query_type="Segment-Generation",
+                system_prompt=system_prompt_dict, 
+                user_prompt=user_prompt_dict,
+                model=self.acfg.code.model, 
+                temperature=self.acfg.code.temp,
+                planner_flag=False,
+                convert_system_to_user=self.acfg.convert_system_to_user, 
+                retries=retries
+            )
+
+            if completion_text is None:
+                logger.error(f"LLM query returned None.")
+                return "#LLM_QUERY_RETURNED_NONE_FOR_SEGMENT"
+  
+            code_snippet = completion_text
+            
+            return code_snippet.strip() if code_snippet else ""
 
     def _generate_code_segment(self,
                                segment_name: str,
@@ -743,13 +744,18 @@ class TOTAgent(Agent):
                                code_accumulator: str,
                                chain_reflection: bool=False,
                                ) -> str:
+        """Generates code for a single segment using the chained Coder."""
         log_prefix_segment = f"Code Chain step {self.current_step }"
         logger.info(f"{log_prefix_segment}: Generating code. Segment: {segment_name}", extra={"verbose": True})
+
+
         system_prompt_getter = CHAINED_CODER_SYSTEM_PROMPT_GETTERS.get(segment_name)
         user_prompt_constructor = CHAINED_CODER_USER_PROMPT_CONSTRUCTORS.get(segment_name)
+
         if not system_prompt_getter or not user_prompt_constructor:
             logger.error(f"{log_prefix_segment}: No prompt definition found for segment '{segment_name}'.")
             return f"# ERROR: No prompt definition for segment: {segment_name}\n"
+
         segment_system_prompt = system_prompt_getter()
         segment_user_prompt = user_prompt_constructor(
             task_summary=task_summary,
@@ -758,6 +764,7 @@ class TOTAgent(Agent):
             competition_name=self.competition_name,
             data_preview_content=self.data_preview
         )
+        
         code_snippet = self._code_segment_query( 
             user_prompt_dict=segment_user_prompt,
             system_prompt_dict=segment_system_prompt,
@@ -766,10 +773,13 @@ class TOTAgent(Agent):
         if not code_snippet or code_snippet.strip() == "#CODE_FAILED" or not code_snippet.strip():
             logger.error(f"{log_prefix_segment}: Code generation failed or produced empty code.")
             return f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}\n"
-        logger.debug(f"{log_prefix_segment}_SEGMENT_LLM_OUTPUT_START\n{code_snippet.strip()}\n{log_prefix_segment}_SEGMENT_LLM_OUTPUT_END", extra={"verbose": True})
-        logger.info(f"{log_prefix_segment}: Code segment generated for {segment_name}.", extra={"verbose": True})
+        
+        logger.info(f"{log_prefix_segment}: Successfully generated code snippet for {segment_name.replace(' ', '_')}.", extra={"verbose": True})
+        logger.debug(f"{segment_name.replace(' ', '_')} Snippet: \n{code_snippet.strip()}\n ")
+
         if chain_reflection:
             logger.info(f"{log_prefix_segment}: Initial snippet generated. Now reflecting.")
+
             reflection_summary, code_snippet = self._reflect_on_segment(
                 task_summary=task_summary,
                 master_plan_text=master_plan_text,
@@ -777,24 +787,35 @@ class TOTAgent(Agent):
                 code_before_segment=code_accumulator,
                 initial_segment_snippet=code_snippet
             )
+            
+
+
+            logger.info(f"{log_prefix_segment}_Revised Snippet: {trim_long_string(code_snippet)}")
         return code_snippet.strip() 
+    
 
     def _parse_multiple_master_plans(self, llm_response_text: str, num_expected: int) -> List[str]:
         log_prefix = f"ToTAgent_ParseMasterPlans_Step_{self.current_step}"
         if not llm_response_text or not llm_response_text.strip():
             logger.warning(f"{log_prefix}: Received empty or whitespace-only response from LLM for plan generation.")
             return []
+
         separator = "<!--- PLAN_SEPARATOR --->"
         candidate_plan_strings = [plan.strip() for plan in llm_response_text.split(separator) if plan.strip()]
+
         if not candidate_plan_strings:
             logger.warning(f"{log_prefix}: No plans found using separator '{separator}'. Treating entire response as a single plan.")
-            logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{llm_response_text.strip()}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
             return [llm_response_text.strip()]
+            
+        # Optional: Log if the number of parsed plans doesn't match num_expected exactly, but still proceed.
         if len(candidate_plan_strings) != num_expected:
             logger.warning(f"{log_prefix}: Parsed {len(candidate_plan_strings)} plans, but expected {num_expected}. Proceeding with parsed plans.")
             for i, p_text in enumerate(candidate_plan_strings):
-                logger.debug(f"{log_prefix}_ParsedPlanCandidate_{i+1}_LLM_OUTPUT_START\n{p_text}\n{log_prefix}_ParsedPlanCandidate_{i+1}_LLM_OUTPUT_END", extra={"verbose": True})
-        return candidate_plan_strings
+                logger.debug(f"{log_prefix}_ParsedPlanCandidate_{i+1}_CONTENT_START\n{p_text}\n{log_prefix}_ParsedPlanCandidate_{i+1}_CONTENT_END", extra={"verbose": True})
+
+
+        return candidate_plan_strings # Return all parsed plans, selection logic will handle n_select_sample
+        
 
     def _evaluate_single_plan_thought(self, aide_input_context: Dict, plan_text_candidate: str, log_prefix_eval: str, plan_candidate_idx: int) -> Dict:
         user_prompt_eval = get_tot_evaluate_master_plan_func_call_user_prompt(
@@ -802,7 +823,9 @@ class TOTAgent(Agent):
             plan_text_candidate
         )
         evaluator_model_name = self.cfg.agent.tot.planning.get("evaluator_model_name") or self.cfg.agent.feedback.model
-        logger.info(f"{log_prefix_eval}: Evaluating Plan Candidate {plan_candidate_idx} (truncated): '{plan_text_candidate[:70].replace(chr(10), ' ')}...' with model {evaluator_model_name}")
+        
+        logger.info(f"{log_prefix_eval}: Evaluating Plan Candidate {plan_candidate_idx} ('{plan_text_candidate[:70].replace(chr(10), ' ')}...') with model {evaluator_model_name}")
+
         evaluation_dict_response = self._query_llm_with_retries(
             query_type=f"TOT_PLAN_EVAL_FUNC_CALL_STEP{self.current_step}_PLAN{plan_candidate_idx}",
             system_prompt=get_tot_evaluator_system_prompt(),
@@ -813,7 +836,7 @@ class TOTAgent(Agent):
             planner_flag=False,
             convert_system_to_user=self.acfg.convert_system_to_user,
         )
-        logger.debug(f"{log_prefix_eval}_EVAL_LLM_OUTPUT_START\n{evaluation_dict_response}\n{log_prefix_eval}_EVAL_LLM_OUTPUT_END", extra={"verbose": True})
+
         score = 0.0
         is_single_plan = False
         if isinstance(evaluation_dict_response, dict):
@@ -821,8 +844,9 @@ class TOTAgent(Agent):
             is_single_plan = evaluation_dict_response.get("is_single_coherent_plan", False)
             if not is_single_plan:
                 logger.warning(f"{log_prefix_eval}: Evaluator determined plan candidate {plan_candidate_idx} is not a single coherent plan. Score set to 0 or penalized.")
-                score = 0.0
-            logger.info(f"{log_prefix_eval}: Plan Candidate {plan_candidate_idx} received score: {score}.")
+                score = 0.0 # Penalize heavily if it's not a single plan as per evaluator
+            
+            logger.info(f"{log_prefix_eval}: Plan Candidate {plan_candidate_idx} received score: {score}. Details: {evaluation_dict_response}")
             return {
                 "plan_text": plan_text_candidate,
                 "score": float(score) if score is not None else 0.0,
@@ -1182,33 +1206,43 @@ class CodeChainAgent(Agent):
         code = extract_code(completion_text)
         if not code:
             code = str(completion_text)
-            logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{code}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
-            logger.info(f"{log_prefix}: LLM response received, but code extraction failed.", extra={"verbose": True})
             return "", code, ""
-        logger.debug(f"{log_prefix}_LLM_OUTPUT_START\n{code}\n{log_prefix}_LLM_OUTPUT_END", extra={"verbose": True})
-        logger.info(f"{log_prefix}: LLM response received and code extracted.", extra={"verbose": True})
-        return "", code, ""
+
+        code = extract_code(completion_text)
+
+        if code:
+            logger.info(f"{log_prefix}: Successfully extracted code.", extra={"verbose": True})
+            logger.debug(f"{log_prefix} \n EXTRACTED_CODE_START\n ----------- \n {code}\n ----------- \n EXTRACTED_CODE_END", extra={"verbose": True})
+        else:
+            logger.warning(f"{log_prefix}: Code extraction failed. Raw text: '{trim_long_string(str(completion_text))}'", extra={"verbose": True})
+            code = str(completion_text) 
+
+        return "", code, "" 
 
     def _code_segment_query(self, 
                             user_prompt_dict: Dict[str, Any], 
                             system_prompt_dict: Dict[str, Any], 
                             retries: int = 3
                             ) -> str: 
-        completion_text = self._query_llm_with_retries(
-            query_type="Segment-Generation",
-            system_prompt=system_prompt_dict, 
-            user_prompt=user_prompt_dict,
-            model=self.acfg.code.model, 
-            temperature=self.acfg.code.temp,
-            planner_flag=False,
-            convert_system_to_user=self.acfg.convert_system_to_user, 
-            retries=retries
-        )
-        if completion_text is None:
-            logger.error(f"LLM query returned None.")
-            return "#LLM_QUERY_RETURNED_NONE_FOR_SEGMENT"
-        logger.debug(f"Segment-Generation_LLM_OUTPUT_START\n{completion_text}\nSegment-Generation_LLM_OUTPUT_END", extra={"verbose": True})
-        return completion_text.strip() if completion_text else ""
+
+            completion_text = self._query_llm_with_retries(
+                query_type="Segment-Generation",
+                system_prompt=system_prompt_dict, 
+                user_prompt=user_prompt_dict,
+                model=self.acfg.code.model, 
+                temperature=self.acfg.code.temp,
+                planner_flag=False,
+                convert_system_to_user=self.acfg.convert_system_to_user, 
+                retries=retries
+            )
+
+            if completion_text is None:
+                logger.error(f"LLM query returned None.")
+                return "#LLM_QUERY_RETURNED_NONE_FOR_SEGMENT"
+  
+            code_snippet = completion_text
+            
+            return code_snippet.strip() if code_snippet else ""
 
     def _generate_code_segment(self,
                                segment_name: str,
@@ -1217,13 +1251,18 @@ class CodeChainAgent(Agent):
                                code_accumulator: str,
                                chain_reflection: bool=False,
                                ) -> str:
+        """Generates code for a single segment using the chained Coder."""
         log_prefix_segment = f"Code Chain step {self.current_step }"
         logger.info(f"{log_prefix_segment}: Generating code. Segment: {segment_name}", extra={"verbose": True})
+
+
         system_prompt_getter = CHAINED_CODER_SYSTEM_PROMPT_GETTERS.get(segment_name)
         user_prompt_constructor = CHAINED_CODER_USER_PROMPT_CONSTRUCTORS.get(segment_name)
+
         if not system_prompt_getter or not user_prompt_constructor:
             logger.error(f"{log_prefix_segment}: No prompt definition found for segment '{segment_name}'.")
             return f"# ERROR: No prompt definition for segment: {segment_name}\n"
+
         segment_system_prompt = system_prompt_getter()
         segment_user_prompt = user_prompt_constructor(
             task_summary=task_summary,
@@ -1232,6 +1271,7 @@ class CodeChainAgent(Agent):
             competition_name=self.competition_name,
             data_preview_content=self.data_preview
         )
+        
         code_snippet = self._code_segment_query( 
             user_prompt_dict=segment_user_prompt,
             system_prompt_dict=segment_system_prompt,
@@ -1240,10 +1280,13 @@ class CodeChainAgent(Agent):
         if not code_snippet or code_snippet.strip() == "#CODE_FAILED" or not code_snippet.strip():
             logger.error(f"{log_prefix_segment}: Code generation failed or produced empty code.")
             return f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}\n"
-        logger.debug(f"{log_prefix_segment}_SEGMENT_LLM_OUTPUT_START\n{code_snippet.strip()}\n{log_prefix_segment}_SEGMENT_LLM_OUTPUT_END", extra={"verbose": True})
-        logger.info(f"{log_prefix_segment}: Code segment generated for {segment_name}.", extra={"verbose": True})
+        
+        logger.info(f"{log_prefix_segment}: Successfully generated code snippet for {segment_name.replace(' ', '_')}.", extra={"verbose": True})
+        logger.debug(f"{segment_name.replace(' ', '_')} Snippet: \n{code_snippet.strip()}\n ")
+
         if chain_reflection:
             logger.info(f"{log_prefix_segment}: Initial snippet generated. Now reflecting.")
+
             reflection_summary, code_snippet = self._reflect_on_segment(
                 task_summary=task_summary,
                 master_plan_text=master_plan_text,
@@ -1251,8 +1294,12 @@ class CodeChainAgent(Agent):
                 code_before_segment=code_accumulator,
                 initial_segment_snippet=code_snippet
             )
-        return code_snippet.strip() 
+            
 
+
+            logger.info(f"{log_prefix_segment}_Revised Snippet: {trim_long_string(code_snippet)}")
+        return code_snippet.strip() 
+    
     def _draft_generate_code_chained(self, task_summary: str, master_plan_text: str) -> str:
         log_prefix_chain = f"CodeChainAgent_Chained_Draft_Step: {self.current_step}"
         logger.info(f"Starting chained code generation for draft.")

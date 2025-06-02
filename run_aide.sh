@@ -30,7 +30,7 @@ aide \
     agent.steps=3 \
     agent.time_limit=36000 \
     agent.obfuscate=False \
-    agent.ITS_Strategy="codechain_v3" \
+    agent.ITS_Strategy="tot" \
     agent.code.model="${O4_MODEL}" \
     agent.code.planner_model="${O4_MODEL}" \
     agent.code.temp=0.8 \

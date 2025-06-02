@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from .backend import compile_prompt_to_md
 
-from .agent import Agent, PlannerAgent,CodeChainAgent
+from .agent import Agent, PlannerAgent,CodeChainAgent,TOTAgent
 from .interpreter import Interpreter
 from .journal import Journal
 from omegaconf import OmegaConf
