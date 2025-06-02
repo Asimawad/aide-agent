@@ -57,35 +57,6 @@ from .utils.prompt_base import (
 )
 
 
-# from .utils.prompt_utils import (
-#     get_agent_draft_user_prompt,
-#     get_agent_improve_user_prompt,
-#     review_func_spec,
-#     get_agent_debug_user_prompt,
-#     CHAINED_CODER_USER_PROMPT_CONSTRUCTORS, # New
-#     CHAINED_CODER_SYSTEM_PROMPT_GETTERS,
-#     get_segment_reflection_system_prompt,
-#     get_segment_reflection_user_prompt,
-#     get_agent_system_prompt,
-#     get_agent_draft_system_prompt,
-#     get_agent_improve_system_prompt,
-#     get_agent_debug_system_prompt,
-#     get_planner_agent_draft_plan_user_prompt,
-#     get_planner_agent_draft_code_user_prompt,
-#     get_planner_agent_improve_plan_user_prompt,
-#     get_planner_agent_improve_code_user_prompt,
-#     get_planner_agent_debug_plan_user_prompt,
-#     get_planner_agent_debug_code_user_prompt,
-#     get_planner_agent_plan_system_prompt,
-#     get_planner_agent_code_system_prompt,
-#     wrap_code as prompt_utils_wrap_code, # Alias if local wrap_code is different
-#     AGENT_debug_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-#     AGENT_improve_SYSTEM_PROMPT_DICT, # If you are directly using the dict
-#     get_chunked_reflection_system_prompt,
-#     get_chunked_reflection_user_prompt
-# )
-
-
 try:
     import wandb
 except ImportError:
@@ -639,7 +610,6 @@ class PlannerAgent(Agent):
         elif "No specific errors found requiring changes." in reflection_plan: logger.info(f"{log_prefix}: Self-reflection found no errors requiring changes.", extra={"verbose": True})
         else: logger.warning(f"{log_prefix}: Self-reflection finished, but revised code is same as original or empty. Plan: {trim_long_string(reflection_plan)}", extra={"verbose": True})
         return reflection_plan, revised_code
-
 #############################################################################
 # CodeChainAgent Implementation
 #############################################################################
@@ -1127,9 +1097,10 @@ class CodeChainAgent(Agent): # Inherit from Agent
         new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
         logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
-    
 
-
+#############################################################################
+# SelfConsistencyAgent Implementation
+#############################################################################
 class SelfConsistencyAgent(Agent):
     def __init__(
         self,
@@ -1805,3 +1776,7 @@ class SelfConsistencyAgent(Agent):
                     f"Buggy: {final_journal_node.is_buggy}, Metric: {final_journal_node.metric.value if final_journal_node.metric else 'N/A'}",
                     extra={"verbose":True})
         return final_journal_node
+
+#############################################################################
+# Tot Implementation
+#############################################################################
