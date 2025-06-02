@@ -17,7 +17,7 @@ console = Console()
 from .utils import copytree 
 from aide.utils.metrics_calculator import generate_all_metrics
 from .utils.wandb_logger import WandbLogger 
-from .agent import Agent, PlannerAgent, CodeChainAgent
+from .agent import Agent, PlannerAgent, CodeChainAgent, SelfConsistencyAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node 
 from omegaconf import OmegaConf
@@ -84,7 +84,7 @@ def run():
     cfg = load_cfg()
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Logger Setup (Remains the same) ---
+    # --- Logger Setup ---
     logger = logging.getLogger("aide") 
     logger.setLevel(logging.DEBUG) 
     logger.handlers.clear() 
@@ -152,7 +152,12 @@ def run():
     elif cfg.agent.ITS_Strategy == "codechain" or cfg.agent.ITS_Strategy == "codechain_v2" or cfg.agent.ITS_Strategy == "codechain_v3":
         logger.info("Initializing CodeChainAgent.")
         agent = CodeChainAgent(**agent_instance_args)
-
+    # elif cfg.agent.ITS_Strategy == "tot":
+    #     logger.info("Initializing TotAgent.")
+    #     agent = TotAgent(**agent_instance_args)
+    elif cfg.agent.ITS_Strategy == "self-consistency":
+        logger.info("Initializing SelfConsistencyAgent.")
+        agent = SelfConsistencyAgent(**agent_instance_args)
     else:
         logger.info("Initializing Agent.")
         agent = Agent(**agent_instance_args)
@@ -195,7 +200,7 @@ def run():
 
         logger.info("All agent steps completed.")
         logger.info("Final solution tree structure:\n" + journal_to_string_tree(journal))
-        save_run(cfg, journal) # Final local save
+        save_run(cfg, journal) 
 
     except KeyboardInterrupt:
         logger.warning("Run interrupted by user (KeyboardInterrupt).")
