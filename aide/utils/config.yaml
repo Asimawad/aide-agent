@@ -40,7 +40,7 @@ agent:
   code:
     model: o3-mini
     planner_model: o3-mini
-    temp: 0.8
+    temp: 0.6
     max_new_tokens: 3200
     top_p: 0.9
     top_k: 50
@@ -49,7 +49,7 @@ agent:
   # ── LLM settings for traceback / feedback ────────────────────────────────
   feedback:
     model: o4-mini-2025-04-16
-    temp: 0.5
+    temp: 0.9
 
   # ── Tree-search / debugging heuristics ───────────────────────────────────
   search:

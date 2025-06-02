@@ -1576,7 +1576,7 @@ def get_tot_evaluator_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(TOT_EVALUATOR_SYSTEM_PROMPT_DICT)
 
 
-# NEW: User prompt for asking the LLM to elaborate a high-level plan into detailed ones
+
 def get_tot_elaborate_high_level_plan_user_prompt(
     aide_context: Dict[str, Any],
     high_level_plan_text: str,
@@ -1611,21 +1611,14 @@ def get_tot_elaborate_high_level_plan_user_prompt(
             "Do NOT include the 'Master Plan X:' prefix unless it's part of the plan content itself. The separator is key."
         )
     }
-    return prompt_user_message
+    return prompt_user_message  
 
-
-
-
-# In aide/utils/prompt_utils.py
-
-# ... (Keep all existing prompts, including those for ToT Planning Phase) ...
-# ... (Keep existing CHAINED_CODER_SYSTEM_PROMPT_SEGMENT_... and their getters if needed for fallback)
-# ... (Keep existing tot_evaluate_master_plan_func_spec)
-
-
-# --- Tree of Thoughts - Code Segment Generation & Evaluation Prompts ---
 
 # 1. System Prompt for LLM generating MULTIPLE code snippet thoughts for a SINGLE segment
+# -----------------------------------------------------------------------------
+# ToT prompts 
+# -----------------------------------------------------------------------------
+
 TOT_SEGMENT_CODER_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "SYSTEM": (
         "You are an expert Python Coder specializing in generating multiple, diverse, and correct implementations for a *specific segment* of a larger machine learning solution. "
@@ -1712,60 +1705,150 @@ def get_tot_generate_segment_code_snippets_user_prompt(
     }
     return prompt_user_message
 
+# tot_evaluate_code_segment_func_spec = FunctionSpec(
+#     name="submit_tot_code_segment_evaluation",
+#     json_schema={
+#         "type": "object",
+#         "properties": {
+#             "snippet_score": {
+#                 "type": "number",
+#                 "description": "Score (1-10, higher is better) for this code snippet's correctness, and adherence to the plan for the current segment and how good the overalll code genrated so far is, is it bug free?",
+#             },
+#             "justification": {
+#                 "type": "string",
+#                 "description": "Brief (1-3 sentences) reasoning for the score. Highlight if it meets segment objectives, potential issues, or elegance.",
+#             },
+#             "likely_correct_and_integrates": {
+#                 "type": "boolean",
+#                 "description": "True if the snippet appears syntactically correct, logically sound for the segment, and likely to integrate with prior code without obvious errors (e.g., using undefined variables not from prior code).",
+#             },
+#             "adheres_to_segment_plan": {
+#                 "type": "boolean",
+#                 "description": "True if the snippet directly and fully addresses the objectives of the current segment as implied by the Master Plan context.",
+#             },
+#             "alternative_approach_comment": {
+#                 "type": "string",
+#                 "description": "Optional: If this snippet represents a significantly different but valid approach compared to a 'standard' way, briefly note it. E.g., 'Uses list comprehension instead of loop'."
+#             }
+#         },
+#         "required": ["snippet_score", "justification", "likely_correct_and_integrates", "adheres_to_segment_plan"],
+#     },
+#     description="Submit a critical evaluation of a proposed Python code snippet for a specific ML pipeline segment.",
+# )
+
+
 tot_evaluate_code_segment_func_spec = FunctionSpec(
-    name="submit_tot_code_segment_evaluation",
+    name="submit_tot_code_segment_evaluation", # Versioning for clarity
     json_schema={
         "type": "object",
         "properties": {
-            "snippet_score": {
+            "overall_quality_score": {
                 "type": "number",
-                "description": "Score (1-10, higher is better) for this code snippet's correctness, and adherence to the plan for the current segment and how good the overalll code genrated so far is, is it bug free?",
+                "description": "Overall quality score (1-10, higher is better) for this snippet. Consider all factors below. A score of 1-3 means critical flaws. 4-6 means usable but with issues. 7-8 is good. 9-10 is excellent.",
             },
-            "justification": {
+            "correctness_and_robustness_score": {
+                "type": "number",
+                "description": "Score (1-10) for syntactic correctness, logical soundness for the segment's objective, and handling of potential edge cases (within segment scope). Low score if buggy or fragile.",
+            },
+            "plan_adherence_score": {
+                "type": "number",
+                "description": "Score (1-10) for how well the snippet implements the *specific objectives of the current segment* as guided by the Master Plan and segment objective. Low score if it deviates, is incomplete, or over-implements.",
+            },
+            "integration_score": {
+                "type": "number",
+                "description": "Score (1-10) for how well the snippet is likely to integrate with 'Python Code Generated So Far' and set up for subsequent segments. Considers variable usage, new definitions, and import management within the snippet.",
+            },
+            "clarity_and_best_practices_score": {
+                "type": "number",
+                "description": "Score (1-10) for code clarity, readability, and appropriate use of '# Thought:' comments explaining its logic within this segment."
+            },
+            "identified_issues_or_risks": {
                 "type": "string",
-                "description": "Brief (1-3 sentences) reasoning for the score. Highlight if it meets segment objectives, potential issues, or elegance.",
+                "description": "Briefly describe any specific bugs, logical flaws, integration risks, deviations from the plan, or areas of major concern. State 'None' if no significant issues.",
             },
-            "likely_correct_and_integrates": {
-                "type": "boolean",
-                "description": "True if the snippet appears syntactically correct, logically sound for the segment, and likely to integrate with prior code without obvious errors (e.g., using undefined variables not from prior code).",
-            },
-            "adheres_to_segment_plan": {
-                "type": "boolean",
-                "description": "True if the snippet directly and fully addresses the objectives of the current segment as implied by the Master Plan context.",
-            },
-            "alternative_approach_comment": {
+            "positive_remarks": {
                 "type": "string",
-                "description": "Optional: If this snippet represents a significantly different but valid approach compared to a 'standard' way, briefly note it. E.g., 'Uses list comprehension instead of loop'."
+                "description": "Optional: Briefly mention any particularly elegant, efficient, or clever aspects of the snippet. State 'None' if not applicable."
             }
+            # We can derive 'likely_correct_and_integrates' and 'adheres_to_segment_plan'
+            # from the scores and identified_issues_or_risks in the Python code if needed,
+            # or keep them as explicit booleans if the LLM handles them well.
+            # For now, let's rely on the scores and textual issue description.
         },
-        "required": ["snippet_score", "justification", "likely_correct_and_integrates", "adheres_to_segment_plan"],
+        "required": [
+            "overall_quality_score",
+            "correctness_and_robustness_score",
+            "plan_adherence_score",
+            "integration_score",
+            "clarity_and_best_practices_score",
+            "identified_issues_or_risks"
+            ],
     },
-    description="Submit a critical evaluation of a proposed Python code snippet for a specific ML pipeline segment.",
+    description="Submit a detailed and critical evaluation of a Python code snippet for a specific ML pipeline segment.",
 )
-
 # 4. System Prompt for LLM evaluating a SINGLE code snippet thought (e.g., o3-mini)
+# TOT_SEGMENT_EVALUATOR_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+#     "SYSTEM": (
+#         "You are a Senior Software Engineer and Kaggle Grandmaster specializing in code review for machine learning pipelines. "
+#         "Your task is to critically evaluate a *single provided Python code snippet* intended for a specific segment of a larger solution. "
+#         "Be meticulous in your assessment."
+#     ),
+#     "user_instructions": {
+#         "Context You Will Receive": [
+#             "'Overall Task Summary' and 'Full Master Plan': For understanding the big picture.",
+#             "'Python Code Generated So Far': To check for integration and available variables/functions.",
+#             "'Current Segment Name & Objective': To understand what this snippet is supposed to achieve.",
+#             "'Code Snippet to Evaluate': The specific snippet under review."
+#         ],
+#         "Your Evaluation Task": (
+#             "Assess the 'Code Snippet to Evaluate' based on the following criteria for its specific segment:"
+#             "\n1. **Correctness & Robustness:** Does it look syntactically correct? Does it seem logically sound for its purpose? Are there obvious bugs or edge cases missed (within the scope of a segment implementation)?"
+#             "\n2. **Plan Adherence:** Does it implement the objectives for this segment as guided by the 'Full Master Plan' and 'Current Segment Objective'?"
+#             "\n3. **Integration:** Does it correctly use variables/functions defined in 'Python Code Generated So Far'? Does it avoid redefining things unnecessarily? If it introduces new variables, are they appropriately scoped for this segment or for use by later segments as per the plan?"
+#             "\n4. **Clarity & Best Practices (for a segment):** Is the snippet reasonably clean? Are '# Thought:' comments adequate for explaining its logic within the segment?"
+#             "\n5. **Focus:** Does it stick to implementing only the current segment's tasks?"
+#         ),
+#         "Action": "Call the 'submit_tot_code_segment_evaluation' function with your structured assessment."
+#     }
+# }
+
+
 TOT_SEGMENT_EVALUATOR_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "SYSTEM": (
-        "You are a Senior Software Engineer and Kaggle Grandmaster specializing in code review for machine learning pipelines. "
-        "Your task is to critically evaluate a *single provided Python code snippet* intended for a specific segment of a larger solution. "
-        "Be meticulous in your assessment."
+        "You are an extremely discerning Senior Software Architect and Kaggle Competition Winner, known for your meticulous code reviews. "
+        "Your task is to provide a *highly critical and detailed evaluation* of a *single Python code snippet* intended for a specific segment of a larger ML solution. "
+        "Do not be lenient. Your goal is to identify any potential weakness or suboptimality."
     ),
     "user_instructions": {
         "Context You Will Receive": [
-            "'Overall Task Summary' and 'Full Master Plan': For understanding the big picture.",
-            "'Python Code Generated So Far': To check for integration and available variables/functions.",
-            "'Current Segment Name & Objective': To understand what this snippet is supposed to achieve.",
-            "'Code Snippet to Evaluate': The specific snippet under review."
+            "'Overall Task Summary' and 'Full Master Plan': For understanding the strategic goals.",
+            "'Python Code Generated So Far': To assess integration and context.",
+            "'Current Segment Name & Objective': The specific goal this snippet aims to achieve.",
+            "'Code Snippet to Evaluate': The snippet under review."
         ],
-        "Your Evaluation Task": (
-            "Assess the 'Code Snippet to Evaluate' based on the following criteria for its specific segment:"
-            "\n1. **Correctness & Robustness:** Does it look syntactically correct? Does it seem logically sound for its purpose? Are there obvious bugs or edge cases missed (within the scope of a segment implementation)?"
-            "\n2. **Plan Adherence:** Does it implement the objectives for this segment as guided by the 'Full Master Plan' and 'Current Segment Objective'?"
-            "\n3. **Integration:** Does it correctly use variables/functions defined in 'Python Code Generated So Far'? Does it avoid redefining things unnecessarily? If it introduces new variables, are they appropriately scoped for this segment or for use by later segments as per the plan?"
-            "\n4. **Clarity & Best Practices (for a segment):** Is the snippet reasonably clean? Are '# Thought:' comments adequate for explaining its logic within the segment?"
-            "\n5. **Focus:** Does it stick to implementing only the current segment's tasks?"
+        "Your Rigorous Evaluation Task": (
+            "Assess the 'Code Snippet to Evaluate' against the following criteria. Be very specific in your 'identified_issues_or_risks'.\n"
+            "1.  **Correctness & Robustness (Score 1-10):**\n"
+            "    - Is it 100% syntactically correct Python for this segment?\n"
+            "    - Is its logic sound and directly achieving the segment's objective? Does it handle obvious segment-specific edge cases?\n"
+            "    - *Low Score Example:* Contains syntax errors, off-by-one errors, incorrect library usage for the task, fails to handle empty inputs if applicable to the segment.\n"
+            "2.  **Plan Adherence (Score 1-10):**\n"
+            "    - Does it precisely implement ONLY the stated 'Current Segment Objective' and align with the relevant part of the 'Full Master Plan'?\n"
+            "    - *Low Score Example:* Implements features from a future segment, misses a key part of the current segment's goal, or introduces unrequested complexity.\n"
+            "3.  **Integration (Score 1-10):**\n"
+            "    - Does it correctly use variables/functions from 'Python Code Generated So Far'?\n"
+            "    - Does it correctly define any new variables/functions needed by *this segment's logic* or for immediate use by the *very next* segment (if obvious from the plan)?\n"
+            "    - Are imports within the snippet minimal and necessary only if not globally available from prior code?\n"
+            "    - *Low Score Example:* Uses undefined variables, redefines global constants, imports libraries already available, or makes subsequent integration difficult.\n"
+            "4.  **Clarity & Best Practices (Score 1-10):**\n"
+            "    - Is the snippet's code clear, concise, and pythonic for its task?\n"
+            "    - Are '# Thought:' comments present, accurate, and genuinely reflective of the code's logic for *this segment*?\n"
+            "    - *Low Score Example:* Obfuscated code, magic numbers without explanation, missing or unhelpful '# Thought:' comments.\n"
+            "5.  **Overall Quality Score (1-10):** Your holistic judgment considering all above, weighted towards correctness and plan adherence.\n"
+            "6.  **Identified Issues or Risks:** *Be explicit*. If you score low on any category, this section MUST detail why. E.g., 'Risk of TypeError if `input_data` is None, not handled.' or 'Deviates from Master Plan step 3.2 by using RandomForest instead of specified LogisticRegression.'\n"
+            "7.  **Positive Remarks (Optional):** Only if something is truly noteworthy."
         ),
-        "Action": "Call the 'submit_tot_code_segment_evaluation' function with your structured assessment."
+        "Action": "Call the 'submit_tot_code_segment_evaluation' function with your structured, critical assessment."
     }
 }
 
@@ -1773,7 +1856,6 @@ def get_tot_segment_evaluator_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(TOT_SEGMENT_EVALUATOR_SYSTEM_PROMPT_DICT)
 
 
-# 5. User Prompt for LLM evaluating a SINGLE code snippet thought (using function call)
 def get_tot_evaluate_segment_code_snippet_func_call_user_prompt(
     aide_context: Dict[str, Any],
     master_plan_text: str,
@@ -1791,7 +1873,7 @@ def get_tot_evaluate_segment_code_snippet_func_call_user_prompt(
     introduction = (
         f"Please critically evaluate the following Python code snippet proposed for the segment: '{current_segment_name}' "
         f"of a solution for the '{aide_context.get('competition_name', 'N/A')}' competition. "
-        "Assess its quality, correctness, and suitability for this specific segment."
+        "Assess its quality, correctness, and suitability for this specific segment according to the detailed criteria."
     )
 
     prompt_user_message: Dict[str, Any] = {
@@ -1805,7 +1887,8 @@ def get_tot_evaluate_segment_code_snippet_func_call_user_prompt(
         "Your Task": (
             "Carefully review the 'Code Snippet to Evaluate for THIS Segment' in the context of all provided information. "
             "Based on the detailed system instructions and evaluation criteria, "
-            "call the 'submit_tot_code_segment_evaluation' function with your assessment."
+            "call the 'submit_tot_code_segment_evaluation' function with your assessment. Be critical and specific in your feedback."
         )
     }
     return prompt_user_message
+    

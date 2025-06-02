@@ -669,6 +669,11 @@ class TOTAgent(Agent):
         completion_text = None
         log_prefix_query = f"TOTAGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}" # More specific log prefix
         effective_max_tokens = max_tokens if max_tokens is not None else self.acfg.code.max_new_tokens
+        # print the size of the system_prompt, user_prompt, and effective_max_tokens
+        print(f"System prompt size: {len(system_prompt)}")
+        print(f"User prompt size: {len(user_prompt)}")
+        print(f"Effective max tokens: {effective_max_tokens}")
+        print(f"--------------------------------------")
         for attempt in range(retries):
             logger.info(f"{log_prefix_query}_ATTEMPT{attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
             try:
@@ -864,9 +869,10 @@ class TOTAgent(Agent):
             logger.error(f"{log_prefix_eval}: Evaluation for Plan Candidate {plan_candidate_idx} did not return a dictionary. Response: {evaluation_dict_response}")
             return {"plan_text": plan_text_candidate, "score": 0.0, "evaluation_details": {"error": "Invalid evaluation response format"}}
 
+    
     def _evaluate_single_code_snippet_thought(
         self, 
-        aide_context_seg: Dict[str, Any], 
+        aide_context_seg: Dict[str, Any],
         master_plan_text: str,
         current_segment_name: str,
         code_generated_so_far: str,
@@ -903,18 +909,20 @@ class TOTAgent(Agent):
         )
 
         if isinstance(evaluation_dict_response, dict):
-            logger.info(f"{log_eval_prefix_full}: Snippet for segment '{current_segment_name}' received evaluation: {evaluation_dict_response}")
-            return evaluation_dict_response 
+                logger.info(f"{log_eval_prefix_full}: Snippet for segment '{current_segment_name}' received detailed evaluation: Score {evaluation_dict_response.get('overall_quality_score', 'N/A')}, Issues: {evaluation_dict_response.get('identified_issues_or_risks', 'N/A')}")
+                logger.debug(f"{log_eval_prefix_full}_FullEvalDict: {json.dumps(evaluation_dict_response, indent=2)}", extra={"verbose": True})
+                return evaluation_dict_response
         else:
             logger.error(f"{log_eval_prefix_full}: Evaluation for snippet (segment '{current_segment_name}') did not return a dictionary. Response: {evaluation_dict_response}")
             return { 
-                "snippet_score": 0.0, 
-                "justification": "Evaluation LLM did not return a valid structured response.",
-                "likely_correct_and_integrates": False,
-                "adheres_to_segment_plan": False,
+                "overall_quality_score": 0.0, "correctness_and_robustness_score": 0.0, 
+                "plan_adherence_score": 0.0, "integration_score": 0.0, 
+                "clarity_and_best_practices_score": 0.0,
+                "identified_issues_or_risks": "Evaluation LLM did not return a valid structured response.",
+                "positive_remarks": "None",
                 "error": "Invalid evaluation response format"
             }
-    
+
     def _generate_master_plan_with_tot(self, aide_input_context: Dict) -> str:
         cfg_planning_tot = self.cfg.agent.tot.planning
         log_prefix_base = f"ToTAgent_MasterPlanToT_Step_{self.current_step}"
@@ -1041,6 +1049,10 @@ class TOTAgent(Agent):
         if self.data_preview is None: 
             self.update_data_preview() 
 
+
+        # investigate how many tokens are in the context
+        print(f"data_preview size: {len(self.data_preview)}")
+        print(f"--------------------------------------")
         context = {
             "task_desc": self.task_desc, # From Agent.__init__
             "data_preview_content": self.data_preview, # From Agent.update_data_preview()
@@ -1050,7 +1062,9 @@ class TOTAgent(Agent):
         if parent_node_being_expanded:
             context["current_code_or_plan"] = parent_node_being_expanded.plan or parent_node_being_expanded.code
             context["previous_analysis"] = parent_node_being_expanded.analysis
-        
+        # investigate how many tokens are in the journal_summary
+        print(f"Journal summary size: {len(context['journal_summary'])}")
+        print(f"--------------------------------------")
         logger.debug(f"{log_prefix}_ContextDetails_START\n"
                      f"TaskDesc: {str(context['task_desc'])[:200]}...\n"
                      f"DataPreview: {str(context['data_preview_content'])[:200]}...\n"
@@ -1072,8 +1086,6 @@ class TOTAgent(Agent):
             if plan_step_line.strip() and not plan_step_line.strip().startswith("##"):
                 initial_boilerplate += f"# {plan_step_line.strip()}\n"
         initial_boilerplate += "# --- End Master Plan ---\n\n"
-
-
         current_beam: List[Dict[str, Any]] = [{"code_acc": initial_boilerplate, "last_snippet_score": 10.0, "path_eval_details": []}] 
 
         segments_order = [
@@ -1095,7 +1107,7 @@ class TOTAgent(Agent):
                 logger.info(f"{log_prefix_beam_item}: Expanding from accumulator (last snippet score: {current_path_data['last_snippet_score']})")
                  
             
-                # Let's call it _generate_and_select_top_snippet_thoughts_for_segment
+
                 top_snippet_thoughts_for_this_segment: List[Dict] = self._generate_and_select_top_snippet_thoughts_for_segment(
                     segment_name,
                     task_summary,
@@ -1187,39 +1199,59 @@ class TOTAgent(Agent):
             logger.error(f"{log_prefix}: Failed to generate/parse any code snippets.")
             return []
 
-        # 2. Evaluation
+        # # 2. Evaluation
+        # evaluated_snippets = []
+        # for i, snippet_text in enumerate(candidate_snippet_strings):
+        #     eval_dict = self._evaluate_single_code_snippet_thought(
+        #         aide_context_seg, master_plan_text, segment_name, current_code_accumulator_context, snippet_text,
+        #         log_prefix, i + 1
+        #     )
+        #     # Store the snippet text with its full evaluation dictionary
+        #     evaluated_snippets.append({
+        #         "snippet_text": snippet_text, # clean snippet
+        #         "score": float(eval_dict.get("snippet_score", 0.0)),
+        #         "evaluation_dict": eval_dict
+        #     })
+
         evaluated_snippets = []
         for i, snippet_text in enumerate(candidate_snippet_strings):
-            eval_dict = self._evaluate_single_code_snippet_thought(
+            full_eval_dict = self._evaluate_single_code_snippet_thought( 
                 aide_context_seg, master_plan_text, segment_name, current_code_accumulator_context, snippet_text,
                 log_prefix, i + 1
             )
-            # Store the snippet text with its full evaluation dictionary
             evaluated_snippets.append({
-                "snippet_text": snippet_text, # clean snippet
-                "score": float(eval_dict.get("snippet_score", 0.0)),
-                "evaluation_dict": eval_dict
+                "snippet_text": snippet_text,
+                "score": float(full_eval_dict.get("overall_quality_score", 0.0)),
+                "evaluation_dict": full_eval_dict 
             })
         
-        # Filter for viability (optional, but good)
-        viable_snippets = [
-            data for data in evaluated_snippets
-            if data["evaluation_dict"].get("likely_correct_and_integrates", False) and \
-            data["evaluation_dict"].get("adheres_to_segment_plan", False) and \
-            (data["evaluation_dict"].get("snippet_score", 0.0) > 0)
-        ]
+        viable_snippets = []
+        for data in evaluated_snippets:
+            eval_d = data["evaluation_dict"]
+            # and no critical identified issues.
+            is_viable = (
+                eval_d.get("overall_quality_score", 0.0) >= 5 and # Example threshold
+                eval_d.get("correctness_and_robustness_score", 0.0) >= 5 and
+                eval_d.get("plan_adherence_score", 0.0) >= 6 and
+                eval_d.get("integration_score", 0.0) >= 5 and
+                (eval_d.get("identified_issues_or_risks", "").lower() == "none" or 
+                "minor" in eval_d.get("identified_issues_or_risks", "").lower()) # Allow minor issues if scores are high
+            )
+            if is_viable:
+                viable_snippets.append(data)
+            else:
+                logger.info(f"{log_prefix}: Snippet '{data['snippet_text'][:50].replace(chr(10),' ')}...' deemed not viable. Eval: {eval_d}")
+
 
         if not viable_snippets:
-            logger.warning(f"{log_prefix}: No viable snippets after evaluation. Using highest scored from original list if any.")
-            if not evaluated_snippets: return [] # No snippets at all
+            logger.warning(f"{log_prefix}: No viable snippets after detailed evaluation. Using highest originally scored if any.")
+            if not evaluated_snippets: return []
             evaluated_snippets.sort(key=lambda x: x["score"], reverse=True)
-            # We need to decide how many to return for the beam expansion even if not "viable"
-            # n_select_sample here refers to how many branches to create from THIS segment for THIS parent path
             return evaluated_snippets[:cfg_segment_tot.n_select_sample] 
 
-        # 3. Selection
-        viable_snippets.sort(key=lambda x: x["score"], reverse=True)
-        return viable_snippets[:cfg_segment_tot.n_select_sample] # Return top N_SELECT_SAMPLE snippets
+        # 3. Selection from viable snippets
+        viable_snippets.sort(key=lambda x: x["score"], reverse=True) # Sort viable by overall_quality_score
+        return viable_snippets[:cfg_segment_tot.n_select_sample]
 
     def _draft(self, parent_node_being_expanded: Optional[Node] = None) -> Node: 
         log_prefix_draft = f"ToTAgent_DRAFT_Step_{self.current_step}"
