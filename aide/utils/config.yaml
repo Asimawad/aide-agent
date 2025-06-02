@@ -72,9 +72,16 @@ agent:
                                       # If null or not present, ToTAgent will use agent.feedback.model
 
     segment_coding: # Settings for ToT Phase 2 (Code Segment Generation) - we'll use later
-      enabled: false # Initially false
+      enabled: true
       method_generate: "propose"
-      evaluator_model_name: "o3-mini"
+      method_evaluate: "value"
+      method_select: "greedy"
+      n_generate_sample: 3
+      n_evaluate_sample: 1
+      n_select_sample: 2
+      max_steps: 1
+      evaluator_model_name: "o3-mini" # Explicitly use o3-mini for evaluating plans
+      inter_segment_beam_width: 2 
 # ─── W&B experiment tracking ────────────────────────────────────────────────
 wandb:
   enabled: true

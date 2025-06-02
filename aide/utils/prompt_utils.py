@@ -1612,3 +1612,200 @@ def get_tot_elaborate_high_level_plan_user_prompt(
         )
     }
     return prompt_user_message
+
+
+
+
+# In aide/utils/prompt_utils.py
+
+# ... (Keep all existing prompts, including those for ToT Planning Phase) ...
+# ... (Keep existing CHAINED_CODER_SYSTEM_PROMPT_SEGMENT_... and their getters if needed for fallback)
+# ... (Keep existing tot_evaluate_master_plan_func_spec)
+
+
+# --- Tree of Thoughts - Code Segment Generation & Evaluation Prompts ---
+
+# 1. System Prompt for LLM generating MULTIPLE code snippet thoughts for a SINGLE segment
+TOT_SEGMENT_CODER_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+    "SYSTEM": (
+        "You are an expert Python Coder specializing in generating multiple, diverse, and correct implementations for a *specific segment* of a larger machine learning solution. "
+        "You will be given the overall Master Plan, the code generated in previous segments, and the objective for the current segment."
+        "Your task is to provide several distinct, valid Python code snippets that fulfill the current segment's objective, adhering to the Master Plan."
+    ),
+    "user_instructions": {
+        "Context Provided": [
+            "'Overall Task Summary': The high-level goal of the competition.",
+            "'Full Master Plan': The strategic blueprint for the entire solution.",
+            "'Python Code Generated So Far': The code from all preceding segments.",
+            "'Your Current Coding Segment (Objective)': Specific instructions for the segment you are to implement now."
+        ],
+        "Your Task (Generating Multiple Snippet Thoughts)": (
+            "Generate the requested number of *distinct and functionally complete* Python code snippets for the *current segment only*. "
+            "Each snippet should be a valid way to achieve the segment's objective as outlined in the Master Plan. "
+            "Ensure each snippet integrates with 'Python Code Generated So Far' (e.g., uses previously defined variables, imports necessary libraries if not already imported and specific to this segment's new logic). "
+            "Focus on correctness and adherence to the Master Plan for this segment."
+        ),
+        "Snippet Requirements": [
+            "Each snippet MUST start with appropriate '# Thought:' comments explaining its specific approach for this segment and referencing relevant Master Plan steps.",
+            "Each snippet should be self-contained for the segment's logic but assume prior code is available.",
+            "If new imports are absolutely necessary for a snippet's specific logic (and not in prior code), include them at the *beginning of that snippet*.",
+            "Do NOT redefine variables or functions already available from 'Python Code Generated So Far' unless the specific goal of this segment is to modify or replace them."
+        ],
+        "Output Format (Strict Adherence Required)": (
+            "You MUST output EACH code snippet proposal separated by the exact string '<!--- SNIPPET_SEPARATOR --->'.\n"
+            "Each snippet itself MUST be enclosed in its own ```python ... ``` markdown block.\n"
+            "For example, if asked for 2 snippets:\n"
+            "```python\n"
+            "# Thought: Approach A for this segment...\n"
+            "# (Code for snippet A)\n"
+            "```\n"
+            "<!--- SNIPPET_SEPARATOR --->\n"
+            "```python\n"
+            "# Thought: Approach B for this segment, using a different library...\n"
+            "# (Code for snippet B)\n"
+            "```\n"
+            "There should be NO text outside these snippet blocks and separators."
+        )
+    }
+}
+
+def get_tot_segment_coder_system_prompt() -> Dict[str, Any]:
+    return copy.deepcopy(TOT_SEGMENT_CODER_SYSTEM_PROMPT_DICT)
+
+# 2. User Prompt for LLM generating MULTIPLE code snippet thoughts for a SINGLE segment
+def get_tot_generate_segment_code_snippets_user_prompt(
+    aide_context: Dict[str, Any], # Contains task_desc, competition_name, data_preview etc.
+    master_plan_text: str,
+    current_segment_name: str,
+    code_generated_so_far: str,
+    num_snippets_to_generate: int
+) -> Dict[str, Any]:
+    """
+    Generates the user prompt for asking the LLM to propose multiple code snippet
+    implementations for the current code chain segment.
+    """
+    segment_objective_prompt_part = CHAINED_CODER_SYSTEM_PROMPT_GETTERS.get(current_segment_name, lambda: {})()
+    segment_objective_details = segment_objective_prompt_part.get("user_instructions", {}).get("Current Segment Focus", f"Implement the segment: {current_segment_name}")
+    
+    introduction = (
+        f"For the machine learning competition '{aide_context.get('competition_name', 'N/A')}', "
+        f"we are implementing the segment: '{current_segment_name}'.\n"
+        f"Based on the overall Master Plan and the code generated so far, please propose "
+        f"{num_snippets_to_generate} distinct Python code snippets to implement this segment."
+    )
+
+    prompt_user_message: Dict[str, Any] = {
+        "Introduction": introduction,
+        "Overall Task Summary": aide_context.get("task_desc", "Task description missing."), # Or a more concise summary if available
+        "Full Master Plan (Guiding Strategy)": master_plan_text,
+        "Python Code Generated So Far (Context)": wrap_code(code_generated_so_far if code_generated_so_far.strip() else "# This is the first functional code segment after setup/imports.") ,
+        "Environment and Packages": get_competition_environment_text(aide_context.get("competition_name", "")),
+        "Data Overview": aide_context.get("data_preview_content", "Rely on Master Plan for data details."),
+        f"Your Current Coding Segment: {current_segment_name}": {
+            "Objective for this Segment": segment_objective_details,
+            "Instructions": (
+                f"Generate exactly {num_snippets_to_generate} diverse and valid Python code snippets for this segment. "
+                "Each snippet must be a complete implementation for *this segment only*, well-commented with '# Thought:' lines, and integrate with the prior code. "
+                "Adhere strictly to the 'Output Format' specified in your system instructions (using '<!--- SNIPPET_SEPARATOR --->' and ```python ... ``` for each snippet)."
+            )
+        }
+    }
+    return prompt_user_message
+
+tot_evaluate_code_segment_func_spec = FunctionSpec(
+    name="submit_tot_code_segment_evaluation",
+    json_schema={
+        "type": "object",
+        "properties": {
+            "snippet_score": {
+                "type": "number",
+                "description": "Score (1-10, higher is better) for this code snippet's correctness, and adherence to the plan for the current segment and how good the overalll code genrated so far is, is it bug free?",
+            },
+            "justification": {
+                "type": "string",
+                "description": "Brief (1-3 sentences) reasoning for the score. Highlight if it meets segment objectives, potential issues, or elegance.",
+            },
+            "likely_correct_and_integrates": {
+                "type": "boolean",
+                "description": "True if the snippet appears syntactically correct, logically sound for the segment, and likely to integrate with prior code without obvious errors (e.g., using undefined variables not from prior code).",
+            },
+            "adheres_to_segment_plan": {
+                "type": "boolean",
+                "description": "True if the snippet directly and fully addresses the objectives of the current segment as implied by the Master Plan context.",
+            },
+            "alternative_approach_comment": {
+                "type": "string",
+                "description": "Optional: If this snippet represents a significantly different but valid approach compared to a 'standard' way, briefly note it. E.g., 'Uses list comprehension instead of loop'."
+            }
+        },
+        "required": ["snippet_score", "justification", "likely_correct_and_integrates", "adheres_to_segment_plan"],
+    },
+    description="Submit a critical evaluation of a proposed Python code snippet for a specific ML pipeline segment.",
+)
+
+# 4. System Prompt for LLM evaluating a SINGLE code snippet thought (e.g., o3-mini)
+TOT_SEGMENT_EVALUATOR_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
+    "SYSTEM": (
+        "You are a Senior Software Engineer and Kaggle Grandmaster specializing in code review for machine learning pipelines. "
+        "Your task is to critically evaluate a *single provided Python code snippet* intended for a specific segment of a larger solution. "
+        "Be meticulous in your assessment."
+    ),
+    "user_instructions": {
+        "Context You Will Receive": [
+            "'Overall Task Summary' and 'Full Master Plan': For understanding the big picture.",
+            "'Python Code Generated So Far': To check for integration and available variables/functions.",
+            "'Current Segment Name & Objective': To understand what this snippet is supposed to achieve.",
+            "'Code Snippet to Evaluate': The specific snippet under review."
+        ],
+        "Your Evaluation Task": (
+            "Assess the 'Code Snippet to Evaluate' based on the following criteria for its specific segment:"
+            "\n1. **Correctness & Robustness:** Does it look syntactically correct? Does it seem logically sound for its purpose? Are there obvious bugs or edge cases missed (within the scope of a segment implementation)?"
+            "\n2. **Plan Adherence:** Does it implement the objectives for this segment as guided by the 'Full Master Plan' and 'Current Segment Objective'?"
+            "\n3. **Integration:** Does it correctly use variables/functions defined in 'Python Code Generated So Far'? Does it avoid redefining things unnecessarily? If it introduces new variables, are they appropriately scoped for this segment or for use by later segments as per the plan?"
+            "\n4. **Clarity & Best Practices (for a segment):** Is the snippet reasonably clean? Are '# Thought:' comments adequate for explaining its logic within the segment?"
+            "\n5. **Focus:** Does it stick to implementing only the current segment's tasks?"
+        ),
+        "Action": "Call the 'submit_tot_code_segment_evaluation' function with your structured assessment."
+    }
+}
+
+def get_tot_segment_evaluator_system_prompt() -> Dict[str, Any]:
+    return copy.deepcopy(TOT_SEGMENT_EVALUATOR_SYSTEM_PROMPT_DICT)
+
+
+# 5. User Prompt for LLM evaluating a SINGLE code snippet thought (using function call)
+def get_tot_evaluate_segment_code_snippet_func_call_user_prompt(
+    aide_context: Dict[str, Any],
+    master_plan_text: str,
+    current_segment_name: str,
+    code_generated_so_far: str,
+    segment_snippet_to_evaluate: str
+) -> Dict[str, Any]:
+    """
+    Generates the user prompt for asking an LLM to evaluate a single code snippet thought
+    for a segment, expecting a function call as output.
+    """
+    segment_objective_prompt_part = CHAINED_CODER_SYSTEM_PROMPT_GETTERS.get(current_segment_name, lambda: {})()
+    segment_objective_details = segment_objective_prompt_part.get("user_instructions", {}).get("Current Segment Focus", f"Objective for {current_segment_name} not explicitly found, infer from Master Plan.")
+
+    introduction = (
+        f"Please critically evaluate the following Python code snippet proposed for the segment: '{current_segment_name}' "
+        f"of a solution for the '{aide_context.get('competition_name', 'N/A')}' competition. "
+        "Assess its quality, correctness, and suitability for this specific segment."
+    )
+
+    prompt_user_message: Dict[str, Any] = {
+        "Introduction": introduction,
+        "Overall Task Summary": aide_context.get("task_desc", "Task description missing."),
+        "Full Master Plan (Guiding Strategy)": master_plan_text,
+        "Python Code Generated in PREVIOUS Segments": wrap_code(code_generated_so_far if code_generated_so_far.strip() else "# No prior code segments or this is the first after setup/imports."),
+        "Current Segment Name": current_segment_name,
+        "Stated Objective for this Segment": segment_objective_details,
+        "Code Snippet to Evaluate for THIS Segment": wrap_code(segment_snippet_to_evaluate),
+        "Your Task": (
+            "Carefully review the 'Code Snippet to Evaluate for THIS Segment' in the context of all provided information. "
+            "Based on the detailed system instructions and evaluation criteria, "
+            "call the 'submit_tot_code_segment_evaluation' function with your assessment."
+        )
+    }
+    return prompt_user_message

@@ -64,7 +64,7 @@ class ToTPhaseConfig:
     max_steps: int = 1               # Max ToT internal iterations for this phase
     evaluator_model_name: Optional[str] = None # Model to use for evaluating thoughts in this phase
     n_high_level_select_for_elaboration: int = 2# Number of high-level plans to select for elaboration
-
+    inter_segment_beam_width: int = 1
 @dataclass
 class ToTConfig:
     """Main configuration for Tree of Thoughts."""

@@ -62,7 +62,12 @@ from .utils.prompt_utils import (
     get_chunked_reflection_user_prompt,
     get_tot_generate_initial_master_plans_user_prompt,
     get_tot_planner_system_prompt,
-    get_tot_evaluator_system_prompt
+    get_tot_evaluator_system_prompt,
+    get_tot_segment_coder_system_prompt,
+    get_tot_generate_segment_code_snippets_user_prompt,
+    tot_evaluate_code_segment_func_spec,
+    get_tot_segment_evaluator_system_prompt,
+    get_tot_evaluate_segment_code_snippet_func_call_user_prompt,
 )
 
 
@@ -660,9 +665,6 @@ class TOTAgent(Agent):
     ):
         super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
     
-
-
-
     def _query_llm_with_retries( self, query_type: str, system_prompt: Dict[str, Any], user_prompt: Dict[str, Any], model: str, temperature: float, planner_flag: bool, convert_system_to_user: bool, func_spec: Optional[Dict[str, Any]] = None, retries: int = 3, max_tokens: Optional[int] = None) -> Any: # Add max_tokens
         completion_text = None
         log_prefix_query = f"TOTAGENT_LLM_QUERY_{query_type.upper()}_STEP{self.current_step}" # More specific log prefix
@@ -796,6 +798,36 @@ class TOTAgent(Agent):
                 logger.debug(f"{log_prefix}_ParsedPlanCandidate_{i+1}_LLM_OUTPUT_START\n{p_text}\n{log_prefix}_ParsedPlanCandidate_{i+1}_LLM_OUTPUT_END", extra={"verbose": True})
         return candidate_plan_strings
 
+    def _parse_multiple_code_snippets(self, llm_response_text: str, num_expected: int) -> List[str]:
+        log_prefix = f"ToTAgent_ParseSnippets_Step_{self.current_step}"
+        if not llm_response_text or not llm_response_text.strip():
+            logger.warning(f"{log_prefix}: Received empty or whitespace-only response from LLM for snippet generation.")
+            return []
+        separator = "<!--- SNIPPET_SEPARATOR --->"
+        raw_snippet_blocks = [block.strip() for block in llm_response_text.split(separator) if block.strip()]
+
+        clean_snippets = []
+        if not raw_snippet_blocks and llm_response_text.strip(): 
+            logger.warning(f"{log_prefix}: Snippet separator '{separator}' not found. Attempting to extract code from entire response as one block.")
+            extracted = extract_code(llm_response_text) 
+            if extracted:
+                clean_snippets.append(extracted)
+        else:
+            for i, block_text in enumerate(raw_snippet_blocks):
+                extracted = extract_code(block_text) 
+                logger.debug(f"DEBUG_PARSE_SNIPPET - Snippet after extract_code: >>>{extracted[:100]}...<<<") # TEMP DEBUG
+                if extracted:
+                    clean_snippets.append(extracted)
+                else:
+                    logger.warning(f"{log_prefix}: Could not extract valid code from snippet block {i+1}. Block content (truncated): {block_text[:200]}...")
+        
+        if not clean_snippets:
+            logger.error(f"{log_prefix}: Failed to parse or extract any valid code snippets from LLM response: {llm_response_text[:500]}...")
+            return []
+
+        logger.info(f"{log_prefix}: Successfully parsed and extracted {len(clean_snippets)} code snippets.")
+        return clean_snippets
+    
     def _evaluate_single_plan_thought(self, aide_input_context: Dict, plan_text_candidate: str, log_prefix_eval: str, plan_candidate_idx: int) -> Dict:
         user_prompt_eval = get_tot_evaluate_master_plan_func_call_user_prompt(
             aide_input_context,
@@ -809,7 +841,7 @@ class TOTAgent(Agent):
             user_prompt=user_prompt_eval,
             model=evaluator_model_name,
             temperature=self.cfg.agent.feedback.temp,
-            func_spec=tot_evaluate_master_plan_func_spec, # Essential for structured output
+            func_spec=tot_evaluate_master_plan_func_spec, 
             planner_flag=False,
             convert_system_to_user=self.acfg.convert_system_to_user,
         )
@@ -832,7 +864,57 @@ class TOTAgent(Agent):
             logger.error(f"{log_prefix_eval}: Evaluation for Plan Candidate {plan_candidate_idx} did not return a dictionary. Response: {evaluation_dict_response}")
             return {"plan_text": plan_text_candidate, "score": 0.0, "evaluation_details": {"error": "Invalid evaluation response format"}}
 
+    def _evaluate_single_code_snippet_thought(
+        self, 
+        aide_context_seg: Dict[str, Any], 
+        master_plan_text: str,
+        current_segment_name: str,
+        code_generated_so_far: str,
+        segment_snippet_to_evaluate: str,
+        log_prefix_eval_seg: str,
+        snippet_candidate_idx: int
+    ) -> Dict: 
+        """
+        Evaluates a single code snippet thought for a given segment using LLM function call.
+        Returns the dictionary from the function call, or an error dict.
+        """
+        user_prompt_eval_snippet = get_tot_evaluate_segment_code_snippet_func_call_user_prompt(
+            aide_context_seg,
+            master_plan_text,
+            current_segment_name,
+            code_generated_so_far,
+            segment_snippet_to_evaluate
+        )
+        
+        evaluator_model_name_seg = self.cfg.agent.tot.segment_coding.get("evaluator_model_name") or self.cfg.agent.feedback.model
+        
+        log_eval_prefix_full = f"{log_prefix_eval_seg}_SNIP{snippet_candidate_idx}"
+        logger.info(f"{log_eval_prefix_full}: Evaluating snippet for segment '{current_segment_name}' ('{segment_snippet_to_evaluate[:70].replace(chr(10),' ')}...') with model {evaluator_model_name_seg}")
 
+        evaluation_dict_response = self._query_llm_with_retries(
+            query_type=f"TOT_SEG_SNIP_EVAL_{current_segment_name.replace(' ','_')}_IDX{snippet_candidate_idx}",
+            system_prompt=get_tot_segment_evaluator_system_prompt(),
+            user_prompt=user_prompt_eval_snippet,
+            model=evaluator_model_name_seg,
+            temperature=self.cfg.agent.feedback.temp, 
+            func_spec=tot_evaluate_code_segment_func_spec,
+            planner_flag=False,
+            convert_system_to_user=self.acfg.convert_system_to_user,
+        )
+
+        if isinstance(evaluation_dict_response, dict):
+            logger.info(f"{log_eval_prefix_full}: Snippet for segment '{current_segment_name}' received evaluation: {evaluation_dict_response}")
+            return evaluation_dict_response 
+        else:
+            logger.error(f"{log_eval_prefix_full}: Evaluation for snippet (segment '{current_segment_name}') did not return a dictionary. Response: {evaluation_dict_response}")
+            return { 
+                "snippet_score": 0.0, 
+                "justification": "Evaluation LLM did not return a valid structured response.",
+                "likely_correct_and_integrates": False,
+                "adheres_to_segment_plan": False,
+                "error": "Invalid evaluation response format"
+            }
+    
     def _generate_master_plan_with_tot(self, aide_input_context: Dict) -> str:
         cfg_planning_tot = self.cfg.agent.tot.planning
         log_prefix_base = f"ToTAgent_MasterPlanToT_Step_{self.current_step}"
@@ -976,52 +1058,170 @@ class TOTAgent(Agent):
                      f"Competition: {context['competition_name']}\n"
                      f"{log_prefix}_ContextDetails_END", extra={"verbose": True})
         return context
-
-
-
     
     def _draft_generate_code_chained(self, task_summary: str, master_plan_text: str) -> str:
-        log_prefix_chain = f"CodeChainAgent_Chained_Draft_Step: {self.current_step}"
-        logger.info(f"Starting chained code generation for draft.")
-        
-        code_accumulator = f"# Script generated by AIDE CodeChainAgent (Chained Coder) - Step {self.current_step}\n"
-        code_accumulator += f"# Competition: {self.competition_name}\n"
-        code_accumulator += f"# Task Summary: {task_summary.splitlines()[0]}...\n" 
-        code_accumulator += "# --- Master Plan ---\n"
-        for i, plan_step_line in enumerate(master_plan_text.splitlines()):
-            if plan_step_line.strip() and not plan_step_line.strip().startswith("##"): 
-                code_accumulator += f"# {plan_step_line.strip()}\n"
-        code_accumulator += "# --- End Master Plan ---\n\n"
+        cfg_segment_tot = self.cfg.agent.tot.segment_coding
+        log_prefix_chain = f"ToTAgent_ChainedDraft_AIDESTEP{self.current_step}"
+        logger.info(f"{log_prefix_chain}: Starting ToT-BFS chained code generation for draft. Segment ToT enabled: {cfg_segment_tot.enabled}")
 
+        initial_boilerplate = f"# Script generated by AIDE TOTAgent - AIDE Step {self.current_step}\n"
+        initial_boilerplate += f"# Competition: {self.competition_name}\n"
+        initial_boilerplate += f"# Task Summary: {task_summary.splitlines()[0]}...\n"
+        initial_boilerplate += "# --- Master Plan (Selected by ToT Planning Phase) ---\n"
+        for i, plan_step_line in enumerate(master_plan_text.splitlines()):
+            if plan_step_line.strip() and not plan_step_line.strip().startswith("##"):
+                initial_boilerplate += f"# {plan_step_line.strip()}\n"
+        initial_boilerplate += "# --- End Master Plan ---\n\n"
+
+
+        current_beam: List[Dict[str, Any]] = [{"code_acc": initial_boilerplate, "last_snippet_score": 10.0, "path_eval_details": []}] 
 
         segments_order = [
-            "Setup & Imports",
-            "Data Loading",
-            "Data Preprocessing",
-            "Modeling",
-            "Training & Validation", 
-            "Prediction & Submission"
+            "Setup & Imports", "Data Loading", "Data Preprocessing",
+            "Modeling", "Training & Validation", "Prediction & Submission"
         ]
 
-        chunked_reflection = (self.acfg.ITS_Strategy == "codechain_v3")
-        chunk_size = 2
-        if chunked_reflection:
-            return self._generate_chuncked_code(task_summary, master_plan_text, chunk_size, code_accumulator)
-        else:
-            chain_reflection = True if self.acfg.ITS_Strategy == "codechain_v2" else False 
-            for segment_name in segments_order:
-                code_snippet = self._generate_code_segment(
-                    segment_name, task_summary, master_plan_text, code_accumulator, chain_reflection
-                )
-                code_accumulator += code_snippet + "\n\n" 
-                if f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}" in code_snippet:
-                    logger.warning(f"{log_prefix_chain}: Halting chain due to failure in segment: {segment_name}")
-                    break 
+        aide_context_seg = self._prepare_aide_input_for_tot() 
 
-            logger.info(f"{log_prefix_chain}: Chained code generation process complete.")
-            return code_accumulator.strip()
-   
-    def _draft(self, parent_node_being_expanded: Optional[Node] = None) -> Node: # Ensure parent_node from search_policy is passed
+        for segment_idx, segment_name in enumerate(segments_order):
+            log_prefix_segment_loop = f"{log_prefix_chain}_Segment_{segment_name.replace(' ', '_')}"
+            logger.info(f"{log_prefix_segment_loop}: Processing segment {segment_idx+1}/{len(segments_order)}: '{segment_name}'")
+            
+            next_beam_candidates: List[Dict[str, Any]] = []
+
+            for beam_item_idx, current_path_data in enumerate(current_beam):
+                current_code_acc = current_path_data["code_acc"]
+                log_prefix_beam_item = f"{log_prefix_segment_loop}_BeamItem{beam_item_idx+1}"
+                logger.info(f"{log_prefix_beam_item}: Expanding from accumulator (last snippet score: {current_path_data['last_snippet_score']})")
+                 
+            
+                # Let's call it _generate_and_select_top_snippet_thoughts_for_segment
+                top_snippet_thoughts_for_this_segment: List[Dict] = self._generate_and_select_top_snippet_thoughts_for_segment(
+                    segment_name,
+                    task_summary,
+                    master_plan_text,
+                    current_code_acc,
+                    aide_context_seg 
+                )
+
+                if not top_snippet_thoughts_for_this_segment:
+                    logger.warning(f"{log_prefix_beam_item}: ToT for segment '{segment_name}' yielded no viable snippets. Path terminated.")
+                    continue 
+                logger.info(f"{log_prefix_beam_item}: ToT for segment '{segment_name}' yielded {len(top_snippet_thoughts_for_this_segment)} viable snippets.")
+
+                for snippet_data in top_snippet_thoughts_for_this_segment:
+                    snippet_text = snippet_data["snippet_text"] 
+                    snippet_score = snippet_data["score"]
+                    logger.info(f"{log_prefix_beam_item}: Adding snippet to beam: '{snippet_text[:70].replace(chr(10), ' ')}...' (Score: {snippet_score})")
+                    
+                    next_beam_candidates.append({
+                        "code_acc": current_code_acc + snippet_text + "\n\n",
+                        "last_snippet_score": snippet_score,
+                        "path_eval_details": current_path_data["path_eval_details"] + [{"segment": segment_name, "score": snippet_score, "method": "ToT"}]
+                    })
+
+
+            if not next_beam_candidates:
+                logger.error(f"{log_prefix_chain}: No viable candidates generated for segment '{segment_name}'. Halting script generation.")
+                current_beam.sort(key=lambda x: x["last_snippet_score"], reverse=True)
+                return current_beam[0]["code_acc"] + f"\n\n# ERROR: Failed to generate next segment '{segment_name}' for any path.\n"
+
+            inter_segment_beam_width = self.cfg.agent.tot.segment_coding.get("inter_segment_beam_width", 1) 
+            next_beam_candidates.sort(key=lambda x: x["last_snippet_score"], reverse=True)
+            current_beam = next_beam_candidates[:inter_segment_beam_width]
+            
+            logger.info(f"{log_prefix_segment_loop}: Selected {len(current_beam)} paths for next segment. Best score for this segment: {current_beam[0]['last_snippet_score'] if current_beam else 'N/A'}")
+            for i, cb_data in enumerate(current_beam):
+                logger.debug(f"{log_prefix_segment_loop}_SelectedPath{i+1}_LastSnippetScore: {cb_data['last_snippet_score']}", extra={"verbose":True})
+                logger.debug(f"{log_prefix_segment_loop}_SelectedPath{i+1}_AccumulatedCodeSoFar_END:\n{cb_data['code_acc'][-500:]}...", extra={"verbose":True})
+
+
+        # After all segments are processed
+        if not current_beam:
+            logger.error(f"{log_prefix_chain}: BFS code generation failed, final beam is empty.")
+            return initial_boilerplate + "\n\n# ERROR: ToT-BFS code generation resulted in an empty final beam.\n"
+
+        # Return the code from the best path in the final beam
+        current_beam.sort(key=lambda x: x["last_snippet_score"], reverse=True) 
+        final_best_code_acc = current_beam[0]["code_acc"]
+        final_path_eval_details = current_beam[0]["path_eval_details"]
+        
+        logger.info(f"{log_prefix_chain}: ToT-BFS chained code generation complete.")
+        logger.info(f"{log_prefix_chain}: Final chosen path evaluation details: {json.dumps(final_path_eval_details, indent=2)}")
+        logger.debug(f"{log_prefix_chain}_FINAL_SCRIPT_START\n{final_best_code_acc}\n{log_prefix_chain}_FINAL_SCRIPT_END", extra={"verbose":True})
+        
+        return final_best_code_acc.strip()
+
+    def _generate_and_select_top_snippet_thoughts_for_segment(self,
+                                                            segment_name: str,
+                                                            task_summary: str,
+                                                            master_plan_text: str,
+                                                            current_code_accumulator_context: str, # Code before this segment
+                                                            aide_context_seg: Dict[str, Any]
+                                                        ) -> List[Dict[str, Any]]: # List of {"snippet_text": str, "score": float, "eval_dict": dict}
+        """
+        Encapsulates the Gen-Eval-Select ToT logic for a single code segment.
+        Returns a list of the top N selected snippet data dictionaries.
+        """
+        cfg_segment_tot = self.cfg.agent.tot.segment_coding # Already has n_generate_sample, n_select_sample
+        log_prefix = f"ToTAgent_GenEvalSelect_AIDESTEP{self.current_step}_SEG_{segment_name.replace(' ', '_')}"
+
+        # 1. Generation
+        user_prompt_gen_snip = get_tot_generate_segment_code_snippets_user_prompt(
+            aide_context_seg, master_plan_text, segment_name, current_code_accumulator_context,
+            cfg_segment_tot.n_generate_sample # k_thoughts for snippets
+        )
+        raw_snippets_text_response = self._query_llm_with_retries(
+            query_type=f"TOT_SEG_SNIP_GEN_{segment_name.replace(' ','_').upper()}",
+            system_prompt=get_tot_segment_coder_system_prompt(),
+            user_prompt=user_prompt_gen_snip,
+            model=self.acfg.code.model,
+            temperature=self.acfg.code.temp,
+            planner_flag=False,
+            convert_system_to_user=self.acfg.convert_system_to_user,
+            max_tokens=self.acfg.code.max_new_tokens
+        )
+        candidate_snippet_strings = self._parse_multiple_code_snippets(raw_snippets_text_response, cfg_segment_tot.n_generate_sample)
+
+        if not candidate_snippet_strings:
+            logger.error(f"{log_prefix}: Failed to generate/parse any code snippets.")
+            return []
+
+        # 2. Evaluation
+        evaluated_snippets = []
+        for i, snippet_text in enumerate(candidate_snippet_strings):
+            eval_dict = self._evaluate_single_code_snippet_thought(
+                aide_context_seg, master_plan_text, segment_name, current_code_accumulator_context, snippet_text,
+                log_prefix, i + 1
+            )
+            # Store the snippet text with its full evaluation dictionary
+            evaluated_snippets.append({
+                "snippet_text": snippet_text, # clean snippet
+                "score": float(eval_dict.get("snippet_score", 0.0)),
+                "evaluation_dict": eval_dict
+            })
+        
+        # Filter for viability (optional, but good)
+        viable_snippets = [
+            data for data in evaluated_snippets
+            if data["evaluation_dict"].get("likely_correct_and_integrates", False) and \
+            data["evaluation_dict"].get("adheres_to_segment_plan", False) and \
+            (data["evaluation_dict"].get("snippet_score", 0.0) > 0)
+        ]
+
+        if not viable_snippets:
+            logger.warning(f"{log_prefix}: No viable snippets after evaluation. Using highest scored from original list if any.")
+            if not evaluated_snippets: return [] # No snippets at all
+            evaluated_snippets.sort(key=lambda x: x["score"], reverse=True)
+            # We need to decide how many to return for the beam expansion even if not "viable"
+            # n_select_sample here refers to how many branches to create from THIS segment for THIS parent path
+            return evaluated_snippets[:cfg_segment_tot.n_select_sample] 
+
+        # 3. Selection
+        viable_snippets.sort(key=lambda x: x["score"], reverse=True)
+        return viable_snippets[:cfg_segment_tot.n_select_sample] # Return top N_SELECT_SAMPLE snippets
+
+    def _draft(self, parent_node_being_expanded: Optional[Node] = None) -> Node: 
         log_prefix_draft = f"ToTAgent_DRAFT_Step_{self.current_step}"
         logger.info(f"{log_prefix_draft}: Initiating draft process.")
         
@@ -1035,7 +1235,7 @@ class TOTAgent(Agent):
             return Node(plan=selected_master_plan_text,
                         code="# ToT Master Plan generation failed.",
                         summary="ToT Master Plan generation failed.",
-                        parent=parent_node_being_expanded, # Use the argument here
+                        parent=parent_node_being_expanded, 
                         is_buggy=True)
 
         logger.info(f"{log_prefix_draft}: ToT Phase 1 completed. Selected Master Plan:\n{selected_master_plan_text[:500]}...")
@@ -1047,7 +1247,7 @@ class TOTAgent(Agent):
 
         try:
             generated_code = self._draft_generate_code_chained(
-                task_summary=task_summary_for_coder, # Or a more refined summary
+                task_summary=task_summary_for_coder, 
                 master_plan_text=selected_master_plan_text
             )
         except AttributeError as e:
@@ -1518,3 +1718,131 @@ class CodeChainAgent(Agent):
         new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
         logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # def _draft_generate_code_chained(self, task_summary: str, master_plan_text: str) -> str:
+    #     log_prefix_chain = f"CodeChainAgent_Chained_Draft_Step: {self.current_step}"
+    #     logger.info(f"Starting chained code generation for draft.")
+        
+    #     code_accumulator = f"# Script generated by AIDE CodeChainAgent (Chained Coder) - Step {self.current_step}\n"
+    #     code_accumulator += f"# Competition: {self.competition_name}\n"
+    #     code_accumulator += f"# Task Summary: {task_summary.splitlines()[0]}...\n" 
+    #     code_accumulator += "# --- Master Plan ---\n"
+    #     for i, plan_step_line in enumerate(master_plan_text.splitlines()):
+    #         if plan_step_line.strip() and not plan_step_line.strip().startswith("##"): 
+    #             code_accumulator += f"# {plan_step_line.strip()}\n"
+    #     code_accumulator += "# --- End Master Plan ---\n\n"
+
+
+    #     segments_order = [
+    #         "Setup & Imports",
+    #         "Data Loading",
+    #         "Data Preprocessing",
+    #         "Modeling",
+    #         "Training & Validation", 
+    #         "Prediction & Submission"
+    #     ]
+
+    #     for segment_name in segments_order:
+    #         code_snippet = self._generate_code_segment_with_tot(
+    #             segment_name, task_summary, master_plan_text, code_accumulator
+    #         )
+    #         clean_code_snippet = extract_code(code_snippet) # From aide.utils.response
+
+    #         if not clean_code_snippet.strip() or "# TOT_ERROR" in clean_code_snippet :
+    #             logger.warning(f"{log_prefix_chain}: Halting chain for {self.current_step} due to failure or empty snippet in segment: {segment_name}")
+    #             code_accumulator += f"\n\n# FAILED TO GENERATE RELIABLE CODE FOR SEGMENT: {segment_name} via ToT\n"
+    #             break 
+
+    #         code_accumulator += code_snippet + "\n\n" 
+    #         if f"# FAILED TO GENERATE CODE FOR SEGMENT: {segment_name}" in code_snippet:
+    #             logger.warning(f"{log_prefix_chain}: Halting chain due to failure in segment: {segment_name}")
+    #             break 
+
+    #     logger.info(f"{log_prefix_chain}: Chained code generation process complete.")
+    #     return code_accumulator.strip()
+
+    # def _generate_code_segment_with_tot(self, 
+    #                                     segment_name: str, 
+    #                                     task_summary_for_coder: str, 
+    #                                     master_plan_text: str,       
+    #                                     code_accumulator: str        
+    #                                     ) -> str: 
+    #     cfg_segment_tot = self.cfg.agent.tot.segment_coding
+    #     log_prefix_seg_tot = f"{self.current_step}_SegToT_{segment_name.replace(' ', '_')}"
+
+    #     if not cfg_segment_tot.enabled:
+    #         return self._generate_code_segment( 
+    #             segment_name, task_summary_for_coder, master_plan_text, code_accumulator
+    #         )
+
+    #     logger.info(f"{log_prefix_seg_tot}: Starting ToT for segment '{segment_name}'.")
+    #     aide_context_seg = self._prepare_aide_input_for_tot() 
+
+    #     # 1. Generate k code snippet "thoughts" for this segment
+    #     user_prompt_gen_snip = get_tot_generate_segment_code_snippets_user_prompt(
+    #         aide_context_seg, master_plan_text, segment_name, code_accumulator, 
+    #         cfg_segment_tot.n_generate_sample
+    #     )
+
+    #     raw_snippets_text = self._query_llm_with_retries(
+    #         query_type=f"TOT_SEG_SNIP_GEN_{segment_name.replace(' ','_')}",
+    #         system_prompt=get_tot_segment_coder_system_prompt(), 
+    #         user_prompt=user_prompt_gen_snip,
+    #         model=self.acfg.code.model, 
+    #         temperature=self.acfg.code.temp,
+    #         planner_flag=False,
+    #         convert_system_to_user=self.acfg.convert_system_to_user, 
+    #         retries=3
+    #     )
+    #     candidate_snippet_strings = self._parse_multiple_code_snippets(raw_snippets_text, cfg_segment_tot.n_generate_sample)
+
+    #     if not candidate_snippet_strings:
+    #         logger.error(f"{log_prefix_seg_tot}: Failed to generate/parse any code snippets for segment '{segment_name}'.")
+    #         return list(f"# TOT_ERROR: No code snippets generated for segment {segment_name}\n")
+
+    #     # 2. Evaluate these k snippet-thoughts
+    #     evaluated_snippets_data = []
+    #     for i, snippet_text in enumerate(candidate_snippet_strings):
+    #         eval_data = self._evaluate_single_code_snippet_thought( 
+    #             aide_context_seg, master_plan_text, segment_name, code_accumulator, snippet_text,
+    #             log_prefix_seg_tot, i + 1
+    #         )
+    #         evaluated_snippets_data.append(eval_data)
+
+    #     viable_snippets_data = [
+    #             data for data in evaluated_snippets_data 
+    #             if data["evaluation_dict"].get("likely_correct_and_integrates", False) and \
+    #             data["evaluation_dict"].get("adheres_to_segment_plan", False) and \
+    #             (data["evaluation_dict"].get("snippet_score", 0.0) > 0) 
+    #         ]
+   
+    #     if not viable_snippets_data:
+    #         logger.error(f"{log_prefix_seg_tot}: No snippets positively evaluated for segment '{segment_name}'. Returning first generated snippet as fallback or error.") 
+    #         return list(candidate_snippet_strings[0]) if candidate_snippet_strings else list(f"# TOT_ERROR: Snippet evaluation failed for segment {segment_name}\n")
+
+    #     # 3. Select the best single snippet (n_select_sample for segments is usually 1)
+    #     viable_snippets_data.sort(key=lambda x: x.get("evaluation_details",{}).get("snippet_score", 0.0), reverse=True)
+        
+    #     chosen_snippet_data = viable_snippets_data[0:self.cfg.agent.tot.segment_coding.n_generate_sample]
+    #     logger.info(f"{log_prefix_seg_tot}: Selected snippet for segment '{segment_name}' with score {chosen_snippet_data.get('evaluation_details',{}).get('snippet_score', 'N/A')}.")
+
+    #     return chosen_snippet_data
