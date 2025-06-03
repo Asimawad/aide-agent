@@ -12,9 +12,9 @@ fi
 
 O4_MODEL="o4-mini-2025-04-16"
 O4_MODEL="o3-mini"
-DeepSeek_MODEL="gpt-4-turbo"
-CODER_MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
-# CODER_MODEL="o3-mini"
+# DeepSeek_MODEL="gpt-4-turbo"
+# CODER_MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+# # CODER_MODEL="o3-mini"
 # ${O4_MODEL} #"RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
 
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
