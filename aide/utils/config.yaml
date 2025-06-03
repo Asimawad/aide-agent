@@ -58,6 +58,8 @@ agent:
     debug_prob: 0.65
     num_drafts: 5
 
+  s_star_iterative_debug:
+      max_rounds: 3
 # ─── W&B experiment tracking ────────────────────────────────────────────────
 wandb:
   enabled: true
