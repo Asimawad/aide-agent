@@ -1,6 +1,6 @@
 """configuration and setup utils"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 import json
 from pathlib import Path
 from typing import Hashable, cast
@@ -52,6 +52,9 @@ class SearchConfig:
     debug_prob: float
     num_drafts: int
 
+@dataclass
+class SStarIterativeDebugConfig:
+    max_rounds: int = 0
 
 @dataclass
 class AgentConfig:
@@ -66,7 +69,7 @@ class AgentConfig:
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
-
+    s_star_iterative_debug: SStarIterativeDebugConfig = field(default_factory=SStarIterativeDebugConfig)
     # # MCTS specific parameters
     # mcts_iterations: int = 10  # Number of MCTS iterations per step
     # mcts_exploration_weight: float = 1.414  # UCB exploration parameter
