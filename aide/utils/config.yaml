@@ -53,7 +53,7 @@ agent:
     num_responses: 3 
   # ── LLM settings for traceback / feedback ────────────────────────────────
   feedback:
-    model: "o4-mini-2025-04-16"
+    model: o4-mini-2025-04-16
     temp: 0.5
 
   # ── Tree-search / debugging heuristics ───────────────────────────────────
