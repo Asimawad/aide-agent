@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path # Ensure Path is imported
 from rich.console import Console # Keep for console output
-from typing import Any, Callable, cast, Optional, Dict ,List,Node,Tuple,Union # Added Dict
+from typing import Any, Callable, cast, Optional, Dict ,List,Tuple,Union # Added Dict
 from .backend import query
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
