@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-from .backend import compile_prompt_to_md
 
 from .agent import Agent, CodeChainAgent, PlannerAgent, SelfConsistencyAgent 
 from .interpreter import Interpreter
