@@ -757,8 +757,6 @@ class SelfDebugAgent(Agent): # Inherit from Agent
         t_step_end = time.time()
         logger.info(f"{log_prefix_main_step}_END: Duration: {t_step_end - t_step_start:.2f}s", extra={"verbose": True})
 
-
-
 class PlannerAgent(Agent):
 
     def __init__(
@@ -1358,7 +1356,6 @@ class CodeChainAgent(Agent): # Inherit from Agent
         new_node = Node(plan=fix_plan, code=generated_code, summary=bug_summary, task_summary=bug_summary, parent=parent_node)
         logger.info(f"{log_prefix}: Debugged node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
-
 #############################################################################
 # SelfConsistencyAgent Implementation
 #############################################################################
