@@ -1370,8 +1370,8 @@ class SelfConsistencyAgent(Agent):
     ):
         super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
         logger.info(
-            f"SelfConsistencyAgent initialized. N={self.acfg.self_consistency.num_responses}, "
-            f"Strategy='{self.acfg.self_consistency.selection_strategy}'"
+            f"SelfConsistencyAgent initialized. N={self.acfg.selfConsistency.num_responses}, "
+            f"Strategy='{self.acfg.selfConsistency.selection_strategy}'"
         )
 
     def plan_and_code_query(self,
@@ -1545,8 +1545,8 @@ class SelfConsistencyAgent(Agent):
         Generates N code candidates for the given master_plan_text and task_summary.
         """
         log_prefix = f"SC_AGENT_GET_N_CODES_Step:{self.current_step}"
-        N = self.acfg.self_consistency.num_responses
-        print(f"self.acfg.self_consistency: {self.acfg.self_consistency}")
+        N = self.acfg.selfConsistency.num_responses
+        print(f"self.acfg.self_consistency: {self.acfg.selfConsistency}")
         logger.info(f"{log_prefix}: Generating {N} code candidates for the master plan.", extra={"verbose": True})
 
 
@@ -1592,7 +1592,7 @@ class SelfConsistencyAgent(Agent):
         and returns that chosen candidate as a fully populated Node object.
         """
         log_prefix_eval_select = f"SC_AGENT_EVAL_SELECT_{operation_type.upper()}_Step:{self.current_step}"
-        logger.info(f"{log_prefix_eval_select}: Evaluating {len(code_candidate_tuples)} code candidates using strategy '{self.acfg.self_consistency.selection_strategy}'.")
+        logger.info(f"{log_prefix_eval_select}: Evaluating {len(code_candidate_tuples)} code candidates using strategy '{self.acfg.selfConsistency.selection_strategy}'.")
 
         if not code_candidate_tuples:
             logger.error(f"{log_prefix_eval_select}: No code candidates provided for evaluation.")
@@ -1658,7 +1658,7 @@ class SelfConsistencyAgent(Agent):
 
 
         chosen_evaluated_node: Optional[Node] = None
-        selection_strategy = self.acfg.self_consistency.selection_strategy
+        selection_strategy = self.acfg.selfConsistency.selection_strategy
 
         if selection_strategy == "interpreter_first_success":
             for node_candidate in evaluated_temp_nodes:
@@ -1719,7 +1719,7 @@ class SelfConsistencyAgent(Agent):
         Used for _improve and _debug stages of SelfConsistencyAgent.
         """
         log_prefix_eval_select = f"SC_AGENT_EVAL_SELECT_PAIRS_{operation_type.upper()}_Step:{self.current_step}"
-        logger.info(f"{log_prefix_eval_select}: Evaluating {len(candidate_plan_code_summary_tuples)} (plan,code) candidate pairs using strategy '{self.acfg.self_consistency.selection_strategy}'.")
+        logger.info(f"{log_prefix_eval_select}: Evaluating {len(candidate_plan_code_summary_tuples)} (plan,code) candidate pairs using strategy '{self.acfg.selfConsistency.selection_strategy}'.")
 
         if not candidate_plan_code_summary_tuples:
             logger.error(f"{log_prefix_eval_select}: No (plan,code) candidate pairs provided for evaluation.")
@@ -1771,7 +1771,7 @@ class SelfConsistencyAgent(Agent):
             evaluated_temp_nodes.append(temp_node)
 
         chosen_evaluated_node: Optional[Node] = None
-        selection_strategy = self.acfg.self_consistency.selection_strategy
+        selection_strategy = self.acfg.selfConsistency.selection_strategy
 
         if selection_strategy == "interpreter_first_success":
             for node_candidate in evaluated_temp_nodes:
@@ -1815,7 +1815,7 @@ class SelfConsistencyAgent(Agent):
         selects the best, and returns it as a new Node.
         """
         log_prefix_draft = f"SC_AGENT_DRAFT_Step:{self.current_step}"
-        logger.info(f"{log_prefix_draft}: Starting self-consistency draft operation (N={self.acfg.self_consistency.num_responses}).")
+        logger.info(f"{log_prefix_draft}: Starting self-consistency draft operation (N={self.acfg.selfConsistency.num_responses}).")
 
 
         task_summary, master_plan_text = self._get_master_plan()
@@ -1895,7 +1895,7 @@ class SelfConsistencyAgent(Agent):
 
     def _improve(self, parent_node: Node) -> Node:
         log_prefix_improve = f"SC_AGENT_IMPROVE_Step:{self.current_step}"
-        logger.info(f"{log_prefix_improve}: Starting self-consistency improve for node {parent_node.id} (N={self.acfg.self_consistency.num_responses}).", extra={"verbose": True})
+        logger.info(f"{log_prefix_improve}: Starting self-consistency improve for node {parent_node.id} (N={self.acfg.selfConsistency.num_responses}).", extra={"verbose": True})
 
         # 1. Prepare the prompt for generating N improvement (plan,code) pairs
         improve_sys_prompt = get_agent_improve_system_prompt() # This is AGENT_improve_SYSTEM_PROMPT_DICT
@@ -1912,7 +1912,7 @@ class SelfConsistencyAgent(Agent):
             user_prompt_dict=improve_user_prompt_dict,
             system_prompt_dict=improve_sys_prompt,
             retries=3,
-            num_responses=self.acfg.self_consistency.num_responses,  # Tell it to ask backend for N
+            num_responses=self.acfg.selfConsistency.num_responses,  # Tell it to ask backend for N
             return_all_responses=True
         )
 
@@ -1968,7 +1968,7 @@ class SelfConsistencyAgent(Agent):
     def _debug(self, parent_node: Node) -> Node:
         log_prefix_debug = f"SC_AGENT_DEBUG_Step:{self.current_step}"
         
-        logger.info(f"{log_prefix_debug}: Starting self-consistency debug for node {parent_node.id} (N={self.acfg.self_consistency.num_responses}).", extra={"verbose": True})
+        logger.info(f"{log_prefix_debug}: Starting self-consistency debug for node {parent_node.id} (N={self.acfg.selfConsistency.num_responses}).", extra={"verbose": True})
 
         debug_sys_prompt = get_agent_debug_system_prompt() 
 
@@ -1987,7 +1987,7 @@ class SelfConsistencyAgent(Agent):
             system_prompt_dict=debug_sys_prompt,
             retries=3,
             return_all_responses=True,
-            num_responses=self.acfg.self_consistency.num_responses
+            num_responses=self.acfg.selfConsistency.num_responses
         )
 
         if not candidate_plan_code_summary_tuples or \
