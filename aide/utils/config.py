@@ -159,13 +159,16 @@ def prep_cfg(cfg: Config):
 
     top_workspace_dir = Path(cfg.workspace_dir).resolve()
     top_workspace_dir.mkdir(parents=True, exist_ok=True)
+    org1 = ""
+    model1 = ""
     model1 = cfg.agent.code.model
     # generate experiment name and prefix with consecutive index
+
     if "/" in cfg.agent.code.model:
         org1, model1 = parse_model_id(cfg.agent.code.model)
 
     experiement_id = (
-        org1
+        org1 or ""
         + "_"
         + model1
         + str(cfg.competition_name or str(cfg.data_dir.name))
