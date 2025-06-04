@@ -34,6 +34,11 @@ class WandbConfig:
     log_code: bool = True
     log_artifacts: bool = True
 
+@dataclass
+class SelfConsistencyConfig:
+    num_responses: int = 1  # Number of candidates to generate. Default to 1 (no SC).
+    selection_strategy: str = "interpreter_first_success" # Options: "interpreter_first_success", "interpreter_best_metric"
+
 
 @dataclass
 class StageConfig:
@@ -70,6 +75,8 @@ class AgentConfig:
     feedback: StageConfig
     search: SearchConfig
     s_star_iterative_debug: SStarIterativeDebugConfig = field(default_factory=SStarIterativeDebugConfig)
+    selfConsistency: SelfConsistencyConfig = field(default_factory=SelfConsistencyConfig) 
+
     # # MCTS specific parameters
     # mcts_iterations: int = 10  # Number of MCTS iterations per step
     # mcts_exploration_weight: float = 1.414  # UCB exploration parameter

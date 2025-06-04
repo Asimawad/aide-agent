@@ -53,7 +53,7 @@ agent:
     temp: 0.5
 
   # ── Self-consistency settings ───────────────────────────────────────────
-  self_consistency:
+  selfConsistency:
     selection_strategy: "interpreter_first_success" # or "interpreter_best_metric"
     num_responses: 3 
   # ── Tree-search / debugging heuristics ───────────────────────────────────
