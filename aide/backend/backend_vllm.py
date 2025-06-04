@@ -116,12 +116,11 @@ def query(
 
         api_params = {
             "temperature": temperature,
-            "max_tokens": model_kwargs.get("max_new_tokens"),
-            "top_p": model_kwargs.get("top_p"),
-            "top_k": model_kwargs.get("top_k"),
-            "stop": model_kwargs.get("stop"),
-            "frequency_penalty": model_kwargs.get("frequency_penalty"),
-            "presence_penalty": model_kwargs.get("presence_penalty"),
+            "max_tokens": model_kwargs.get("max_new_tokens", 4096),
+            "top_p": model_kwargs.get("top_p", 0.95),
+            "top_k": model_kwargs.get("top_k", 40),
+            "frequency_penalty": model_kwargs.get("frequency_penalty", 0.0),
+            "presence_penalty": model_kwargs.get("presence_penalty", 0.0),
         }
         filtered_api_params = {k: v for k, v in api_params.items() if v is not None}
         filtered_api_params["model"] = model

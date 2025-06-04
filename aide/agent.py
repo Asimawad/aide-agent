@@ -1525,7 +1525,7 @@ class SelfConsistencyAgent(Agent):
   
         task_summary, master_plan_text, _ = self.plan_query(
             user_prompt_dict=plan_user_prompt_dict,
-            retries=3, # Using a potentially specific retry count for planning
+            retries=3, 
         )
   
         if not master_plan_text or master_plan_text.strip() == "":
