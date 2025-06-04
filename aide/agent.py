@@ -30,7 +30,7 @@ from .utils.self_reflection import (
 )
 from .utils.metric import MetricValue, WorstMetricValue # Moved here for clarity
 
-from .utils.prompt_base import (
+from .utils.prompt_utils import (
     get_agent_draft_user_prompt,
     get_agent_improve_user_prompt,
     review_func_spec,
@@ -276,7 +276,7 @@ class Agent:
     def process_step(self,exec_callback: ExecCallbackType,result_node: Node,node_stage: str, current_step_number: int, use_reflection: bool = True):
         
         logger.info(f"Executing code for step {current_step_number}.", extra={"verbose": True})
-
+        print(f"code: {wrap_code(result_node.code)}")
         exec_start_time = time.time()
         exec_result = exec_callback(result_node.code, reset_session=True)
         exec_duration = time.time() - exec_start_time

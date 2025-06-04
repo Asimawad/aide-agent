@@ -118,7 +118,6 @@ def query(
             "temperature": temperature,
             "max_tokens": model_kwargs.get("max_new_tokens", 4096),
             "top_p": model_kwargs.get("top_p", 0.95),
-            "top_k": model_kwargs.get("top_k", 40),
             "frequency_penalty": model_kwargs.get("frequency_penalty", 0.0),
             "presence_penalty": model_kwargs.get("presence_penalty", 0.0),
         }
