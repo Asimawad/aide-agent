@@ -31,6 +31,7 @@ aide \
     agent.obfuscate=False \
     agent.ITS_Strategy="self-consistency" \
     agent.code.model="${CODER_MODEL}" \
+    agent.code.planner_model="${CODER_MODEL}" \
     agent.code.temp=0.8 \
     agent.code.max_new_tokens=4096 \
     agent.code.num_return_sequences=1 \
