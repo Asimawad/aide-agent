@@ -183,7 +183,6 @@ class Agent:
         logger.error(f"{log_prefix}: All {retries} attempts for plan+code extraction failed.", extra={"verbose": True})
         return "", completion_text or "No LLM response received", "EXTRACTION_FAILED"
 
-
     def _draft(self, parent_node=None) -> Node:
         log_prefix_base = f"{self.__class__.__name__}_DRAFT_STEP:{self.current_step}" 
         logger.info(f"{log_prefix_base}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
@@ -220,7 +219,6 @@ class Agent:
         logger.info(f"{log_prefix_base}: Improvement plan for node {parent_node.id}: {trim_long_string(plan)}", extra={"verbose": True})
         logger.info(f"{log_prefix_base}: Improved node {parent_node.id} to new node {new_node.id}.", extra={"verbose": True})
         return new_node
-
 
     def _debug(self, parent_node: Node) -> Node:
         log_prefix_base = f"{self.__class__.__name__}_DEBUG_STEP{self.current_step}"
@@ -321,7 +319,6 @@ class Agent:
             logger.debug(f"Result: Not Buggy", extra={"verbose": True})
             logger.debug(f"Feedback: {result_node.analysis}", extra={"verbose": True})
         return result_node, exec_duration
-
 
     def step(self, exec_callback: ExecCallbackType, current_step_number: int):
         log_prefix_main = f"{self.__class__.__name__.upper()}_STEP{current_step_number}"
@@ -1359,6 +1356,7 @@ class CodeChainAgent(Agent): # Inherit from Agent
 #############################################################################
 # SelfConsistencyAgent Implementation
 #############################################################################
+
 class SelfConsistencyAgent(Agent):
     def __init__(
         self,
@@ -1373,6 +1371,21 @@ class SelfConsistencyAgent(Agent):
             f"SelfConsistencyAgent initialized. N={self.acfg.selfConsistency.num_responses}, "
             f"Strategy='{self.acfg.selfConsistency.selection_strategy}'"
         )
+    
+    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
+        logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
+        logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        if completion_text is None: return "", "", ""
+        task_summary, plan = extract_summary_and_plan(completion_text,task=True); 
+        if not (plan and task_summary): 
+            plan = plan or str(completion_text) 
+            task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
+            logger.warning(f"{log_prefix}: Plan or summary extraction failed/partial. Raw: {trim_long_string(completion_text)}", extra={"verbose":True})
+        logger.debug(f"{log_prefix}: Plan query completed. Task summary: {task_summary}\n\nPlan: {plan}", extra={"verbose": True})
+        return task_summary, plan, ""
 
     def plan_and_code_query(self,
                             user_prompt_dict: Dict[str, Any],
@@ -1522,7 +1535,7 @@ class SelfConsistencyAgent(Agent):
   
         task_summary, master_plan_text, _ = self.plan_query(
             user_prompt_dict=plan_user_prompt_dict,
-            retries=3, 
+            retries=3, # Using a potentially specific retry count for planning
         )
   
         if not master_plan_text or master_plan_text.strip() == "":
@@ -1546,7 +1559,7 @@ class SelfConsistencyAgent(Agent):
         """
         log_prefix = f"SC_AGENT_GET_N_CODES_Step:{self.current_step}"
         N = self.acfg.selfConsistency.num_responses
-        print(f"self.acfg.self_consistency: {self.acfg.selfConsistency}")
+        print(f"self.acfg.selfConsistency: {self.acfg.selfConsistency}")
         logger.info(f"{log_prefix}: Generating {N} code candidates for the master plan.", extra={"verbose": True})
 
 
@@ -1820,7 +1833,7 @@ class SelfConsistencyAgent(Agent):
 
         task_summary, master_plan_text = self._get_master_plan()
 
-        if master_plan_text == "MASTER_PLAN_GENERATION_FAILED_SELF_CONSISTENCY":
+        if master_plan_text == "MASTER_PLAN_GENERATION_FAILED_SELFCONSISTENCY":
             logger.error(f"{log_prefix_draft}: Master plan generation failed. Cannot proceed with drafting code candidates.")
             # Create and return a definitive error node
             error_node = Node(
