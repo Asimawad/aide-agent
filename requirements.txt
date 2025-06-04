@@ -22,10 +22,14 @@ rich
 shutup
 tqdm
 transformers  
-torch==2.6.0+cu124                  
-torchvision==0.21.0+cu124                
-torchaudio==2.6.0+cu124                   
-vllm==0.8.5                        
+# torch==2.6.0+cu124                  
+# torchvision==0.21.0+cu124                
+# torchaudio==2.6.0+cu124                   
+# vllm==0.8.5 
+torch                
+torchvision              
+torchaudio                  
+vllm                 
 setuptools
 packaging
 wheel
@@ -66,13 +70,7 @@ timm # PyTorch Image Models
 opencv-python # OpenCV for image processing
 Pillow # PIL for image manipulation
 
-# # --- Text & NLP ---
-# nltk # Natural Language Toolkit
-# spacy # For advanced NLP tasks
-# spacy-transformers # For using transformers with spaCy
-# textblob # Simple NLP tasks
-# transformers # Hugging Face Transformers library for NLP models
-# sentence-transformers # For sentence embeddings and similarity tasks
+
 # # # --- Image Specific ---
 albumentations # For image augmentation
 # imgaug # Another library for image augmentation
@@ -89,7 +87,6 @@ optuna # Hyperparameter optimization
 httpx # Often a dependency of API clients like openai, good to ensure it's there.
 igraph # For tree visualization (tree_export.py) - can be python-igraph or cairocffi for plotting
 cairocffi # Often needed for igraph plotting capabilities
-pandas-stubs # For type hinting with pandas (development) - optional
 
 radon
 catboost
