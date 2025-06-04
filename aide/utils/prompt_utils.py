@@ -182,38 +182,19 @@ AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
         "Possible Questions you will face": "You will be asked to either come up with a plan and code to solve a Kaggle competition, debug existing code, or improve working code to get better results.",
         "How to answer the user": (
             'Whenever you answer, always: '
-            '1. Write a "PLAN:" section in plain text with 7-10*highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
+            '1. You strat by writing a "PLAN:" section in plain text with 7-10*highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
             'Example plan step: "1. Load \'train.csv\' and \'test.csv\' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets."\n'
             '2. Then write a "CODE:" section containing exactly one fenced Python block: ```python. Within this code block, *before each major logical section of code*, include a comment explaining your immediate thought process, the specific purpose of that section, and how it relates to your PLAN step. '
-            'Example CODE format: ```python\n'
-            '# Thought: First, I need to load the data using pandas as per step 1 of the plan.\n'
-            'import pandas as pd\n'
-            'train_df = pd.read_csv("./input/train.csv")\n'
-            'test_df = pd.read_csv("./input/test.csv")\n'
-            '# Thought: Now, preprocess the features. Based on preliminary analysis, fill missing numerical values with the mean, as mentioned in the plan.\n'
-            'train_df["Feature"] = train_df["Feature"].fillna(train_df["Feature"].mean())\n'
-        ),
-        "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed."
-    },
-}
+            "Your entire response MUST strictly follow this format:\n\n"
+            "PLAN:\n" # No "1)"
+            "<your step-by-step reasoning here, as detailed bullet points>\n\n" # Removed "plain text, no fences" as it's implied by not having backticks
+            "---\n" # Separator
+            "CODE:\n" # No "2)"
+            "```python\n"
+            "<your python code here, with '# Thought:' comments before logical blocks>\n"
+            "```\n"
+            "There should be NO text before 'PLAN:' and NO text after the final '```'."
 
-
-AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
-    "SYSTEM": "You are a Kaggle Grandmaster. You can plan, implement, debug, and improve machine learning engineering code.",
-    "user_instructions": {
-        "Possible Questions you will face": "You will be asked to either come up with a plan and code to solve a Kaggle competition, debug existing code, or improve working code to get better results.",
-        "How to answer the user": (
-            'Whenever you answer, always: '
-            '1. Write a "PLAN:" section in plain text with 7-10*highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
-            'Example plan step: "1. Load \'train.csv\' and \'test.csv\' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets."\n'
-            '2. Then write a "CODE:" section containing exactly one fenced Python block: ```python. Within this code block, *before each major logical section of code*, include a comment explaining your immediate thought process, the specific purpose of that section, and how it relates to your PLAN step. '
-            'Example CODE format: ```python\n'
-            '# Thought: First, I need to load the data using pandas as per step 1 of the plan.\n'
-            'import pandas as pd\n'
-            'train_df = pd.read_csv("./input/train.csv")\n'
-            'test_df = pd.read_csv("./input/test.csv")\n'
-            '# Thought: Now, preprocess the features. Based on preliminary analysis, fill missing numerical values with the mean, as mentioned in the plan.\n'
-            'train_df["Feature"] = train_df["Feature"].fillna(train_df["Feature"].mean())\n'
         ),
         "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed."
     },
@@ -518,50 +499,6 @@ def get_agent_debug_user_prompt(
 #################################################################################################################################################################
 ############################################################## --- Planner Agent --- #############################################################################
 #################################################################################################################################################################
-
-# # --- Static Prompt Components (from PlannerAgent) ---
-# PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT2: Dict[str, Any] = {
-#     "SYSTEM": (
-#         "You are an expert Kaggle Grandmaster and a meticulous Technical Lead. Your primary responsibility is to "
-#         "create exceptionally detailed, actionable, and high-quality strategic plans for solving machine learning competitions. "
-#         "These plans will be executed by a separate Coder agent. Your output MUST be a 'Task Summary' followed by a 'Plan'. "
-#         "You do NOT write any code."
-#     ),
-#     "user_instructions": {
-#         "Task Context": "You will be provided with a full Kaggle competition description, data overview, and potentially a memory of previous attempts.",
-#         "Your Output Requirements (Strict Adherence Mandatory)": (
-#             "Your response MUST strictly follow this two-part structure, using the specified markdown headers:\n\n"
-#             "## Task Summary:\n"
-#             "   - Provide a concise summary (5-7 sentences) of the overall competition task, its objective, the primary evaluation metric, and key data characteristics. This summary is to orient the Coder agent.\n\n"
-#             "## Plan:\n"
-#             "   - Construct a list of 7-10 sequential, highly detailed bullet points outlining the step-by-step methodology to create a *simple, correct, and bug-free first draft solution*.\n"
-#             "   - **Crucial Detail per Step:** Each bullet point *must* be self-contained and explicitly state:\n"
-#             "       a. **WHAT** the action is.\n"
-#             "       b. **HOW** it will be achieved (mention specific libraries, functions, parameters, or techniques, e.g., 'use `pandas.read_csv()`', 'apply `sklearn.preprocessing.StandardScaler`', 'define a PyTorch `Dataset` class with `__getitem__` to load images using `PIL.Image.open()`').\n"
-#             "       c. **WHY** this step is necessary or its purpose in the overall solution (briefly).\n"
-#             "   - **No EDA:** Do NOT include steps for Exploratory Data Analysis (EDA).\n"
-#             "   - **Simplicity for Draft:** For this initial draft, prioritize a straightforward approach. Avoid complex ensembling or extensive hyperparameter optimization. and try to use a different approach than the previous solutions in the memory.\n"
-#             "   - **Data Access:** Assume all necessary data files are available in the `./input/` directory and require no unzipping.\n"
-#             "   - **Memory Consideration:** If a 'Memory of Previous Attempts' is provided, learn from it and avoid repeating unsuccessful strategies or explicitly address past issues if relevant to the new plan.\n\n"
-
-#             "   *Example Plan Steps (for a hypothetical customer churn prediction task, demonstrating required detail for each bullet point):*\n"
-#             '   " - **1. Imports, Data Loading and Initial Setup**: \n'
-#                         '*WHAT: Utilize the `pandas` library to load `train.csv` and `test.csv` into DataFrames named `train_df` and `test_df` respectively, using `pd.read_csv()`. '
-#                         '*HOW: This provides the foundational data structures. Store the `customerID` column from `test_df` into a separate variable `test_customer_ids` for later use in the submission file, as this ID is required for matching predictions."\n'
-#                         '*WHY: This step is essential to ensure we have the correct identifiers for our test set predictions later on.\n'
-#             '   " - **2. Target Variable Preparation**: \n'
-#                         '*WHAT: Isolate the target variable, assumed to be named `Churn` in `train_df`. Create a new series `y_train_raw = train_df[\"Churn\"]`. Since ML models require numerical targets, convert `y_train_raw` (if string like \'Yes\'/\'No\') to binary (1/0) using `sklearn.preprocessing.LabelEncoder`. \n'
-#                         '*HOW: Fit and transform `y_train_raw` to create `y_train_encoded`. This step is crucial for model compatibility."\n'
-#                         '*WHY: ML models need numerical inputs, so this conversion is necessary for training.\n'
-#             '   " - **3. Numerical Feature Imputation and Scaling**: \n' 
-#                         '*WHAT: Identify numerical feature columns (e.g., `tenure`, `MonthlyCharges`). For these, first impute missing values using `sklearn.impute.SimpleImputer(strategy=\'median\')`, fitting *only* on the training data numerical features and then transforming both train and test numerical features to prevent data leakage.\n'
-#                         '*HOW: Subsequently, scale these imputed numerical features using `sklearn.preprocessing.StandardScaler`, again fitting *only* on the training set numerical features and then transforming both sets. This ensures features have zero mean and unit variance, aiding model convergence."\n'
-#                         '*WHY: Proper scaling and imputation are critical for model performance and to avoid biases from different feature distributions.\n'
-#             '   " - (Continue with 4-7 more similarly detailed steps covering categorical encoding, feature combination, train-validation split, model instantiation (e.g., `LogisticRegression`), training, validation metric calculation and printing, test set prediction, and submission file generation, all with similar explicit detail on libraries/functions and rationale.)"\n'
-#         ),
-#        "Critical Reminder": "Your role is exclusively planning and summarizing. Your plan steps MUST be as detailed as the provided examples. DO NOT generate any Python code.The Coder agent relies entirely on the clarity, DETAILS, and correctness of your 'Task Summary' and 'Plan'."
-#     }
-# }
 
 PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "SYSTEM": (
