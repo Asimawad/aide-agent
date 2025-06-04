@@ -10,7 +10,9 @@ from typing import Any, Callable, cast, Optional, Dict ,List,Tuple,Union # Added
 from .backend import query
 from .interpreter import ExecutionResult
 from .journal import Journal, Node
-from .utils import data_preview # data_preview.generate
+from .utils import data_preview
+from aide.backend.utils import OutputType, PromptType, compile_prompt_to_md
+
 from .utils.config import Config
 from .utils.pretty_logging import log_step # logger from pretty_logging might conflict, be careful
 from .backend.utils import ContextLengthExceededError # Add this import at the top of agent.py
@@ -1372,20 +1374,198 @@ class SelfConsistencyAgent(Agent):
             f"Strategy='{self.acfg.selfConsistency.selection_strategy}'"
         )
     
-    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3) -> tuple[str, str, str]:
-        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"PLANNER_AGENT_PLAN_QUERY_STEP{self.current_step}"
+
+    def _query_llm_with_retries(
+        self,
+        query_type: str, # e.g., "PLANNER_PLAN", "PLANNER_CODER", "Segment-Generation"
+        system_prompt: Dict[str, Any],
+        user_prompt: Dict[str, Any],
+        model: str,
+        convert_system_to_user: bool,
+        retries: int = 3,
+        max_tokens: int = None,
+        num_responses: int = 1,
+        temperature: float=0.7,
+        planner_flag: bool=False, # Number of desired completions
+    ) -> Union[OutputType, List[OutputType], None]: # Return type can be single, list, or None on total failure
+        
+        completion_text = None
+        log_prefix = f"" 
+        for attempt in range(retries):
+            logger.info(f"Generation Attempt {attempt+1}/{retries}: Sending request. Model: {model}, Temp: {temperature}, PlannerFlag: {planner_flag}", extra={"verbose": True})
+            try:
+                raw_llm_output_from_backend: Union[OutputType, List[OutputType], None] = None
+                raw_llm_output_from_backend = query(
+                    system_message=system_prompt,
+                    user_message=user_prompt,
+                    model=model,
+                    temperature=temperature,
+                    planner=planner_flag,
+                    current_step=self.current_step,
+                    convert_system_to_user=convert_system_to_user,
+                    max_tokens=max_tokens if max_tokens is not None else self.acfg.code.max_new_tokens,
+                    num_responses=num_responses,
+                )
+
+                if isinstance(raw_llm_output_from_backend, str) and \
+                   ("Exceeded context length limit" in raw_llm_output_from_backend or \
+                    "CONTEXT_LENGTH_EXCEEDED" in raw_llm_output_from_backend): # Check common error strings
+                    logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Backend returned Context Length Exceeded string: {raw_llm_output_from_backend}")
+
+                    raise ContextLengthExceededError(f"CLE from backend: {raw_llm_output_from_backend}")
+
+                if isinstance(raw_llm_output_from_backend, list):
+
+                    for item_idx, item_content in enumerate(raw_llm_output_from_backend):
+                        if isinstance(item_content, str) and \
+                           ("Exceeded context length limit" in item_content or \
+                            "CONTEXT_LENGTH_EXCEEDED" in item_content):
+                            logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Item {item_idx} in list from backend signals Context Length Exceeded: {item_content}")
+                            raise ContextLengthExceededError(f"CLE in list item from backend: {item_content}")
+                
+                if num_responses == 1 : 
+                    if not isinstance(raw_llm_output_from_backend, (str)) :
+                        logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Expected single str/dict from backend (n=1), got {type(raw_llm_output_from_backend)}. Content: {str(raw_llm_output_from_backend)[:200]}")
+                        if attempt == retries -1 : return None # Total failure
+                        time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                        continue # Retry
+
+                    single_completion_text = cast(OutputType, raw_llm_output_from_backend)  
+
+                    if query_type == "Segment-Generation":
+                            if not isinstance(single_completion_text, str):
+                                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation expected string, got {type(single_completion_text)}. Cannot extract code.")
+                                if attempt == retries -1: return None
+                                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                                continue # Retry
+                            
+                            code_snippet = extract_code(single_completion_text)
+                            if not code_snippet or not code_snippet.strip():
+                                logger.warning(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation - extracted empty code. Raw: '{trim_long_string(single_completion_text)}'. Retrying...")
+                                if attempt == retries -1: return "#EMPTY_CODE_SNIPPET_AFTER_RETRIES" # Or None
+                                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                                continue # Retry
+                            logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Segment-Generation successful.", extra={"verbose": True})
+                            return code_snippet.strip()
+                        
+                        # For other query types when n=1, return the single completion
+                    logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Query successful (n=1).", extra={"verbose": True})
+                    return single_completion_text
+
+
+                else: 
+                    if not isinstance(raw_llm_output_from_backend, list):
+                        logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Expected list from backend (n>1), got {type(raw_llm_output_from_backend)}. Content: {str(raw_llm_output_from_backend)[:200]}")
+                        if attempt == retries -1: return None # Total failure
+                        time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+                        continue 
+
+                    logger.info(f"{log_prefix}_ATTEMPT{attempt+1}: Query successful (n={num_responses}). Returning list of {len(raw_llm_output_from_backend)} items.", extra={"verbose": True})
+                    return raw_llm_output_from_backend
+
+            except ContextLengthExceededError as cle:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Context Length Exceeded: {cle}. Failing this operation permanently.", exc_info=False)
+                return None 
+            
+            except Exception as e:
+                logger.error(f"{log_prefix}_ATTEMPT{attempt+1}: Error during LLM query or processing: {e}", exc_info=True)
+                if attempt == retries - 1: 
+                    logger.error(f"{log_prefix}: All {retries} retries failed for query type {query_type}.")
+                    return None 
+                
+                time.sleep(self.cfg.agent.get("retry_delay_seconds", 5))
+
+        
+        logger.error(f"{log_prefix}: All {retries} attempts failed for query type {query_type}. Returning None.")
+        return None
+
+    def plan_query(self, user_prompt_dict: Dict[str, Any], retries: int = 3, planner_flag: bool=True) -> tuple[str, str, str]:
+        system_prompt = get_planner_agent_plan_system_prompt(); log_prefix = f"Plan_Step: {self.current_step}"
+
         logger.info(f"{log_prefix}: Sending PLANNER_PLAN query to LLM.", extra={"verbose": True})
         logger.debug(f"{log_prefix}: System prompt: {system_prompt}", extra={"verbose": True})
         logger.debug(f"{log_prefix}: User prompt: {user_prompt_dict}", extra={"verbose": True})
-        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict, model=self.acfg.code.planner_model, temperature=self.acfg.code.temp, planner_flag=True, convert_system_to_user=self.acfg.convert_system_to_user, retries=retries)
+        completion_text = self._query_llm_with_retries(query_type="PLANNER_PLAN", system_prompt=system_prompt, user_prompt=user_prompt_dict,
+                                               model=self.acfg.code.planner_model, temperature=self.acfg.code.temp,
+                                               convert_system_to_user=self.acfg.convert_system_to_user, retries=retries, planner_flag=planner_flag)
         if completion_text is None: return "", "", ""
-        task_summary, plan = extract_summary_and_plan(completion_text,task=True); 
-        if not (plan and task_summary): 
-            plan = plan or str(completion_text) 
-            task_summary = task_summary or "SUMMARY_EXTRACTION_FAILED_FROM_PLAN_QUERY" 
-            logger.warning(f"{log_prefix}: Plan or summary extraction failed/partial. Raw: {trim_long_string(completion_text)}", extra={"verbose":True})
-        logger.debug(f"{log_prefix}: Plan query completed. Task summary: {task_summary}\n\nPlan: {plan}", extra={"verbose": True})
-        return task_summary, plan, ""
+
+        summary, plan = extract_summary_and_plan(completion_text)
+        if not (plan and summary): plan = plan or str(completion_text); summary = summary or "SUMMARY_EXTRACTION_FAILED"
+        logger.info(f"{log_prefix}: Extracted summary and plan: {summary} \n ------ \n {plan} \n ------ \n END", extra={"verbose": True})
+        return summary, plan, " "
+    
+    def code_query(self, 
+                   user_prompt_dict: Dict[str, Any], 
+                   retries: int = 3, 
+                   num_responses: int = 1, # Add num_responses here
+                   temperature: float = 0.7) -> Union[Tuple[str, str, str], List[Tuple[str, str, str]]]: # Return can be single or list of (plan, code, summary)
+                                                                                      # For code_query, plan and summary are empty strings.
+        system_prompt = get_planner_agent_code_system_prompt() # This system prompt is for generating ONLY code
+        log_prefix = f"AGENT_CODE_QUERY_Step:{self.current_step}"
+        
+        # _query_llm_with_retries will call backend.query with n=num_responses.
+        # backend.query will return a single string if num_responses=1, or List[str] if num_responses > 1.
+        raw_llm_output = self._query_llm_with_retries(
+            query_type="PLANNER_CODER", # Or a more generic "CODE_GENERATION"
+            system_prompt=system_prompt, 
+            user_prompt=user_prompt_dict,
+            temperature=temperature,
+            model=self.acfg.code.model, # Use the primary coder model
+            planner_flag=False, # It's a coder model call
+            convert_system_to_user=self.acfg.convert_system_to_user, 
+            retries=retries,
+            num_responses=num_responses, # Pass N here
+        )
+
+        if raw_llm_output is None: # Indicates total failure in _query_llm_with_retries
+            if num_responses > 1:
+                return [("", "#LLM_QUERY_RETURNED_NONE", "Query returned None")] * num_responses
+            else:
+                return "", "#LLM_QUERY_RETURNED_NONE", "Query returned None"
+
+        if isinstance(raw_llm_output, list):
+            # We received multiple raw text responses
+            extracted_codes_tuples: List[Tuple[str, str, str]] = []
+            for text_item in raw_llm_output:
+                if not isinstance(text_item, str):
+                    logger.warning(f"{log_prefix}: Received non-string item in list from LLM: {type(text_item)}. Skipping.")
+                    extracted_codes_tuples.append(("", "#NON_STRING_RESPONSE_ITEM", "Non-string item"))
+                    continue
+                if text_item.startswith("ERROR:") or text_item == "Exceeded context length limit":
+                     logger.warning(f"{log_prefix}: Received error string from LLM: {text_item}.")
+                     extracted_codes_tuples.append(("", f"#{text_item.replace(' ','_')}", text_item)) # Make it a valid comment
+                     continue
+
+                code = extract_code(text_item)
+                if code:
+                    logger.info(f"{log_prefix}: Successfully extracted code from one of N responses.", extra={"verbose": True})
+                    extracted_codes_tuples.append(("", code, "code_candidate_summary_placeholder"))
+                else:
+                    print(f"{log_prefix}: Code extraction failed for one of N responses.'")
+                    logger.debug(f"{log_prefix}: Code extraction failed for one of N responses. Raw: '{trim_long_string(text_item)}'", extra={"verbose": True})
+                    extracted_codes_tuples.append(("", f"#CODE_EXTRACTION_FAILED\n#Raw:\n#{text_item.replace(chr(10), '#')}", "Code extraction failed"))
+            return extracted_codes_tuples
+        
+        elif isinstance(raw_llm_output, str): # Single response (num_responses was likely 1)
+            if raw_llm_output.startswith("ERROR:") or raw_llm_output == "Exceeded context length limit":
+                logger.warning(f"{log_prefix}: Received error string from LLM: {raw_llm_output}.")
+                return "", f"#{raw_llm_output.replace(' ','_')}", raw_llm_output
+        
+            code = extract_code(raw_llm_output)
+            if code:
+                logger.info(f"{log_prefix}: Successfully extracted code.", extra={"verbose": True})
+                # logger.debug(f"{log_prefix} \n EXTRACTED_CODE_START\n{code}\nEXTRACTED_CODE_END", extra={"verbose": True})
+                return "", code, "code_generation_summary_placeholder" # Plan is empty, summary is placeholder
+            else:
+                logger.warning(f"{log_prefix}: Code extraction failed. Raw: '{trim_long_string(raw_llm_output)}'")
+                # Return the raw output as code if extraction fails, prepended with a comment
+                return "", f"#CODE_EXTRACTION_FAILED\n#Raw Response:\n#{raw_llm_output.replace(chr(10),'#')}", "Code extraction failed"
+        else:
+            # Should not happen if _query_llm_with_retries behaves as expected
+            logger.error(f"{log_prefix}: Unexpected output type from _query_llm_with_retries: {type(raw_llm_output)}")
+            err_placeholder = ("", "#UNEXPECTED_LLM_OUTPUT_TYPE", "Unexpected LLM output type")
+            return [err_placeholder] * num_responses if num_responses > 1 else err_placeholder
 
     def plan_and_code_query(self,
                             user_prompt_dict: Dict[str, Any],
