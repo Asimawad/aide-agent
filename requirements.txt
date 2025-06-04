@@ -35,7 +35,9 @@ datasets
 scikit-learn
 xgboost
 lightgbm
+# tensorflow==2.19.0
 keras
+# numpy==2.1.3
 matplotlib
 albumentations
 seaborn
@@ -92,5 +94,5 @@ pandas-stubs # For type hinting with pandas (development) - optional
 radon
 catboost
 tensorflow-decision-forests
-
+pymorphy2
 num2words
