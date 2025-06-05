@@ -22,14 +22,10 @@ rich
 shutup
 tqdm
 transformers  
-# torch==2.6.0+cu124                  
-# torchvision==0.21.0+cu124                
-# torchaudio==2.6.0+cu124                   
-# vllm==0.8.5 
-torch                
-torchvision              
-torchaudio                  
-vllm                 
+torch==2.6.0+cu124                  
+torchvision==0.21.0+cu124                
+torchaudio==2.6.0+cu124                   
+vllm==0.8.5             
 setuptools
 packaging
 wheel
