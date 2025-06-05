@@ -6,7 +6,7 @@
 # mkdir -p logs/
 CODER_MODEL="o4-mini-2025-04-16"
 # O4_MODEL="o3-mini"
-DeepSeek_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"
+# DeepSeek_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"
 # CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"
 # CODER_MODEL="o3-mini"
 # ${O4_MODEL} #"RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
