@@ -14,6 +14,7 @@ pyproject.toml
 uv.lock
 info/
 scratch
+helpers/
 build/
 logs_old/
 develop-eggs/
@@ -140,6 +141,7 @@ celerybeat.pid
 .env
 .venv
 env/
+helpers_files/
 venv/
 ENV/
 env.bak/
