@@ -1,221 +1,166 @@
-# AIDE: the Machine Learning CodeGen Agent
+# AIDE: AI-Driven Exploration for ML Engineering
+### An Open-Source Agentic Framework for Autonomous Problem-Solving
 
-# How to use AIDE?
-## Setup
+AIDE (AI-Driven Exploration) is an open-source, autonomous agent designed to tackle end-to-end machine learning engineering tasks. It frames the complex, iterative process of ML development as a tree search through the space of possible code solutions. Powered by Large Language Models (LLMs), AIDE can draft initial solutions, debug faulty code, and iteratively improve upon working scripts to enhance performance, mirroring the workflow of a human data scientist.
 
-Make sure you have uv and `Python>=3.11` installed and run:
+This repository contains the implementation of the AIDE agent, along with several advanced **Inference-Time Scaling (ITS)** strategies designed to enhance the performance of smaller, open-source LLMs, making them competitive with large, proprietary models on challenging benchmarks like [MLE-Bench](https://github.com/openai/mle-bench).
+
+![Solution Tree Visualization](https://github.com/WecoAI/aideml/assets/8918572/2401529c-b97e-4029-aed2-c3f376f54c3c)
+
+---
+
+## Features
+- **Agentic Tree Search:** Models ML engineering as a tree search, intelligently navigating through drafting, debugging, and improvement steps.
+- **Local LLM Integration:** Comes with a high-throughput backend powered by [vLLM](https://github.com/vllm-project/vllm) for serving local, open-source models efficiently.
+- **Plug-and-Play ITS Strategies:** Easily switch between different reasoning strategies via a simple configuration flag to find the best approach for your model and task.
+- **Supported Strategies:** Includes implementations for `Self-Reflection`, `Planner-Coder` (Task Decomposition), `Self-Consistency`, and more.
+- **Benchmark Ready:** Designed for rigorous evaluation on benchmarks like MLE-Bench.
+
+---
+
+## Quickstart
+
+### 1. Setup Environment
+Ensure you have Python >= 3.11 and `uv` installed.
+
 ```bash
-uv venv .aide-ds --python 3.11 
+# Clone the repository
+git clone https://github.com/Asimawad/aide-agent.git
+cd aide-agent
+
+# Create and activate a virtual environment
+uv venv .aide-ds --python 3.11
 source .aide-ds/bin/activate
-uv pip install  --index-strategy unsafe-best-match  --extra-index-url https://download.pytorch.org/whl/cu124 -e .
 
-```
-Also install `unzip` to allow the agent to autonomously extract your data.
+# Install dependencies (including PyTorch for CUDA 12.1)
+uv pip install --extra-index-url https://download.pytorch.org/whl/cu121 -e .
 
-Set up your OpenAI API key:
+# Set your OpenAI API Key (used for the reliable feedback/judge model)
+export OPENAI_API_KEY="<your-openai-api-key>"```
 
+### 2. Launch the Local LLM Server
+AIDE works best with a locally served open-source model for code generation. We use `vLLM` for high-performance inference.
+
+In a separate terminal, launch the vLLM server with your chosen model. For example, to serve the DeepSeek 14B model:
 ```bash
-export OPENAI_API_KEY=<your API key>
-```
-
-## Running AIDE via the command line
-
-To run AIDE:
-
-```bash
-aide data_dir="<path to your data directory>" goal="<describe the agent's goal for your task>" eval="<(optional) describe the evaluation metric the agent should use>"
-```
-
-For example, to run AIDE on the example [house price prediction task](https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques/data):
-
-```bash
-aide data_dir="example_tasks/house_prices" goal="Predict the sales price for each house" eval="Use the RMSE metric between the logarithm of the predicted and observed values." agent.code.model=deepseek-r1:latest wandb.project="my-aide-experiments"
-```
-
-### And here’s your model-friendly prompt-style instruction:
-
-```bash
-aide data_dir="spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=o3-mini agent.ITS_Strategy="none" agent.steps=3 agent.code.planner_model="RedHatAI_DeepSeek-R1-Distill-Qwen-7B-FP8-dynamic"
-
-logs/+o3-minispooky-author-identification_none_3_steps
-
-
+# Make sure your environment is activated: source .aide-ds/bin/activate
 python -m vllm.entrypoints.openai.api_server \
-    --model "Qwen/Qwen2-0.5B-Instruct"  \
-    --port 8001 \
-    --dtype bfloat16 \
-    --device cuda \
-    --max-model-len 2000 \
-    --gpu-memory-utilization 0.75 \
-    --trust-remote-code \
-    --enforce-eager 
-
-aide data_dir="data/spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=o3-mini agent.ITS_Strategy="self-reflection" agent.steps=10 competition_name="spooky-author-identification" agent.code.planner_model="Qwen/Qwen2-0.5B-Instruct"
-### To use vllm for inference
-.aide-ds/bin/python -m vllm.entrypoints.openai.api_server \
-    --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B \
+    --model "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" \
     --port 8000 \
     --dtype bfloat16 \
-    --device cuda &
-
-
-aide data_dir="aide/example_tasks/spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=deepseek-r1 agent.steps=2
-
-aide data_dir="example_tasks/spooky-author-identification" goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" eval="Use multi-class logarithmic loss between predicted author probabilities and the true label." agent.code.model=deepseek-r1:latest wandb.project="my-aide-experiments"
+    --gpu-memory-utilization 0.85 \
+    --trust-remote-code
 ```
 
+### 3. Run Your First AIDE Experiment
+Now, in your original terminal, you can run an AIDE experiment.
 
-
-## Arial-Cactus
-# Ensure you are in the directory ABOVE 'aerial-cactus-identification'
-# OR adjust data_dir accordingly if running from elsewhere.
-
-# Activate your environment first, e.g.: source .aide-ds/bin/activate
+**Example: House Price Prediction Task**
 ```bash
-aide data_dir="data/aerial-cactus-identification" \
-     goal="Create a classifier capable of predicting whether an aerial image contains a cactus" \
-     eval="Area under the ROC curve (AUC)" \
-     agent.code.model=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
-     agent.steps=20 \
-     agent.code.max_new_tokens=4096 \
-     agent.code.temp=0.6 \
-     wandb.project="aide-cactus-identification" 
+aide data_dir="aide/example_tasks/house_prices" \
+     goal="Predict the sales price for each house" \
+     eval="Use the RMSE metric between the logarithm of the predicted and observed values." \
+     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" \
+     agent.steps=25
 ```
-Options:
+AIDE will now start the run. You can monitor its progress in the console and find the results in the `runs/` and `workspaces/` directories upon completion.
 
-- `data_dir` (required): a directory containing all the data relevant for your task (`.csv` files, images, etc.).
-- `goal`: describe what you want the models to predict in your task, for example, "Build a timeseries forcasting model for bitcoin close price" or "Predict sales price for houses".
-- `eval`: the evaluation metric used to evaluate the ML models for the task (e.g., accuracy, F1, Root-Mean-Squared-Error, etc.)
+---
 
-Alternatively, you can provide the entire task description as a `desc_str` string, or write it in a plaintext file and pass its path as `desc_file` ([example file](aide/example_tasks/house_prices.md)).
+## How AIDE Works
+AIDE's problem-solving approach is centered around a **Solution Space Tree Search**. This process has three main components:
 
+1.  **The Solution Generator (The LLM):** Proposes new solutions by either creating novel drafts or making changes to existing solutions by fixing bugs or introducing improvements.
+2.  **The Evaluator:** Assesses the quality of each proposed solution by executing the code in a sandboxed environment and parsing the output (tracebacks, printed metrics) to determine if the solution is buggy and what its performance score is.
+3.  **The Search Policy:** A simple set of heuristics that selects the most promising node from the solution tree to serve as the base for the next iteration of refinement.
+
+By repeatedly applying these steps, AIDE navigates the vast space of possible solutions, progressively refining its approach until it converges on an optimal solution.
+
+## Using Inference-Time Scaling (ITS) Strategies
+
+The true power of this framework lies in its ability to apply different reasoning strategies to the LLM. You can activate these via a single command-line flag.
+
+### Self-Reflection (SR)
+**What it does:** After a code execution fails, the agent is forced to first critique its own code and then revise it based on that critique. This is excellent for fixing contained bugs.
+
+**How to run:**
 ```bash
-aide data_dir="my_data_dir" desc_file="my_task_description.txt"
+aide data_dir="..." goal="..." \
+     agent.ITS_Strategy="self-reflection" \
+     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
 ```
 
-The result of the run will be stored in the `logs` directory.
+### Decomposed Task Generation (Planner-Coder / "DG")
+**What it does:** This strategy separates the task into two phases: a "Planner" LLM creates a detailed, high-level plan, and then a "Coder" LLM implements that plan segment by segment. This is our best-performing strategy for high-capability models.
 
-- `logs/<experiment-id>/best_solution.py`: Python code of _best solution_ according to the validation metric
-- `logs/<experiment-id>/journal.json`: a JSON file containing the metadata of the experiment runs, including all the code generated in intermediate steps, plan, evaluation results, etc.
-- `logs/<experiment-id>/tree_plot.html`: you can open it in your browser. It contains visualization of solution tree, which details the experimentation process of finding and optimizing ML code. You can explore and interact with the tree visualization to view what plan and code AIDE comes up with in each step.
+**How to run:**
+```bash
+aide data_dir="..." goal="..." \
+     agent.ITS_Strategy="codechain" \
+     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B" \
+     agent.code.planner_model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B" # You can use a different model for planning
+```
+*Note: The `codechain_v2` (per-segment reflection) and `codechain_v3` (chunked reflection) variants can also be set via the `ITS_Strategy` flag.*
 
-The `workspaces` directory will contain all the files and data that the agent generated.
+### Self-Consistency (SC)
+**What it does:** Generates *N* different solutions in parallel for the same prompt and then uses execution feedback to select the best one. This improves robustness and the chance of finding a working solution.
 
-### Advanced Usage
+**How to run:**
+```bash
+aide data_dir="..." goal="..." \
+     agent.ITS_Strategy="self-consistency" \
+     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" \
+     agent.selfConsistency.num_responses=3 \
+     agent.selfConsistency.selection_strategy="interpreter_first_success"
+```
 
-To further customize the behaviour of AIDE, some useful options might be:
+---
 
-- `agent.code.model=...` to configure which model the agent should use for coding (default is `gpt-4-turbo`)
-- `agent.steps=...` to configure how many improvement iterations the agent should run (default is 20)
-- `agent.search.num_drafts=...` to configure the number of initial drafts the agent should generate (default is 5)
+## Advanced Configuration
+You can override any parameter from the command line. Key options include:
+- `agent.steps=...`: Number of iterations for the agent (default: 25).
+- `agent.search.num_drafts=...`: Number of initial solutions to explore (default: 5).
+- `agent.code.temp=...`: The sampling temperature for the coding model (higher values increase creativity/randomness).
+- `wandb.project=...`: To log your experiment results to Weights & Biases.
 
-You can check the [`config.yaml`](aide/utils/config.yaml) file for more options.
+For a full list of configurable parameters, see the `aide/utils/config.yaml` file.
 
-## Using AIDE in Python
-
-Using AIDE within your Python script/project is easy. Follow the setup steps above, and then create an AIDE experiment like below and start running:
+## Using AIDE as a Python Library
+You can also integrate AIDE directly into your Python projects.
 
 ```python
 import aide
+
+# Initialize the experiment
 exp = aide.Experiment(
-    data_dir="example_tasks/bitcoin_price",  # replace this with your own directory
-    goal="Build a timeseries forcasting model for bitcoin close price.",  # replace with your own goal description
-    eval="RMSLE"  # replace with your own evaluation metric
+    data_dir="aide/example_tasks/spooky-author-identification",
+    goal="Predict the author of a sentence (Poe, Lovecraft, or Shelley).",
+    eval="Use multi-class logarithmic loss."
 )
 
-best_solution = exp.run(steps=10)
+# Configure the agent programmatically (optional)
+exp.cfg.agent.ITS_Strategy = "self-consistency"
+exp.cfg.agent.code.model = "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+exp.cfg.agent.selfConsistency.num_responses = 3
 
-print(f"Best solution has validation metric: {best_solution.valid_metric}")
-print(f"Best solution code: {best_solution.code}")
+# Run the agent for 15 steps
+best_solution = exp.run(steps=15)
+
+print(f"Best solution's validation metric: {best_solution.valid_metric}")
+print("--- Best Solution Code ---")
+print(best_solution.code)
 ```
 
 ## Development
-
-To install AIDE for development, clone this repository and install it locally.
-first, Install dependencies either using uv or pip
+To install AIDE for development:
 ```bash
-uv sync
+git clone https://github.com/Asimawad/aide-agent.git
+cd aide-agent
 uv pip install -e .
 ```
-then:
-
-```bash
-git clone https://github.com/WecoAI/aideml.git
-cd aideml
-pip install -e .
-```
-
-Contribution guide will be available soon.
-
-## Algorithm Description
-
-AIDE's problem-solving approach is inspired by how human data scientists tackle challenges. It starts by generating a set of initial solution drafts and then iteratively refines and improves them based on performance feedback. This process is driven by a technique we call Solution Space Tree Search.
-
-At its core, Solution Space Tree Search consists of three main components:
-
-- **Solution Generator**: This component proposes new solutions by either creating novel drafts or making changes to existing solutions, such as fixing bugs or introducing improvements.
-- **Evaluator**: The evaluator assesses the quality of each proposed solution by running it and comparing its performance against the objective. This is implemented by instructing the LLM to include statements that print the evaluation metric and by having another LLM parse the printed logs to extract the evaluation metric.
-- **Base Solution Selector**: The solution selector picks the most promising solution from the explored options to serve as the starting point for the next iteration of refinement.
-
-By repeatedly applying these steps, AIDE navigates the vast space of possible solutions, progressively refining its approach until it converges on the optimal solution for the given data science problem.
-
-![Tree Search Visualization](https://github.com/WecoAI/aideml/assets/8918572/2401529c-b97e-4029-aed2-c3f376f54c3c)
 
 
 
 
 
-```bash
 
-aide  \
-      goal="Predict the author of a sentence as one of Poe, Lovecraft, or Shelley" \
-      eval=\
-      agent.code.model=deepseek-r1 \
-      agent.steps=3 \
-      agent.code.max_new_tokens=2048 \
-      exec.timeout=600 \
-      agent.code.temp=0.6 \
-      inference_engine=vllm
-
-
-
-
-.aide-ds/bin/python -m vllm.entrypoints.openai.api_server \
-    --model deepseek-ai/DeepSeek-R1-Distill-Qwen-14B \
-    --port 8000 \
-    --dtype bfloat16 \
-    --device cuda &
-
-aide data_dir="aide/example_tasks/nomad2018-predict-transparent-conductors/dataset" \
-     goal="Predict formation energy (formation_energy_ev_natom) and bandgap energy (bandgap_energy_ev) for materials given their composition and structural properties" \
-     eval="Mean of column-wise Root Mean Squared Logarithmic Error (RMSLE) across the two target columns" \
-     agent.code.model="deepseek-r1:latest" \
-     agent.steps=20 \
-     agent.code.max_new_tokens=2048 \
-     agent.code.temp=0.6 \
-     wandb.project="aide-nomad2018" \
-     exp_name="32b_nomad2018"
-
-
-```bash
-#!/bin/bash
-set -e                          
-set -o pipefail               
-
-echo "Entrypoint script started."
-
-export VLLM_TRACE_LEVEL=DEBUG
-
-# export MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
-# export MODEL_NAME="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
-# export MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" 
-# export MODEL_NAME="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
- $@"
-exec "$@"
-
-python -m vllm.entrypoints.openai.api_server \
-       --model  RedHatAI/DeepSeek-Coder-V2-Lite-Instruct-FP8 \
-       --trust-remote-code \
-       --port 8000 \
-       --max-model-len 4096 \   
-       --gpu-memory-utilization 0.85  
