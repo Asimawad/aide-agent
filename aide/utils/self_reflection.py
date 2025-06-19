@@ -17,6 +17,10 @@ from .config import load_cfg  # Assuming this is your config loader
 cfg = load_cfg()
 logger = logging.getLogger("aide")  # Use the same logger instance
 
+from .config import load_cfg # Assuming this is your config loader
+# --- Configuration ---
+cfg = load_cfg()
+logger = logging.getLogger("aide") # Use the same logger instance
 
 def perform_two_step_reflection(
     code: str,

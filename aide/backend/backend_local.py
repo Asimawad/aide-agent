@@ -55,7 +55,6 @@ from rich.syntax import Syntax
 logger = logging.getLogger("aide")  # More specific logger name
 console = Console()
 
-
 class LocalLLMManager:
     _cache = {}  # Cache to store loaded models
 

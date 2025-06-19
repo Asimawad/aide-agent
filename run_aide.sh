@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-set -e                          
-set -o pipefail   
+# set -e                          
+# set -o pipefail   
 cp -r logs/ logs_old/
 rm -rf workspaces/ wandb/ logs/
 mkdir -p logs/
