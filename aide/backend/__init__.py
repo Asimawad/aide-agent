@@ -9,6 +9,7 @@ from aide.utils.config import (
 
 from . import (
     backend_deepseek,
+    backend_deepseek,
     backend_local,
     backend_openai,
     backend_vllm,

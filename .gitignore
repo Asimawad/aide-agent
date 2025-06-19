@@ -29,6 +29,7 @@ lib/
 lib64/
 aide-ds/
 parts/
+agent.py
 sdist/
 var/
 wandb/
@@ -178,7 +179,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 .vscode/
-
+example_tasks/
 workspaces
 logs
 

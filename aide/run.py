@@ -5,8 +5,9 @@ import shutil
 import sys
 import pandas as pd
 import os
+from .utils import copytree, load_benchmarks
+from tqdm import tqdm  
 from pathlib import Path 
-from .utils import load_benchmarks 
 import time
 from rich.console import Console
 from rich.logging import RichHandler 
@@ -17,7 +18,7 @@ console = Console()
 from .utils import copytree 
 from aide.utils.metrics_calculator import generate_all_metrics
 from .utils.wandb_logger import WandbLogger 
-from .agent import Agent, PlannerAgent, CodeChainAgent, SelfConsistencyAgent, SelfDebugAgent
+from .agent import Agent, PlannerAgent, CodeChainAgent, SelfConsistencyAgent, SelfDebugAgent, BaselineAgent
 from .interpreter import Interpreter
 from .journal import Journal, Node 
 from omegaconf import OmegaConf
@@ -28,18 +29,10 @@ from rich.progress import (
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 from rich.status import Status
 from rich.tree import Tree 
 from .utils.config import load_task_desc, prep_agent_workspace, save_run, load_cfg
-
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-import warnings
-warnings.filterwarnings("ignore")
-try:
-    import absl.logging
-    absl.logging.set_verbosity(absl.logging.ERROR)
-except ImportError:
-    pass
 
 class VerboseFilter(logging.Filter):
     def filter(self, record):
@@ -158,6 +151,13 @@ def run():
     elif cfg.agent.ITS_Strategy == "self-consistency":
         logger.info("Initializing SelfConsistencyAgent.")
         agent = SelfConsistencyAgent(**agent_instance_args)
+    elif cfg.agent.ITS_Strategy == "baseline":
+        logger.info("Initializing BaselineAgent.")
+        agent = BaselineAgent(task_desc=task_desc,
+        cfg=cfg,
+        journal=journal,
+    )
+
     else:
         logger.info("Initializing Agent.")
         agent = Agent(**agent_instance_args)

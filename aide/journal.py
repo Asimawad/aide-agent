@@ -299,6 +299,8 @@ def filter_journal(journal: Journal) -> Journal:
 def journal2report(journal: Journal, task_desc: dict):
     from .backend import query
 
+    from .backend import query
+
     """
     Generate a report from a journal, the report will be in markdown format.
     """
