@@ -10,7 +10,8 @@ if [ ! -d "data/" ]; then
     python aide/utils/drive_download.py
 fi
 
-O4_MODEL="o4-mini-2025-04-16"
+O4_MODEL="o3-mini"
+# o4-mini-2025-04-16"
 CODER_MODEL="o3-mini"
 # DeepSeek_MODEL="gpt-4-turbo"
 # CODER_MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
@@ -27,9 +28,9 @@ aide \
     desc_file="${data_dir}/leaf-classification.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
-    agent.steps=25 \
+    agent.steps=2 \
     agent.obfuscate=False \
-    agent.ITS_Strategy="self-consistency" \
+    agent.ITS_Strategy="codechain_v3" \
     agent.code.model="${CODER_MODEL}" \
     agent.code.planner_model="${CODER_MODEL}" \
     agent.code.temp=0.8 \

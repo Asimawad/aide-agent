@@ -23,7 +23,7 @@ export second_model_log="./logs/vllm_planner.log"
 export FEEDBACK_MODEL="o4-mini-2025-04-16"
 # export CODER_MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
  
-CODER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+CODER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
 
 # --- Start first model ---
 echo "Starting vLLM server for coder model #1 with $CODER_MODEL on port 8000..."
