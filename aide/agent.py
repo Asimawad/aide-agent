@@ -1086,17 +1086,6 @@ class BaselineAgent:
 # SelfDebugAgent Implementation
 #############################################################################
 class SelfDebugAgent(Agent): # Inherit from Agent
-    def __init__(
-        self,
-        task_desc: str,
-        cfg: Config,
-        journal: Journal,
-        wandb_run=None, # Replaced by wandb_logger
-        wandb_logger: Optional['WandbLogger'] = None,
-        competition_benchmarks=None,
-    ):
-        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
-
 
     def _execute_and_evaluate_node(self, 
                                    node_to_process: Node, 
@@ -1349,18 +1338,6 @@ class SelfDebugAgent(Agent): # Inherit from Agent
 #############################################################################
 class PlannerAgent(Agent):
 
-    def __init__(
-        self,
-        task_desc: str,
-        cfg: Config,
-        journal: Journal,
-        wandb_logger: Optional[WandbLogger] = None,
-        competition_benchmarks: Optional[Dict[str, Any]] = None,
-    ):
-
-        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
-
-
     def _draft(self, parent_node=None) -> Node:
         log_prefix = f"PLANNER_AGENT_DRAFT_STEP{self.current_step}"
         logger.info(f"{log_prefix}: Starting drafting. Parent: {parent_node.id if parent_node else 'None'}", extra={"verbose": True})
@@ -1424,16 +1401,8 @@ class PlannerAgent(Agent):
 # CodeChainAgent Implementation
 #############################################################################
 class CodeChainAgent(Agent): # Inherit from Agent
-    def __init__(
-        self,
-        task_desc: str,
-        cfg: Config,
-        journal: Journal,
-        wandb_run=None, # Replaced by wandb_logger
-        wandb_logger: Optional['WandbLogger'] = None,
-        competition_benchmarks=None,
-    ):
-        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
+    
+    
 
     def _code_segment_query(self, 
                                 user_prompt_dict: Dict[str, Any], 
@@ -1792,21 +1761,6 @@ class CodeChainAgent(Agent): # Inherit from Agent
 # SelfConsistencyAgent Implementation
 #############################################################################
 class SelfConsistencyAgent(Agent):
-    def __init__(
-        self,
-        task_desc: str,
-        cfg: Config,
-        journal: Journal,
-        wandb_logger: Optional[WandbLogger] = None,
-        competition_benchmarks: Optional[Dict[str, Any]] = None,
-    ):
-        super().__init__(task_desc, cfg, journal, wandb_logger, competition_benchmarks)
-        logger.info(
-            f"SelfConsistencyAgent initialized. N={self.acfg.selfConsistency.num_responses}, "
-            f"Strategy='{self.acfg.selfConsistency.selection_strategy}'"
-        )
-    
-
     def _query_llm_with_retries(
         self,
         query_type: str, # e.g., "PLANNER_PLAN", "PLANNER_CODER", "Segment-Generation"
