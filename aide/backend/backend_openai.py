@@ -1,26 +1,28 @@
-"""Backend for OpenAI API."""
+"""Backend for OpenAI API with multi-response support."""
 
 import time
 import json
 import logging
-import time
 from dotenv import load_dotenv
 import os
+from typing import List, Tuple, Dict, Any, Union
+
+import openai
+from funcy import notnone, once, select_values
+
 from aide.backend.utils import (
     FunctionSpec,
-    OutputType,
+    OutputType,  # Union[str, dict]
     opt_messages_to_list,
     backoff_create,
     ContextLengthExceededError,
 )
-from funcy import notnone, once, select_values
-import openai
 
 logger = logging.getLogger("aide")
 
-# load environment variables
+# Load environment variables
 load_dotenv()
-_client: openai.OpenAI = None  # type: ignore
+_client: openai.OpenAI = None  # will be initialized in _setup_openai_client
 
 OPENAI_TIMEOUT_EXCEPTIONS = (
     openai.RateLimitError,
@@ -29,14 +31,11 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-from rich.console import Console
-
-console = Console()
-
-
 @once
 def _setup_openai_client():
+    """Initialize the OpenAI client, prompting for API key if necessary."""
     if not os.getenv("OPENAI_API_KEY"):
+        logger.warning("OPENAI_API_KEY not found; prompting user.")
         os.environ["OPENAI_API_KEY"] = input("Please enter your OpenAI API key: ")
     global _client
     _client = openai.OpenAI(max_retries=0)
@@ -44,116 +43,74 @@ def _setup_openai_client():
 
 def filter_model_kwargs(model: str, kwargs: dict) -> dict:
     """
-    Filter and adapt kwargs based on the model being used to prevent invalid parameters.
-    Handles parameter renaming and removal for specific models.
+    Filter and adapt kwargs based on the model.
+    Ensures only supported parameters are passed, renaming/removing as needed.
     """
-    # Remove None values
-    filtered_kwargs = select_values(notnone, kwargs)
+    # Drop None values
+    filtered = select_values(notnone, kwargs)
 
-    # Define valid parameters and renames for each model family
-    MODEL_PARAM_SPECS = [
+    # Define per-model parameter specs
+    SPEC_LIST = [
+        # Anthropic-style via OpenAI (o3-, o4-): no 'n', use max_completion_tokens → max_tokens
         {
             "prefixes": ("o3-", "o4-"),
-            "valid_params": {
-                "model",
-                "n",
-                "stream",
-                "stop",
-                "max_completion_tokens",
-                "presence_penalty",
-                "frequency_penalty",
-                "logit_bias",
-                "user",
-                "reasoning_effort",
+            "valid": {
+                "model", "stream", "stop", "max_completion_tokens",
+                "presence_penalty", "frequency_penalty", "logit_bias", "user", "reasoning_effort","n"
             },
             "renames": {"max_completion_tokens": "max_tokens"},
-            "remove": {"temperature", "top_p"},  # Not supported
+            "remove": {"temperature", "top_p"},
         },
+        # GPT family: supports 'n'
         {
-            "prefixes": ("gpt-"),
-            "valid_params": {
-                "model",
-                "top_p",
-                "n",
-                "stream",
-                "stop",
-                "max_tokens",
-                "presence_penalty",
-                "frequency_penalty",
-                "logit_bias",
-                "user",
-                "response_format",
-                "seed",
-                "temperature",
+            "prefixes": ("gpt-",),
+            "valid": {
+                "model", "top_p", "n", "stream", "stop", "max_tokens",
+                "presence_penalty", "frequency_penalty", "logit_bias", "user",
+                "response_format", "seed", "temperature",
             },
             "renames": {},
             "remove": set(),
         },
+        # Fallback: assume supports 'n'
         {
             "prefixes": (),
-            "valid_params": {
-                "model",
-                "top_p",
-                "n",
-                "stream",
-                "stop",
-                "max_tokens",
-                "presence_penalty",
-                "frequency_penalty",
-                "logit_bias",
-                "user",
+            "valid": {
+                "model", "top_p", "n", "stream", "stop",
+                "presence_penalty", "frequency_penalty", "logit_bias", "user",
             },
             "renames": {},
             "remove": set(),
         },
     ]
 
-    # Find the spec for this model
-    for spec in MODEL_PARAM_SPECS:
-        if any(model.startswith(prefix) for prefix in spec["prefixes"]):
-            valid_params = spec["valid_params"]
-            renames = spec["renames"]
-            remove = spec["remove"]
+    # Pick spec
+    spec = SPEC_LIST[-1]
+    for s in SPEC_LIST:
+        if any(model.startswith(pref) for pref in s["prefixes"]):
+            spec = s
             break
-    else:
-        # Default to the last spec if no prefix matches
-        valid_params = MODEL_PARAM_SPECS[-1]["valid_params"]
-        renames = MODEL_PARAM_SPECS[-1]["renames"]
-        remove = MODEL_PARAM_SPECS[-1]["remove"]
 
-    # Remove unsupported parameters
-    for param in remove:
-        if param in filtered_kwargs:
-            filtered_kwargs.pop(param)
-            logger.debug(
-                f"Removed '{param}' parameter for model {model} as it's not supported",
-                extra={"verbose": True},
-            )
+    # Remove unsupported params
+    for p in spec["remove"]:
+        if p in filtered:
+            filtered.pop(p)
+            logger.debug(f"Removed '{p}' for model {model}")
 
-    # Filter and rename parameters
-    result = {}
-    for k, v in filtered_kwargs.items():
-        if k in valid_params:
+    # Build result with valid and renamed keys
+    result: dict = {}
+    for k, v in filtered.items():
+        if k in spec["valid"]:
             result[k] = v
-        elif k in renames and renames[k] in valid_params:
-            result[renames[k]] = v
-            logger.debug(
-                f"Renamed '{k}' to '{renames[k]}' for model {model}",
-                extra={"verbose": True},
-            )
-        else:
-            logger.debug(
-                f"Ignored invalid parameter '{k}' for model {model}",
-                extra={"verbose": True},
-            )
+        elif k in spec["renames"] and spec["renames"][k] in spec["valid"]:
+            result[spec["renames"][k]] = v
+            logger.debug(f"Renamed '{k}'→'{spec['renames'][k]}' for model {model}")
 
-    # Log which parameters were removed
-    removed_params = set(filtered_kwargs.keys()) - set(result.keys())
-    if removed_params:
-        logger.debug(
-            f"Removed invalid parameters for model {model}: {removed_params}",
-            extra={"verbose": True},
-        )
+    # Log dropped params
+    dropped = set(filtered.keys()) - set(result.keys())
+    if dropped:
+        logger.debug(f"Dropped params for {model}: {dropped}")
+
     return result
 
 
@@ -161,88 +118,96 @@ def query(
     system_message: str | None,
     user_message: str | None,
     func_spec: FunctionSpec | None = None,
-    excute: bool = False,
-    step_identifier=None,
-    planner=False,
     convert_system_to_user: bool = False,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:
     logger.info("activated openai backend...")
 
+    """
+    Send a chat completion request, possibly returning multiple outputs.
+
+    Returns:
+      - outputs: list of OutputType (str or dict) of length == number requested
+      - elapsed_time: seconds spent on API call
+      - prompt_tokens: tokens consumed by prompt
+      - completion_tokens: tokens produced by completion(s)
+      - info: metadata dict
+    """
     t0 = time.time()
     _setup_openai_client()
-
-    t0 = time.time()
-    # Prepare messages list for OpenAI API format
+    model_kwargs['n'] = model_kwargs.get("num_responses", 1)
     model = model_kwargs.get("model", "")
-    filtered_kwargs = filter_model_kwargs(model, model_kwargs)
+    filtered = filter_model_kwargs(model, model_kwargs)
+
+    # Determine how many responses we asked for
+    num_req = filtered.get("n", 1)
 
     messages = opt_messages_to_list(
         system_message, user_message, convert_system_to_user=convert_system_to_user
     )
-    if func_spec is not None:
-        filtered_kwargs["tools"] = [func_spec.as_openai_tool_dict]
-        # force the model the use the function
-        filtered_kwargs["tool_choice"] = func_spec.openai_tool_choice_dict
+    if func_spec:
+        filtered["tools"] = [func_spec.as_openai_tool_dict]
+        filtered["tool_choice"] = func_spec.openai_tool_choice_dict
 
-    logger.debug(
-        f"OpenAI Backend Activated with model {model}",
-        extra={"verbose": True},
-    )
+    logger.debug(f"Calling OpenAI model={model} params={filtered}", extra={"verbose": True})
 
-    t0 = time.time()
     try:
         completion = backoff_create(
             _client.chat.completions.create,
             OPENAI_TIMEOUT_EXCEPTIONS,
             messages=messages,
-            **filtered_kwargs,
+            **filtered,
         )
+ 
     except ContextLengthExceededError as cle:
-        logger.error(f"Context Length Exceeded: {cle}. Aborting retries for this call.", exc_info=False, extra={"verbose": True})
-        return f"ERROR: {e}", 0, 0, 0, {"error": str(e)}
+        logger.error(f"ContextLengthExceededError: {cle}")
+        err_list = ["ERROR: context length exceeded"] * num_req
+        return err_list, time.time() - t0, 0, 0, {"model": model, "error": str(cle)}
     except Exception as e:
-        logger.error(f"OpenAI API call failed: {str(e)}")
-        error_info = {"error": str(e), "model": model}
-        return (
-            f"ERROR: OpenAI API call failed: {str(e)}",
-            time.time() - t0,
-            0,
-            0,
-            error_info,
-        )
+        logger.error(f"OpenAI API call failed: {e}", exc_info=True)
+        err_list = [f"ERROR: {e}"] * num_req
+        return err_list, time.time() - t0, 0, 0, {"model": model, "error": str(e)}
 
-    req_time = time.time() - t0
+    elapsed = time.time() - t0
+    choices = completion.choices or []
+    outputs: List[OutputType] = []
 
-    choice = completion.choices[0]
+    for idx, choice in enumerate(choices):
+        if func_spec is None:
+            content = choice.message.content
+            if content is None:
+                logger.warning(f"Choice {idx} has no content")
+                outputs.append("ERROR: no content")
+            else:
+                outputs.append(content)
+        else:
+            calls = choice.message.tool_calls or []
+            if not calls or calls[0].function.name != func_spec.name:
+                logger.warning(f"Choice {idx} missing expected tool call")
+                outputs.append({"error": "tool call missing or mismatched"})
+            else:
+                try:
+                    args = json.loads(calls[0].function.arguments)
+                    outputs.append(args)
+                except json.JSONDecodeError as je:
+                    logger.error(f"JSON decode error: {je}")
+                    outputs.append({"error": "invalid JSON in tool args", "raw": calls[0].function.arguments})
 
-    if func_spec is None:
-        output = choice.message.content
-    else:
-        assert (
-            choice.message.tool_calls
-        ), f"function_call is empty, it is not a function call: {choice.message}"
-        assert (
-            choice.message.tool_calls[0].function.name == func_spec.name
-        ), "Function name mismatch"
-        try:
-            output = json.loads(choice.message.tool_calls[0].function.arguments)
-            # console.rule(f"[green]Excution Feedback")
-            logger.debug(f"Response of the feedback is {output}")
-            logger.debug("\n")
-        except json.JSONDecodeError as e:
-            logger.error(
-                f"Error decoding the function arguments: {choice.message.tool_calls[0].function.arguments}"
-            )
-            raise e
-    in_tokens = completion.usage.prompt_tokens
-    out_tokens = completion.usage.completion_tokens
+    # If fewer outputs than requested, pad with errors
+    while len(outputs) < num_req:
+        logger.warning(f"Padding response: expected {num_req}, got {len(outputs)}")
+        outputs.append("ERROR: missing response")
 
-    info = {
-        "system_fingerprint": completion.system_fingerprint,
-        "model": completion.model,
-        "created": completion.created,
-        "execution_summaries": "None",
+    # Token counts (aggregate over all choices)
+    prompt_toks = getattr(completion.usage, "prompt_tokens", 0)
+    comp_toks = getattr(completion.usage, "completion_tokens", 0)
+
+    info: Dict[str, Any] = {
+        "model_used": completion.model,
+        "created": getattr(completion, "created", None),
+        "num_requested": num_req,
+        "num_returned": len(choices),
+        "system_fingerprint": getattr(completion, "system_fingerprint", None),
     }
 
-    return output, req_time, in_tokens, out_tokens, info
+    return outputs, elapsed, prompt_toks, comp_toks, info

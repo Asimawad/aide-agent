@@ -7,7 +7,7 @@ from ..backend import FunctionSpec
 from copy import deepcopy
 
 # --- Helper for wrapping code (already in your codebase) ---
-def wrap_code(code_str: str, lang: str = "python") -> str:
+def prompt_utils_wrap_code(code_str: str, lang: str = "python") -> str:
     if not code_str: # Handle None or empty string gracefully
         return f"```{lang}\n# No code provided.\n```" if lang else "```\n# No content provided.\n```"
     if lang:
@@ -453,7 +453,7 @@ def get_agent_improve_user_prompt(
         "Task description": task_desc,
         "Memory": journal_summary,
         "Previous solution": { # Original had this as a top-level key, kept for consistency
-            "Code": wrap_code(parent_node_code),
+            "Code": prompt_utils_wrap_code(parent_node_code),
         },
         "Instructions": {
             "Response format": AGENT_RESPONSE_FORMAT_TEXT,
@@ -484,8 +484,8 @@ def get_agent_debug_user_prompt(
     prompt_user_message: Dict[str, Any] = {
         "Introduction": introduction,
         "Task Description": task_desc,
-        "Previous (Buggy) Implementation": wrap_code(parent_node_code),
-        "Execution Output (Traceback)": wrap_code(parent_node_term_out, lang=""), # Explicitly label as traceback
+        "Previous (Buggy) Implementation": prompt_utils_wrap_code(parent_node_code),
+        "Execution Output (Traceback)": prompt_utils_wrap_code(parent_node_term_out, lang=""), # Explicitly label as traceback
         "Initial Bug Summary (from analysis tool)": parent_node_feedback if parent_node_feedback else "No initial summary provided. Perform analysis based on traceback and code.",
         "Instructions": {
             "General Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST, # These are still good general rules
@@ -805,7 +805,7 @@ def get_planner_agent_improve_plan_user_prompt(
     prompt_user_message: Dict[str, Any] = {
         "Introduction": planner_introduction,
         "Overall Task Description": task_desc,
-        "Previous solution": {"Code": wrap_code(parent_node_code)},
+        "Previous solution": {"Code": prompt_utils_wrap_code(parent_node_code)},
         "Instructions": {
             "Response format": PLANNER_AGENT_PLAN_RESPONSE_FORMAT_TEXT,
             "Solution improvement sketch guideline": [
@@ -838,7 +838,7 @@ def get_planner_agent_improve_code_user_prompt(
         "Introduction": code_introduction,
         "Task description summary and previous solution": task_summary_from_planner,
         "Improvement plan": {"Plan": improvement_plan_from_planner},
-        "Previous solution code": {"Code": wrap_code(parent_node_code)},
+        "Previous solution code": {"Code": prompt_utils_wrap_code(parent_node_code)},
         "Memory": journal_summary,
         "Instructions": {
             "Environment and Packages": get_competition_environment_text(competition_name),
@@ -876,8 +876,8 @@ def get_planner_agent_debug_plan_user_prompt(
     prompt_user_message: Dict[str, Any] = {
         "Introduction": plan_introduction,
         "Task description": task_desc,
-        "Previous (buggy) implementation": wrap_code(parent_node_code),
-        "Execution output": wrap_code(parent_node_term_out, lang=""),
+        "Previous (buggy) implementation": prompt_utils_wrap_code(parent_node_code),
+        "Execution output": prompt_utils_wrap_code(parent_node_term_out, lang=""),
         "Instructions": {
             "Response format": PLANNER_AGENT_DEBUG_RESPONSE_FORMAT_TEXT,
             # Guidelines are embedded in the response format and intro for planner debug plan
@@ -907,8 +907,8 @@ def get_planner_agent_debug_code_user_prompt(
         "Introduction": code_introduction,
         "Problem Description and Analysis": bug_summary_from_planner,
         "Plan for fixing the bug": fix_plan_from_planner,
-        "Previous (buggy) implementation": wrap_code(parent_node_code),
-        "Execution output of buggy code": wrap_code(parent_node_term_out, lang=""),
+        "Previous (buggy) implementation": prompt_utils_wrap_code(parent_node_code),
+        "Execution output of buggy code": prompt_utils_wrap_code(parent_node_term_out, lang=""),
         "Instructions": {
             "Environment and Packages": get_competition_environment_text(competition_name),
             "Response format": PLANNER_AGENT_CODE_RESPONSE_FORMAT_TEXT,
@@ -1038,7 +1038,7 @@ def _get_base_coder_chain_user_prompt_args(
             "Task Summary": task_summary or "No task summary was provided by the planner.",
             "Full Master Plan": master_plan_text or "CRITICAL ERROR: No master plan provided by planner."
         },
-        "Python Code Generated So Far": wrap_code(current_code_so_far if current_code_so_far.strip() else "# This is the first code segment to be generated."),
+        "Python Code Generated So Far": prompt_utils_wrap_code(current_code_so_far if current_code_so_far.strip() else "# This is the first code segment to be generated."),
         "Environment and Packages": get_competition_environment_text(competition_name),
         "Data Overview": data_preview_content if data_preview_content else "Refer to Master Plan and Task Summary for data details."
     }
@@ -1234,9 +1234,9 @@ def get_segment_reflection_user_prompt(
             "Full Master Plan": master_plan_text,
             "Current Segment Being Reviewed": current_segment_name,
             "Current Segment Original Objective": get_coder_chain_system_prompt(current_segment_name)['user_instructions'],
-            "Python Code Generated in PREVIOUS Segments": wrap_code(code_generated_before_this_segment if code_generated_before_this_segment.strip() else "# No code generated in prior segments."),
+            "Python Code Generated in PREVIOUS Segments": prompt_utils_wrap_code(code_generated_before_this_segment if code_generated_before_this_segment.strip() else "# No code generated in prior segments."),
         },
-        "Code Snippet to Review for THIS Segment": wrap_code(initial_code_snippet_for_this_segment),
+        "Code Snippet to Review for THIS Segment": prompt_utils_wrap_code(initial_code_snippet_for_this_segment),
         "Your Reflection Task for THIS Segment": (
             f"Carefully review the provided 'Code Snippet to Review for THIS Segment' ({current_segment_name}).\n"
             "1. Does it correctly implement the relevant part of the 'Full Master Plan' for this segment?\n"
@@ -1321,11 +1321,11 @@ def get_chunked_reflection_user_prompt(
             "Overall Task Summary": task_summary,
             "Full Master Plan": master_plan,
             "Segments in This Chunk": segment_names,
-            "Python Code Generated Before This Chunk": wrap_code(
+            "Python Code Generated Before This Chunk": prompt_utils_wrap_code(
                 code_before_chunk or "# No prior code generated."
             ),
         },
-        "Initial Chunk Code to Review": wrap_code(initial_chunk_code),
+        "Initial Chunk Code to Review": prompt_utils_wrap_code(initial_chunk_code),
         "Your Chunk Reflection Task": (
             f"Please review the above 'Initial Chunk Code to Review' for segments "
             f"{', '.join(segment_names)} as a single unit.  \n"

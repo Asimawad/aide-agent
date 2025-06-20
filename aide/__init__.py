@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-from .backend import compile_prompt_to_md
 
-from .agent import Agent, PlannerAgent,CodeChainAgent
+from .agent import Agent, CodeChainAgent, PlannerAgent, SelfConsistencyAgent, BaselineAgent, SelfDebugAgent
 from .interpreter import Interpreter
 from .journal import Journal
 from omegaconf import OmegaConf
@@ -45,19 +44,36 @@ class Experiment:
             prep_agent_workspace(self.cfg)
 
         self.journal = Journal()
-        if self.cfg.ITS_Strategy == "planner":
-            self.agent = PlannerAgent(
-                task_desc=self.task_desc,
-                cfg=self.cfg,
-                journal=self.journal,
-            )
-        elif self.cfg.agent.ITS_Strategy == "code-chain" or self.cfg.agent.ITS_Strategy == "chain-reflect":
-             self.agent = CodeChainAgent(
-                task_desc=self.task_desc,
-                cfg=self.cfg,
-                journal=self.journal,
-            )
 
+        if self.cfg.agent.ITS_Strategy == "codechain" or self.cfg.agent.ITS_Strategy == "codechain_v2" or self.cfg.agent.ITS_Strategy == "codechain_v3": 
+            self.agent = CodeChainAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+            )
+        elif self.cfg.agent.ITS_Strategy == "self-consistency": 
+            self.agent = SelfConsistencyAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+            )
+        elif self.cfg.agent.ITS_Strategy == "planner": #
+             self.agent = PlannerAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+             )
+        elif self.cfg.agent.ITS_Strategy == "self-debug":
+            self.agent = SelfDebugAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+            )
+        elif self.cfg.agent.ITS_Strategy == "baseline":
+            self.agent = BaselineAgent(task_desc=self.task_desc,
+            cfg=self.cfg,
+            journal=self.journal,
+        )
         else:
             self.agent = Agent(
                 task_desc=self.task_desc,
@@ -65,7 +81,7 @@ class Experiment:
                 journal=self.journal,
             )
         self.interpreter = Interpreter(
-            self.cfg.workspace_dir, **OmegaConf.to_container(self.cfg.exec)  # type: ignore
+            self.cfg.workspace_dir, **OmegaConf.to_container(self.cfg.exec)  
         )
 
     def run(self, steps: int) -> Solution:
