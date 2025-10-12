@@ -9,7 +9,7 @@ builder:
   context: .
 
 spec:
-  operator: tf
+  operator: pytorch
   image: MLEBench
   command: "entrypoint.sh /home/run.sh"
   # command: "/usr/local/bin/entrypoint.sh /aide-ds/run.sh"
