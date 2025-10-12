@@ -53,6 +53,7 @@ RUN export UV_HTTP_TIMEOUT=600 && \
         torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
         -e /home/
 
+# set environment variables
 ENV PATH="/home/.aide-ds/bin:${PATH}"
 ENV OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
