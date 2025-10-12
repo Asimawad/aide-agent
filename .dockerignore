@@ -1,0 +1,12 @@
+/data/
+/*runs/
+/runs*/
+/aide-ds/
+/.venv/
+aide-ds/
+.aide-ds/
+.aide-ds/bin/
+.aide-ds/lib/
+.aide-ds/lib64/
+.aide-ds/libexec/
+.aide-ds/sbin/
