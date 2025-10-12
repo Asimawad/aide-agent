@@ -1,0 +1,172 @@
+# AIDE Configuration for TPU
+# This configuration optimizes settings for TPU usage
+
+# Compute Backend Configuration
+compute:
+  backend: "tpu"  # Options: "tpu", "cuda", "cpu", "auto"
+  
+  # TPU-specific settings
+  tpu:
+    # Device settings
+    device_type: "v4"  # v2, v3, v4, v5e - adjust based on your TPU
+    num_cores: 8  # Number of TPU cores available
+    
+    # Model loading
+    use_bfloat16: true  # TPU is optimized for bfloat16
+    load_quantized: false  # TPU doesn't support bitsandbytes quantization
+    warmup_steps: 3  # Number of warmup inference steps for XLA compilation
+    
+    # Memory management
+    max_model_size: "14B"  # Maximum model size to load
+    enable_gradient_checkpointing: false  # Usually not needed for inference
+    
+    # Performance tuning
+    xla_optimization: true
+    batch_size_multiplier: 2.0  # TPU can handle larger batches than GPU
+    
+  # GPU fallback settings (if TPU unavailable)
+  cuda:
+    load_in_4bit: true
+    gpu_memory_utilization: 0.85
+    device_map: "auto"
+
+# Agent Configuration
+agent:
+  # Number of solution iterations
+  steps: 25
+  
+  # Inference-Time Scaling Strategy
+  # Options: "baseline", "self-reflection", "codechain", "codechain_v2", 
+  #          "codechain_v3", "self-consistency", "planner", "self-debug"
+  ITS_Strategy: "baseline"
+  
+  # Search configuration
+  search:
+    num_drafts: 5
+    max_depth: 10
+    best_first: true
+    
+  # Code generation model configuration
+  code:
+    # Model selection
+    # Good TPU-compatible models:
+    # - "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" (14B, good balance)
+    # - "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B" (7B, faster)
+    # - "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B" (32B, best quality, requires more memory)
+    model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+    
+    # Backend settings
+    backend: "tpu"  # Force TPU backend, or "auto" to auto-detect
+    
+    # Generation parameters (optimized for TPU)
+    temp: 0.7
+    max_new_tokens: 2048
+    top_p: 0.9
+    top_k: 50
+    
+    # Batch settings
+    # TPU can handle larger batches efficiently
+    batch_size: 8  # Increase from typical GPU value of 4
+    
+    # Planner model (for codechain strategy)
+    planner_model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+    planner_temp: 0.5
+    
+  # Self-consistency configuration
+  selfConsistency:
+    num_responses: 3  # Number of parallel solutions
+    selection_strategy: "interpreter_first_success"
+    
+  # Feedback/critique model (can use API for this)
+  feedback:
+    model: "gpt-4o-mini"  # Use OpenAI API for feedback
+    temp: 0.3
+    max_new_tokens: 1024
+
+# Execution configuration
+exec:
+  timeout: 600  # Execution timeout in seconds
+  format_tb_ipython: false
+  agent_file_name: "runfile.py"
+
+# Logging configuration
+log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+save_every_n_steps: 1
+
+# Weights & Biases logging
+wandb:
+  enabled: true
+  project: "aide-tpu-experiments"
+  entity: null  # Your W&B username/team
+  tags:
+    - "tpu"
+    - "pytorch-xla"
+  notes: "Running AIDE on TPU"
+
+# Model serving configuration
+serving:
+  # For TPU, you have several options:
+  
+  # Option 1: Use backend_tpu.py directly (recommended for start)
+  mode: "direct"  # Direct model loading in-process
+  
+  # Option 2: Use local server (for production)
+  # mode: "server"
+  # server:
+  #   host: "localhost"
+  #   port: 8000
+  #   endpoint: "/generate"
+  #   timeout: 300
+
+# Task-specific settings
+task:
+  # Data directory - will be overridden by CLI args
+  data_dir: "./aide/example_tasks/house_prices"
+  
+  # Task goal - will be overridden by CLI args
+  goal: "Predict the target variable with high accuracy"
+  
+  # Evaluation metric - will be overridden by CLI args
+  eval: "Use appropriate metrics for the task"
+
+# Competition name (for benchmarking)
+competition_name: "custom"
+
+# Experiment naming
+exp_name: "aide_tpu_${now:%Y%m%d_%H%M%S}"
+
+# Workspace configuration
+workspace_dir: "./workspaces/${exp_name}"
+log_dir: "./logs/${exp_name}"
+
+# Advanced TPU settings (for power users)
+advanced:
+  # XLA compilation settings
+  xla:
+    # Set XLA flags for optimization
+    flags:
+      # Reduce memory fragmentation
+      - "--xla_gpu_enable_async_all_reduce=true"
+      # Enable experimental features
+      - "--xla_gpu_enable_xla_runtime_executable=true"
+    
+  # Profiling settings
+  profiling:
+    enabled: false
+    output_dir: "./profiles/${exp_name}"
+    
+  # Distributed settings (for multi-TPU)
+  distributed:
+    enabled: false
+    num_replicas: 1
+    strategy: "data_parallel"
+
+# Resource monitoring
+monitoring:
+  log_memory_usage: true
+  log_device_utilization: true
+  checkpoint_interval: 5  # Steps between checkpoints
+
+
+
+

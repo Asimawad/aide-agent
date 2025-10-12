@@ -20,7 +20,7 @@ CODER_MODEL="o3-mini"
 # CODER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
 competition_name="leaf-classification"
-data_dir="data/leaf-classification"
+data_dir="data/data/leaf-classification"
 GOAL="Predict the leaf species" 
 EVAL="Use the accuracy score metric between the predicted and observed values." 
 aide \
