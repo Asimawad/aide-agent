@@ -1,32 +1,31 @@
-# yaml-language-server: $schema=https://instadeep.aichor.ai/schema/latest/manifest.schema.json
-kind: AIchorManifest
-apiVersion: "0.2.3"
-name: MLEBench
+apiVersion: 0.2.3
 builder:
-  image: MLEBench
-  dockerfile: ./Dockerfile
+  buildArgs:
+    USE_CUDA: 'true'
   context: .
-
+  dockerfile: ./Dockerfile
+  image: mlebench
+clone:
+  depth: 1000
+  includeDotGit: true
+kind: AIchorManifest
 spec:
-  pytorch:
-    image: MLEBench
-    command: "entrypoint.sh /home/run.sh"
-    # command: "/usr/local/bin/entrypoint.sh /aide-ds/run.sh"
-    types:
-      worker:
-        count: 1
-        resources:
-          cpus: 96  # 12 # 24 # 24 # 48 #  96 # optional: number of GPUs wanted
-          ramRatio: 4 # total ram = ramRatio * cpus # mandatory (must be >= 2): RAM ratio wanted (in GB)
-          # 4 CPUs per GPU for Quadro-RTX-4000
-          shmSizeGB: 12
-          accelerators:
-            gpu: # mandatory (if gpus amount is > 0): gpu type wanted
-              count: 1
-              type: gpu # mig-3g.20gb #mig-3g.40gb #mig-3g.40gb # UPDATE ME mig-3g.40gb
-              product: NVIDIA-H100-80GB-HBM3  #NVIDIA-A100-SXM4-80GB #
+  command: "entrypoint.sh /home/run.sh"
   debug:
     vscode:
-      enabled: true # required
+      enabled: true 
       path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
-      provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
+      provider: "github" # Optional,  vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
+  image: mlebench
+  operator: pytorch
+  types:
+    worker:
+      count: 1
+      resources:
+        accelerators:
+          gpu:
+            count: 1
+            product: NVIDIA-H100-80GB-HBM3
+            type: gpu
+        cpus: 96
+        ramRatio: 20
