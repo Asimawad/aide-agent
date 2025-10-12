@@ -17,7 +17,7 @@ spec:
       path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
       provider: "github" # Optional,  vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   image: mlebench
-  operator: pytorch
+  operator: jax
   types:
     worker:
       count: 1
