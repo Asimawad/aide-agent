@@ -49,8 +49,9 @@ RUN ls -la /home/ || echo "Directory is empty or does not exist"
 # Clone the repository and checkout a specific commit
 RUN git clone https://github.com/Asimawad/aide-agent.git /home/aide-ds  && \
     cd /home/aide-ds && \
-    git fetch origin main && \
-    git pull origin main
+    git fetch origin aide-cloud && \
+    git pull origin aide-cloud  && \
+    git checkout aide-cloud
 # create a virt env
 RUN export UV_HTTP_TIMEOUT=600 && \
     uv venv .aide-ds --python 3.11 && \
