@@ -3,7 +3,34 @@ import shutil
 import zipfile
 from pathlib import Path
 import json
+
 logger = logging.getLogger("aide")
+
+# Export new logging utilities
+from .logging_context import LoggingContext, LoggingContextFilter, format_context_string
+from .contextual_logger import get_logger, ContextualLogger, ContextualLogFormatter
+from .timing import Timer, log_timing, PerformanceTracker, timed_operation
+
+__all__ = [
+    # Original exports
+    "copytree",
+    "clean_up_dataset",
+    "extract_archives",
+    "preproc_data",
+    "parse_model_id",
+    "load_benchmarks",
+    # New logging exports
+    "LoggingContext",
+    "LoggingContextFilter",
+    "format_context_string",
+    "get_logger",
+    "ContextualLogger",
+    "ContextualLogFormatter",
+    "Timer",
+    "log_timing",
+    "PerformanceTracker",
+    "timed_operation",
+]
 
 
 def copytree(src: Path, dst: Path, use_symlinks=True):

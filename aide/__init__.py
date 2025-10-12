@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 
-from .agent import Agent, CodeChainAgent, PlannerAgent, SelfConsistencyAgent, BaselineAgent, SelfDebugAgent
+from .agents import *
 from .interpreter import Interpreter
 from .journal import Journal
 from omegaconf import OmegaConf

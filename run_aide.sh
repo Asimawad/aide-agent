@@ -10,9 +10,9 @@ if [ ! -d "data/" ]; then
     python aide/utils/drive_download.py
 fi
 
-O4_MODEL="o3-mini"
+O4_MODEL="gpt-4o-mini"
 # o4-mini-2025-04-16"
-CODER_MODEL="o3-mini"
+CODER_MODEL="gpt-4o-mini"
 # DeepSeek_MODEL="gpt-4-turbo"
 # CODER_MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
 # # CODER_MODEL="o3-mini"
@@ -20,7 +20,7 @@ CODER_MODEL="o3-mini"
 # CODER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # PLANNER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" 
 competition_name="leaf-classification"
-data_dir="data/data/leaf-classification"
+data_dir="data/leaf-classification"
 GOAL="Predict the leaf species" 
 EVAL="Use the accuracy score metric between the predicted and observed values." 
 aide \
@@ -28,9 +28,9 @@ aide \
     desc_file="${data_dir}/leaf-classification.md" \
     log_level="DEBUG" \
     competition_name="${competition_name}" \
-    agent.steps=2 \
+    agent.steps=1 \
     agent.obfuscate=False \
-    agent.ITS_Strategy="codechain_v3" \
+    agent.ITS_Strategy="baseline" \
     agent.code.model="${CODER_MODEL}" \
     agent.code.planner_model="${CODER_MODEL}" \
     agent.code.temp=0.8 \

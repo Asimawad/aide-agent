@@ -2,25 +2,19 @@
 import atexit
 import logging
 import shutil
-import sys
-import pandas as pd
-import os
-from .utils import copytree, load_benchmarks
-from tqdm import tqdm  
+from aide.utils import copytree, load_benchmarks
 from pathlib import Path 
 import time
 from rich.console import Console
 from rich.logging import RichHandler 
-import wandb
 console = Console() 
 
 
-from .utils import copytree 
 from aide.utils.metrics_calculator import generate_all_metrics
-from .utils.wandb_logger import WandbLogger 
-from .agent import Agent, PlannerAgent, CodeChainAgent, SelfConsistencyAgent, SelfDebugAgent, BaselineAgent
-from .interpreter import Interpreter
-from .journal import Journal, Node 
+from aide.utils.wandb_logger import WandbLogger 
+from aide.agents import *
+from aide.interpreter import Interpreter
+from aide.journal import Journal, Node 
 from omegaconf import OmegaConf
 from rich.progress import (
     BarColumn,
@@ -32,7 +26,7 @@ from rich.progress import (
 from rich.text import Text
 from rich.status import Status
 from rich.tree import Tree 
-from .utils.config import load_task_desc, prep_agent_workspace, save_run, load_cfg
+from aide.utils.config import load_task_desc, prep_agent_workspace, save_run, load_cfg
 
 class VerboseFilter(logging.Filter):
     def filter(self, record):
@@ -234,17 +228,6 @@ def run():
         logger.info("W&B finalization initiated.")
         if wandb_logger_instance: 
             wandb_logger_instance.finalize_run(journal) 
-
-        try:
-            logger.info("Calculating comprehensive metrics locally (before W&B finalization)...")
-            generate_all_metrics(
-                cfg.exp_name, 
-                run_id_for_wandb=active_wandb_run_id # Pass the ID if available
-            )
-            # comprehensive_metrics_report.json is now in logs/{exp_name}/
-        except Exception as e:
-            logger.error(f"Error calculating comprehensive metrics: {e}", exc_info=True)
-        
         # --- Step 3: Local Workspace Cleanup ---
         if global_step == 0 or global_step == cfg.agent.steps :
             try:
