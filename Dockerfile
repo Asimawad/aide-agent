@@ -59,7 +59,6 @@ RUN export UV_HTTP_TIMEOUT=600 && \
         --index-strategy unsafe-best-match \
         --extra-index-url https://download.pytorch.org/whl/cu124 \
         torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
-        -e /home/ \
         -e /home/aide-ds
 
 ENV PATH="/home/.aide-ds/bin:${PATH}"
