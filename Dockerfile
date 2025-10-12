@@ -43,16 +43,7 @@ WORKDIR /home
 # Copy your project files into the container
 COPY . .
 
-# Debugging: Check if the directory exists
-RUN ls -la /home/ || echo "Directory is empty or does not exist"
-
-# Clone the repository and checkout a specific commit
-RUN git clone https://github.com/Asimawad/aide-agent.git /home/aide-ds  && \
-    cd /home/aide-ds && \
-    git fetch origin aide-cloud && \
-    git pull origin aide-cloud  && \
-    git checkout aide-cloud
-# create a virt env
+# create a virt env and install dependencies
 RUN export UV_HTTP_TIMEOUT=600 && \
     uv venv .aide-ds --python 3.11 && \
     export DEBIAN_FRONTEND=noninteractive && \
@@ -60,7 +51,7 @@ RUN export UV_HTTP_TIMEOUT=600 && \
         --index-strategy unsafe-best-match \
         --extra-index-url https://download.pytorch.org/whl/cu124 \
         torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
-        -e /home/aide-ds
+        -e /home/
 
 ENV PATH="/home/.aide-ds/bin:${PATH}"
 ENV OMP_NUM_THREADS=1 \
