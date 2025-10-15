@@ -1,0 +1,16 @@
+Research Problem: Current machine learning engineering agents rely heavily on expensive closed-source models. This research investigates whether Inference Time Scaling+ (ITS+) techniques combined with open-source models can achieve superior performance on software engineering tasks, democratizing access to powerful AI agents.
+
+Research Question: Can a fine-tuned 14B parameter Qwen model with ITS+ outperform closed-source alternatives on MLE-bench, the standard benchmark for ML engineering agents?
+
+GCP Tools: We will utilize TPU v4/v5 pods or A100 GPU clusters for distributed fine-tuning of the Qwen-14B model. Vertex AI will manage training pipelines and model versioning. Cloud Storage will host training datasets, intermediate checkpoints, and evaluation results. Compute Engine VMs will orchestrate MLE-bench evaluation workflows across multiple model variants.
+
+Timeline & Milestones (12 months):
+- Months 1-2: Dataset curation and preprocessing pipeline development
+- Months 3-7: Fine-tuning experiments (10-20 runs) with varying ITS+ configurations
+- Months 8-10: Comprehensive MLE-bench evaluation of 2-3 best model variants against closed-source baselines
+- Months 11-12: Results analysis, paper writing, and model publication
+
+Key Outcomes: (1) Open-source trained models released to the community, (2) Benchmark results demonstrating ITS+ effectiveness, (3) Academic publication advancing agent research, (4) Reproducible training and evaluation pipelines.
+
+Future GCP Support: This foundational work will establish infrastructure for ongoing research into scaling laws, multi-agent architectures, and real-world deployment of open-source AI agents, requiring continued computational resources for model iteration and validation.
+

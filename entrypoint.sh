@@ -23,14 +23,19 @@ export second_model_log="./logs/vllm_planner.log"
 export FEEDBACK_MODEL="o4-mini-2025-04-16"
 # export CODER_MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
  
-CODER_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+CODER_MODEL="RedHatAI/DeepSeek-R1-Distill-Qwen-14B-FP8-dynamic"
+
+# Allow overriding the Python interpreter used to start vLLM.
+# By default prefer the system Python which matches many compiled wheels (e.g. /usr/bin/python3).
+# Override by setting AIDE_PYTHON in the environment, e.g.: AIDE_PYTHON=/home/.aide-ds/bin/python bash entrypoint.sh
+AIDE_PYTHON=${AIDE_PYTHON:-/usr/bin/python3}
 
 # --- Start first model ---
 echo "Starting vLLM server for coder model #1 with $CODER_MODEL on port 8000..."
 touch $first_model_log
 if [ -n "$CODER_MODEL" ]; then
 
-    python -m vllm.entrypoints.openai.api_server \
+    "$AIDE_PYTHON" -m vllm.entrypoints.openai.api_server \
         --model "$CODER_MODEL" \
         --port 8000 \
         --dtype bfloat16 \
@@ -66,7 +71,7 @@ if [ -n "$CODER_MODEL" ]; then
 else
     echo "CODER_MODEL is not set. Skipping first model start."
 fi
-chmod +x run_aide.sh
-chmod +x gc.sh
-echo "Executing command: $@"
-exec "$@"
+# chmod +x run_aide.sh
+# chmod +x gc.sh
+# echo "Executing command: $@"
+# exec "$@"
