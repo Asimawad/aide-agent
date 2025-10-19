@@ -1,0 +1,6 @@
+cmake>=3.26
+ninja
+packaging
+wheel
+jinja2
+
