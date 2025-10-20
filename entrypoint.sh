@@ -34,9 +34,9 @@ if [ -n "$CODER_MODEL" ]; then
         --model "$CODER_MODEL" \
         --port 8000 \
         --dtype bfloat16 \
-        --device cuda \
+        --device tpu \
+        --tensor-parallel-size 4 \
         --max-model-len 16384 \
-        --gpu-memory-utilization 0.95 \
         --max-num-batched-tokens 16384 \
         --max-num-seqs 3 \
         --trust-remote-code \

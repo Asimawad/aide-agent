@@ -22,10 +22,40 @@ rich
 shutup
 tqdm
 transformers  
-torch==2.6.0+cu124                  
-torchvision==0.21.0+cu124                
-torchaudio==2.6.0+cu124                   
-vllm==0.8.5             
+# torch==2.6.0+cu124                  
+# torchvision==0.21.0+cu124                
+# torchaudio==2.6.0+cu124                   
+# vllm==0.8.5    
+# ===========================================================================
+# TPU-specific packages - READ CAREFULLY
+# ===========================================================================
+# For TPU deployment, you CANNOT use regular pip install for vLLM.
+# Instead, run the provided setup_tpu.sh script, OR manually follow these steps:
+#
+# 1. Install PyTorch with TPU support:
+#    pip install torch~=2.6.0
+#    pip install torch-xla[tpu]~=2.6.0 -f https://storage.googleapis.com/libtpu-releases/index.html
+#
+# 2. Clone and build vLLM with TPU support:
+#    git clone https://github.com/vllm-project/vllm.git
+#    cd vllm
+#    pip install -r requirements-tpu.txt  # or requirements/tpu.txt depending on version
+#    sudo apt-get install libopenblas-base libopenmpi-dev libomp-dev
+#    VLLM_TARGET_DEVICE="tpu" pip install -e .
+#    cd ..
+#
+# 3. Then install the rest of AIDE requirements:
+#    pip install -r requirements-tpu.txt  # (use the AIDE requirements-tpu.txt file)
+#
+# RECOMMENDED: Just run ./setup_tpu.sh to do all of this automatically!
+# ===========================================================================
+
+# Uncomment these if installing manually:
+# torch~=2.6.0
+# torch-xla[tpu]~=2.6.0
+# torchvision
+# torchaudio
+# vllm installed from source (see above)
 setuptools
 packaging
 wheel

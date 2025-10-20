@@ -33,8 +33,12 @@ uv venv .aide-ds --python 3.11
 source .aide-ds/bin/activate
 
 # Install dependencies (including PyTorch for CUDA 12.1)
-uv pip install --extra-index-url https://download.pytorch.org/whl/cu121 -e .
+uv pip install  --index-strategy unsafe-best-match  --extra-index-url https://download.pytorch.org/whl/cu124 -e .
 
+
+uv pip install torch~=2.6.0
+uv pip install --prerelease=allow torch-xla[tpu]~=2.6.0 
+-f https://storage.googleapis.com/libtpu-releases/index.html
 # Set your OpenAI API Key (used for the reliable feedback/judge model)
 export OPENAI_API_KEY="<your-openai-api-key>"```
 
