@@ -1,21 +1,21 @@
 """Backend for OpenAI API with multi-response support."""
 
-import time
 import json
 import logging
-from dotenv import load_dotenv
 import os
-from typing import List, Tuple, Dict, Any, Union
+import time
+from typing import Any, Dict, List
 
 import openai
+from dotenv import load_dotenv
 from funcy import notnone, once, select_values
 
 from aide.backend.utils import (
+    ContextLengthExceededError,
     FunctionSpec,
     OutputType,  # Union[str, dict]
-    opt_messages_to_list,
     backoff_create,
-    ContextLengthExceededError,
+    opt_messages_to_list,
 )
 
 logger = logging.getLogger("aide")
@@ -30,6 +30,7 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.InternalServerError,
 )
+
 
 @once
 def _setup_openai_client():
@@ -55,8 +56,16 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
         {
             "prefixes": ("o3-", "o4-"),
             "valid": {
-                "model", "stream", "stop", "max_completion_tokens",
-                "presence_penalty", "frequency_penalty", "logit_bias", "user", "reasoning_effort","n"
+                "model",
+                "stream",
+                "stop",
+                "max_completion_tokens",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
+                "reasoning_effort",
+                "n",
             },
             "renames": {"max_completion_tokens": "max_tokens"},
             "remove": {"temperature", "top_p"},
@@ -65,9 +74,19 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
         {
             "prefixes": ("gpt-",),
             "valid": {
-                "model", "top_p", "n", "stream", "stop", "max_tokens",
-                "presence_penalty", "frequency_penalty", "logit_bias", "user",
-                "response_format", "seed", "temperature",
+                "model",
+                "top_p",
+                "n",
+                "stream",
+                "stop",
+                "max_tokens",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
+                "response_format",
+                "seed",
+                "temperature",
             },
             "renames": {},
             "remove": set(),
@@ -76,8 +95,15 @@ def filter_model_kwargs(model: str, kwargs: dict) -> dict:
         {
             "prefixes": (),
             "valid": {
-                "model", "top_p", "n", "stream", "stop",
-                "presence_penalty", "frequency_penalty", "logit_bias", "user",
+                "model",
+                "top_p",
+                "n",
+                "stream",
+                "stop",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
             },
             "renames": {},
             "remove": set(),
@@ -135,7 +161,7 @@ def query(
     """
     t0 = time.time()
     _setup_openai_client()
-    model_kwargs['n'] = model_kwargs.get("num_responses", 1)
+    model_kwargs["n"] = model_kwargs.get("num_responses", 1)
     model = model_kwargs.get("model", "")
     filtered = filter_model_kwargs(model, model_kwargs)
 
@@ -158,7 +184,7 @@ def query(
             messages=messages,
             **filtered,
         )
- 
+
     except ContextLengthExceededError as cle:
         logger.error(f"ContextLengthExceededError: {cle}")
         err_list = ["ERROR: context length exceeded"] * num_req
@@ -191,7 +217,9 @@ def query(
                     outputs.append(args)
                 except json.JSONDecodeError as je:
                     logger.error(f"JSON decode error: {je}")
-                    outputs.append({"error": "invalid JSON in tool args", "raw": calls[0].function.arguments})
+                    outputs.append(
+                        {"error": "invalid JSON in tool args", "raw": calls[0].function.arguments}
+                    )
 
     # If fewer outputs than requested, pad with errors
     while len(outputs) < num_req:

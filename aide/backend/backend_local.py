@@ -1,13 +1,12 @@
-import re
 import logging
-import torch
-from typing import Optional, Dict, Any, Tuple, List  # Add List
+import re
 import sys
-import shutil  # Import shutil for file operations
-from pprint import pprint
+import time
 import traceback  # Import traceback for error handling
 from pathlib import Path
-import time
+from typing import Any, Dict, List, Optional, Tuple  # Add List
+
+import torch
 
 # --- Add necessary imports ---
 try:
@@ -25,13 +24,13 @@ try:
         # Assuming aide is installed in the environment
         pass
 
-    from aide.interpreter import Interpreter, ExecutionResult
-    from aide.utils.response import extract_code, format_code, wrap_code
-    from aide.utils import serialize  # For saving ExecutionResult
     from aide.backend.utils import (
         opt_messages_to_list,
     )  # Keep opt_messages_to_list if needed here
+    from aide.interpreter import ExecutionResult, Interpreter
+    from aide.utils import serialize  # For saving ExecutionResult
     from aide.utils.config import load_cfg
+    from aide.utils.response import extract_code, format_code, wrap_code
 
     cfg = load_cfg()
 
@@ -42,18 +41,17 @@ except ImportError as e:
     )
     # sys.exit(1) # Don't exit if just using as a library potentially
 
+from rich.console import Console
+from rich.syntax import Syntax
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
 )
 
-from rich.console import Console
-from rich.syntax import Syntax
-
-
 logger = logging.getLogger("aide")  # More specific logger name
 console = Console()
+
 
 class LocalLLMManager:
     _cache = {}  # Cache to store loaded models
@@ -67,9 +65,7 @@ class LocalLLMManager:
             cls.clear_cache()
             logger.info(f"Loading local model: {model_name}", extra={"verbose": True})
             try:
-                tokenizer = AutoTokenizer.from_pretrained(
-                    model_name, trust_remote_code=True
-                )
+                tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
                 # Set padding token to avoid attention mask issues
                 if tokenizer.pad_token is None:
                     tokenizer.pad_token = tokenizer.eos_token
@@ -106,9 +102,7 @@ class LocalLLMManager:
                         f"Quantized (4-bit) local model '{model_name}' loaded successfully."
                     )
                 else:
-                    logger.info(
-                        f"Unquantized local model '{model_name}' loaded successfully."
-                    )
+                    logger.info(f"Unquantized local model '{model_name}' loaded successfully.")
                 # Move model to GPU if available
                 cls._cache[model_name] = (tokenizer, model)
             except Exception as e:
@@ -121,9 +115,7 @@ class LocalLLMManager:
         """Clear specific model or entire cache to free memory."""
         if model_name:
             cls._cache.pop(model_name, None)
-            logger.info(
-                f"Cleared cache for model: {model_name}", extra={"verbose": True}
-            )
+            logger.info(f"Cleared cache for model: {model_name}", extra={"verbose": True})
         else:
             cls._cache.clear()
             logger.info("Cleared entire model cache", extra={"verbose": True})
@@ -164,7 +156,7 @@ class LocalLLMManager:
 
         t0 = time.time()
         outputs = []
-        console.rule(f"[bold blue]Generating Responses")
+        console.rule("[bold blue]Generating Responses")
 
         try:
             # Generate with attention mask
@@ -226,9 +218,7 @@ def query(
     raw_responses: Optional[List[str]] = None
     info: Optional[Dict[str, Any]] = None
     input_token_count = 0
-    output_token_count = (
-        0  # Represents tokens in the first response for consistency, or total
-    )
+    output_token_count = 0  # Represents tokens in the first response for consistency, or total
     info = {"model_name": model}
 
     if output_dir is None:
@@ -236,9 +226,7 @@ def query(
         # Use cfg.exp_name if available, otherwise use a generic name
         exp_name = cfg.exp_name if cfg and hasattr(cfg, "exp_name") else "default_exp"
         output_dir = (
-            output_base
-            / f"exp_{exp_name}"
-            / f"{step_identifier}_{time.strftime('%Y%m%d_%H%M%S')}"
+            output_base / f"exp_{exp_name}" / f"{step_identifier}_{time.strftime('%Y%m%d_%H%M%S')}"
         )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -263,9 +251,7 @@ def query(
                 )
                 logger.info("Applied chat template to prompt.", extra={"verbose": True})
             except Exception as e:
-                logger.warning(
-                    f"Could not apply chat template ({e}). Using basic concatenation."
-                )
+                logger.warning(f"Could not apply chat template ({e}). Using basic concatenation.")
                 prompt_text = (system_message or "") + "\n\n" + (user_message or "")
 
         logger.debug(
@@ -273,16 +259,14 @@ def query(
             extra={"verbose": True},
         )
 
-        raw_responses, input_len, output_len_first, latency_gen = (
-            LocalLLMManager.generate_response(
-                model_name=model,
-                tokenizer=tokenizer,
-                model=model_instance,
-                prompt=prompt_text,
-                num_responses=num_responses,
-                do_sample=False,
-                **model_kwargs,
-            )
+        raw_responses, input_len, output_len_first, latency_gen = LocalLLMManager.generate_response(
+            model_name=model,
+            tokenizer=tokenizer,
+            model=model_instance,
+            prompt=prompt_text,
+            num_responses=num_responses,
+            do_sample=False,
+            **model_kwargs,
         )
         input_token_count = input_len
         # For consistency, report output tokens of the first response, or sum if needed elsewhere
@@ -343,20 +327,14 @@ def process_and_execute_responses(
     output_base_dir.mkdir(parents=True, exist_ok=True)
 
     for i, response in enumerate(responses):
-        console.rule(
-            f"[bold blue]Processing Response {i+1}/{len(responses)} for {step_identifier}"
-        )
+        console.rule(f"[bold blue]Processing Response {i+1}/{len(responses)} for {step_identifier}")
         response_dir = output_base_dir / f"{step_identifier}_response_{i}"
         response_dir.mkdir(exist_ok=True)
 
         # Save Raw Response
         raw_response_path = response_dir / "raw_response.txt"
-        raw_response_path.write_text(
-            response or "<Response was None>"
-        )  # Handle None case
-        logger.info(
-            f"Raw response saved to: {raw_response_path}", extra={"verbose": True}
-        )
+        raw_response_path.write_text(response or "<Response was None>")  # Handle None case
+        logger.info(f"Raw response saved to: {raw_response_path}", extra={"verbose": True})
         console.print(f"[bold cyan]Raw Response {i+1}:[/bold cyan]")
         console.print(
             (response or "<Response was None>")[:1000]
@@ -374,9 +352,7 @@ def process_and_execute_responses(
             extracted_code = extract_code(response)
             if not extracted_code:
                 logger.error(f"Response {i+1}: Could not extract valid Python code.")
-                console.print(
-                    f"[bold red]Response {i+1}: Code extraction FAILED.[/bold red]"
-                )
+                console.print(f"[bold red]Response {i+1}: Code extraction FAILED.[/bold red]")
                 exec_result = ExecutionResult(
                     term_out=["Code extraction failed."],
                     exec_time=0,
@@ -388,9 +364,7 @@ def process_and_execute_responses(
                 try:
                     formatted_extracted_code = format_code(extracted_code)
                     code_path.write_text(formatted_extracted_code)
-                    logger.info(
-                        f"Extracted code saved to: {code_path}", extra={"verbose": True}
-                    )
+                    logger.info(f"Extracted code saved to: {code_path}", extra={"verbose": True})
                     console.print(f"[bold green]Extracted Code {i+1}:[/bold green]")
                     console.print(
                         Syntax(
@@ -402,9 +376,7 @@ def process_and_execute_responses(
                     )
                     console.print("-" * 20)
                 except Exception as format_e:
-                    logger.error(
-                        f"Failed to format code for response {i+1}: {format_e}"
-                    )
+                    logger.error(f"Failed to format code for response {i+1}: {format_e}")
                     # Save unformatted if formatting fails
                     code_path.write_text(extracted_code)
                     formatted_extracted_code = (
@@ -416,21 +388,15 @@ def process_and_execute_responses(
 
         # Execute code (only if code was extracted)
         if formatted_extracted_code:
-            logger.info(
-                f"Executing code for response {i+1} in Workspace :{main_workspace_dir}.."
-            )
+            logger.info(f"Executing code for response {i+1} in Workspace :{main_workspace_dir}..")
             interpreter = Interpreter(
                 working_dir=main_workspace_dir,  # data_dir.parent.parent/ "workspaces" / cfg.exp_name, # Use the dedicated workspace
                 timeout=interpreter_timeout,
             )
             try:
-                exec_result = interpreter.run(
-                    formatted_extracted_code, reset_session=True
-                )
+                exec_result = interpreter.run(formatted_extracted_code, reset_session=True)
             except Exception as e:
-                logger.error(
-                    f"Interpreter failed for response {i+1}: {e}", exc_info=True
-                )
+                logger.error(f"Interpreter failed for response {i+1}: {e}", exc_info=True)
                 # Create a more complete ExecutionResult for interpreter errors
                 exec_result = ExecutionResult(
                     term_out=[f"Interpreter Error: {e}", traceback.format_exc()],
@@ -477,22 +443,14 @@ def process_and_execute_responses(
             serialize.dump_json(exec_result, exec_log_path)
             logger.info(f"Execution log saved to: {exec_log_path}")
         except Exception as e:
-            logger.error(
-                f"Failed to save execution log as JSON for response {i+1}: {e}"
-            )
+            logger.error(f"Failed to save execution log as JSON for response {i+1}: {e}")
             # Fallback to saving as text
             try:
                 exec_log_path.with_suffix(".txt").write_text(
-                    str(
-                        exec_result.to_dict()
-                        if hasattr(exec_result, "to_dict")
-                        else exec_result
-                    )
+                    str(exec_result.to_dict() if hasattr(exec_result, "to_dict") else exec_result)
                 )
             except Exception as e_txt:
-                logger.error(
-                    f"Failed to save execution log as text for response {i+1}: {e_txt}"
-                )
+                logger.error(f"Failed to save execution log as text for response {i+1}: {e_txt}")
 
         summary_lines = []
         summary_lines.append(f"[bold magenta]Execution Result {i+1}:[/bold magenta]")
@@ -505,17 +463,13 @@ def process_and_execute_responses(
         if exec_result.exc_type:
             console.print(f"  Error Type: [bold red]{exec_result.exc_type}[/bold red]")
 
-            summary_lines.append(
-                f"  Error Type: [bold red]{exec_result.exc_type}[/bold red]"
-            )
-            error_args = (
-                exec_result.exc_info.get("args", []) if exec_result.exc_info else []
-            )
+            summary_lines.append(f"  Error Type: [bold red]{exec_result.exc_type}[/bold red]")
+            error_args = exec_result.exc_info.get("args", []) if exec_result.exc_info else []
             if error_args:
                 console.print(f"  Error Args: {error_args}")
                 summary_lines.append(f"  Error Args: {error_args}")
-        console.print(f"  Terminal Output (preview):")
-        summary_lines.append(f"  Terminal Output (preview):")
+        console.print("  Terminal Output (preview):")
+        summary_lines.append("  Terminal Output (preview):")
         term_out_list = (
             exec_result.term_out
             if isinstance(exec_result.term_out, list)
@@ -523,29 +477,19 @@ def process_and_execute_responses(
         )
         term_out_str = "\n".join(term_out_list)
         summary_lines.append(
-            "[dim]"
-            + term_out_str[:500]
-            + ("\n..." if len(term_out_str) > 500 else "")
-            + "[/dim]"
+            "[dim]" + term_out_str[:500] + ("\n..." if len(term_out_str) > 500 else "") + "[/dim]"
         )
 
         console.print(
-            "[dim]"
-            + term_out_str[:500]
-            + ("\n..." if len(term_out_str) > 500 else "")
-            + "[/dim]"
+            "[dim]" + term_out_str[:500] + ("\n..." if len(term_out_str) > 500 else "") + "[/dim]"
         )
-        console.print(
-            f"  Full output/logs saved in: {response_dir}"
-        )  # Use relative path
+        console.print(f"  Full output/logs saved in: {response_dir}")  # Use relative path
         console.print("-" * 20)
 
         # Join lines for console print and store the raw string version
         console_summary = "\n".join(summary_lines)
         # Remove rich markup for the stored string summary
-        plain_summary = "\n".join(
-            [re.sub(r"\[/?.*?\]", "", line) for line in summary_lines]
-        )
+        plain_summary = "\n".join([re.sub(r"\[/?.*?\]", "", line) for line in summary_lines])
 
         console.print(console_summary)
         execution_summaries.append(plain_summary)

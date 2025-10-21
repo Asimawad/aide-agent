@@ -1,30 +1,31 @@
 #
 # python/backend_vllm.py
 import logging
-import re
-import time
 import os
-from typing import Optional, Dict, Any, Tuple, List
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
 import openai
-from omegaconf import OmegaConf
 from funcy import notnone, once, select_values
+from omegaconf import OmegaConf
 
 from aide.backend.utils import (
-    OutputType,
-    opt_messages_to_list,
-    backoff_create,
     ContextLengthExceededError,
+    OutputType,
+    backoff_create,
+    opt_messages_to_list,
 )
 
 logger = logging.getLogger("aide")
 
 
-
 _client: openai.OpenAI = None
 _vllm_config: dict = {
-    "base_url": os.getenv("VLLM_BASE_URL", f"http://localhost:8000/v1"),
+    "base_url": os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
     "api_key": os.getenv("VLLM_API_KEY", "EMPTY"),
 }
+
+
 @once
 def _setup_vllm_client():
     """Sets up the OpenAI client for vLLM server."""
@@ -43,6 +44,7 @@ def _setup_vllm_client():
     except Exception as e:
         logger.error(f"Failed to setup vLLM client: {e}")
         raise
+
 
 VLLM_API_EXCEPTIONS = (
     openai.APIConnectionError,
@@ -69,6 +71,7 @@ def set_vllm_config(cfg: OmegaConf):
         extra={"verbose": True},
     )
 
+
 def query(
     system_message: Optional[str] = None,
     user_message: Optional[str] = None,
@@ -89,6 +92,7 @@ def query(
     # build messages
     logger.info("activated vllm backend...", extra={"verbose": True})
     model_kwargs = select_values(notnone, model_kwargs)
+
     # Prepare messages list for OpenAI API format
     def prepare_messages(sys_msg):
         return opt_messages_to_list(sys_msg, user_message, convert_system_to_user=False)
@@ -97,7 +101,7 @@ def query(
     retries = 0
     while retries < max_retries:
         messages = prepare_messages(current_system_message)
-        
+
         api_params = {
             "temperature": temperature,
             "max_tokens": model_kwargs.get("max_new_tokens", 4096),
@@ -108,7 +112,6 @@ def query(
         filtered_api_params = {k: v for k, v in api_params.items() if v is not None}
         filtered_api_params["model"] = model
         filtered_api_params["n"] = num_responses
-
 
         try:
             _setup_vllm_client()
@@ -123,9 +126,7 @@ def query(
             print(f"number of responses generated from vllm: {len(completion.choices)}")
             req_time = time.time() - t0
             if not completion or not completion.choices:
-                logger.error(
-                    "vLLM API call returned empty or invalid completion object."
-                )
+                logger.error("vLLM API call returned empty or invalid completion object.")
                 return (
                     "ERROR: Invalid API response",
                     req_time,
@@ -147,7 +148,7 @@ def query(
 
             # token usage
             prompt_toks = getattr(completion.usage, "prompt_tokens", 0)
-            comp_toks   = getattr(completion.usage, "completion_tokens", 0)
+            comp_toks = getattr(completion.usage, "completion_tokens", 0)
 
             info = {
                 "model": completion.model,
@@ -165,18 +166,15 @@ def query(
 
         except Exception as e:
             retries += 1
-            logger.warning(f"vLLM call failed (attempt {retries}/{max_retries}): {e}", exc_info=True)
+            logger.warning(
+                f"vLLM call failed (attempt {retries}/{max_retries}): {e}", exc_info=True
+            )
             if retries >= max_retries:
                 return [f"ERROR: {e}"] * num_responses, 0.0, 0, 0, {"error": str(e)}
             if retries == 2:
                 logger.info("Dropping system_message to reduce context size")
                 messages = opt_messages_to_list(None, user_message, convert_system_to_user=False)
             continue
-
-
-
-
-
 
     #         choice = completion.choices[0]
     #         output = choice.message.content or ""

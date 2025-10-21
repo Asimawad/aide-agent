@@ -1,37 +1,22 @@
+import json
 import logging
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
-import json
-import openai
+
+
 from aide.utils.config import (
     load_cfg,
 )  # Assuming this path is correct relative to your project structure
 
 from . import (
-    backend_deepseek,
-    backend_deepseek,
-    backend_local,
     backend_openai,
     backend_vllm,
-    backend_ollama,
 )
 from .utils import FunctionSpec, OutputType, PromptType, compile_prompt_to_md
 
 # --- Configuration & Globals ---
 _DEFAULT_CONFIG = load_cfg()
 logger = logging.getLogger("aide.backend")  # Standard logger name
-
-# Mapping from provider names to their query function implementations
-# _PROVIDER_QUERY_FUNCTIONS: Dict[
-#     str, Callable[..., Tuple[OutputType, float, int, int, Dict[str, Any]]]
-# ] = {
-#     "openai": backend_openai.query,
-#     "vllm": backend_vllm.query,
-#     "deepseek": backend_deepseek.query,
-#     "deepseek": backend_vllm.query,
-#     "ollama": backend_ollama.query,  # Assuming Ollama uses OpenAI's API
-#     "hf": backend_local.query,  # Renamed "HF" to "hf" for consistency
-# }
 
 # for now we default to vllm as the main provider, but we can switch to ollama if needed
 _PROVIDER_QUERY_FUNCTIONS: Dict[
@@ -80,12 +65,10 @@ def _resolve_provider(
     # VLLM engine override:
     # (like o3, o4, gpt- which might have special handling or features not via a generic VLLM endpoint)
     is_openai_direct_model = any(
-        model_name.startswith(p)
-        for p in _MODEL_PREFIX_TO_PROVIDER_MAP.get("openai", ())
+        model_name.startswith(p) for p in _MODEL_PREFIX_TO_PROVIDER_MAP.get("openai", ())
     )  # Use map dynamically
     is_deepseek_direct_model = any(
-        model_name.startswith(p)
-        for p in _MODEL_PREFIX_TO_PROVIDER_MAP.get("deepseek", ())
+        model_name.startswith(p) for p in _MODEL_PREFIX_TO_PROVIDER_MAP.get("deepseek", ())
     )  # Use map dynamically
 
     if (
@@ -142,43 +125,52 @@ def query(
     func_spec: Optional[FunctionSpec] = None,
     convert_system_to_user: bool = False,
     inference_engine: Optional[str] = None,
-    current_step: int = 0, 
+    current_step: int = 0,
     reasoning_effort: Optional[str] = None,
     **model_kwargs: Any,
 ) -> OutputType:
-    provider_name = _resolve_provider(
-        model, requested_inference_engine=inference_engine
-    )
+    provider_name = _resolve_provider(model, requested_inference_engine=inference_engine)
     final_model_kwargs = _prepare_model_kwargs(
         provider_name, model, max_tokens, reasoning_effort, model_kwargs
     )
 
     log_identifier = f"Step: {current_step} - Model: {model} - Provider: {provider_name}"
 
-    compiled_system_message = (
-        compile_prompt_to_md(system_message) if system_message else None
-    )
+    compiled_system_message = compile_prompt_to_md(system_message) if system_message else None
     compiled_user_message = compile_prompt_to_md(user_message) if user_message else None
 
     # Enhanced Logging
     if compiled_system_message:
         try:
-            system_log_content = json.dumps(system_message, indent=2) if isinstance(system_message, (dict, list)) else compiled_system_message
-            logger.debug(f"System message for logging:\n{system_log_content}", extra={"verbose": True})
+            system_log_content = (
+                json.dumps(system_message, indent=2)
+                if isinstance(system_message, (dict, list))
+                else compiled_system_message
+            )
+            logger.debug(
+                f"System message for logging:\n{system_log_content}", extra={"verbose": True}
+            )
             #   system_log_content = compiled_system_message  # Current behavior
-        except ( TypeError):
-            logger.warning(f"System message is not a dict or list: {system_message}")   
-            logger.debug(f"System message for logging:\n{compiled_system_message}", extra={"verbose": True})
+        except TypeError:
+            logger.warning(f"System message is not a dict or list: {system_message}")
+            logger.debug(
+                f"System message for logging:\n{compiled_system_message}", extra={"verbose": True}
+            )
             system_log_content = str(system_message)  # Fallback to string representation
 
     if compiled_user_message:
         try:
-            user_log_content = json.dumps(user_message, indent=2) if isinstance(user_message, (dict, list)) else compiled_user_message
+            user_log_content = (
+                json.dumps(user_message, indent=2)
+                if isinstance(user_message, (dict, list))
+                else compiled_user_message
+            )
             logger.debug(f"User message for logging:\n{user_log_content}", extra={"verbose": True})
         except TypeError:
             user_log_content = str(user_message)
-            logger.debug(f"User message for logging:\n{compiled_user_message}", extra={"verbose": True})
-
+            logger.debug(
+                f"User message for logging:\n{compiled_user_message}", extra={"verbose": True}
+            )
 
     if func_spec:
         logger.debug(
@@ -246,7 +238,7 @@ def query(
             extra={"verbose": True},
         )
         return output_response
-    
+
     if type(raw_responses) == list and model_kwargs.get("num_responses", 1) == 1:
         return raw_responses[0]
     else:

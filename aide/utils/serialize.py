@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Type, TypeVar
 
 import dataclasses_json
+
 from ..journal import Journal
 
 

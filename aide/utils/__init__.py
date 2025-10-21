@@ -1,8 +1,9 @@
+import json
 import logging
 import shutil
 import zipfile
 from pathlib import Path
-import json
+
 logger = logging.getLogger("aide")
 
 
@@ -58,9 +59,7 @@ def extract_archives(path: Path):
 
         # special case: the intended output path already exists (maybe data has already been extracted by user)
         if f_out_dir.exists():
-            logger.info(
-                f"Skipping {zip_f} as an item with the same name already exists."
-            )
+            logger.info(f"Skipping {zip_f} as an item with the same name already exists.")
             # if it's a file, it's probably exactly the same as in the zip -> remove the zip
             # [TODO] maybe add an extra check to see if zip file content matches the colliding file
             if f_out_dir.is_file() and f_out_dir.suffix != "":

@@ -1,15 +1,15 @@
 # aide/utils/data_preview.py
 
 import json
+import logging  # Import logging
 from pathlib import Path
-import logging # Import logging
 
 import humanize
 import pandas as pd
 from genson import SchemaBuilder
 from pandas.api.types import is_numeric_dtype
 
-logger = logging.getLogger("aide.data_preview") # Specific logger for this module
+logger = logging.getLogger("aide.data_preview")  # Specific logger for this module
 
 # these files are treated as code (e.g. markdown wrapped)
 code_files = {".py", ".sh", ".yaml", ".yml", ".md", ".html", ".xml", ".log", ".rst"}
@@ -25,7 +25,7 @@ def get_file_len_size(f: Path) -> tuple[int, str]:
     try:
         if f.suffix in plaintext_files:
             # Ensure file is read with an encoding that handles potential diverse characters
-            with open(f, 'r', encoding='utf-8', errors='ignore') as fp:
+            with open(f, "r", encoding="utf-8", errors="ignore") as fp:
                 num_lines = sum(1 for _ in fp)
             return num_lines, f"{num_lines} lines"
         else:
@@ -51,20 +51,18 @@ def file_tree(path: Path, depth=0) -> str:
         logger.error(f"Error iterating directory {path}: {e}")
         return f"{' '*depth*4} [Error Reading Directory]"
 
-
     max_n_files = 4 if len(files) > 30 else 8
     for p in files[:max_n_files]:
         result.append(f"{' '*depth*4}{p.name} ({get_file_len_size(p)[1]})")
     if len(files) > max_n_files:
         result.append(f"{' '*depth*4}... and {len(files)-max_n_files} other files")
 
-    max_n_dirs = 10 # Limit number of directories listed to prevent excessively long trees
+    max_n_dirs = 10  # Limit number of directories listed to prevent excessively long trees
     for p in dirs[:max_n_dirs]:
         result.append(f"{' '*depth*4}{p.name}/")
         result.append(file_tree(p, depth + 1))
     if len(dirs) > max_n_dirs:
         result.append(f"{' '*depth*4}... and {len(dirs)-max_n_dirs} other directories")
-
 
     return "\n".join(result)
 
@@ -75,7 +73,7 @@ def _walk(path: Path):
         for p in sorted(Path(path).iterdir()):
             if p.is_dir():
                 yield from _walk(p)
-            else: # It's a file
+            else:  # It's a file
                 yield p
     except PermissionError:
         logger.warning(f"Permission denied walking directory: {path}")
@@ -87,16 +85,17 @@ def preview_csv(p: Path, file_name: str, simple=True) -> str:
     try:
         # Try to read with common encodings, and handle potential parsing errors
         try:
-            df = pd.read_csv(p, encoding='utf-8')
+            df = pd.read_csv(p, encoding="utf-8")
         except UnicodeDecodeError:
-            df = pd.read_csv(p, encoding='latin1')
+            df = pd.read_csv(p, encoding="latin1")
         except pd.errors.ParserError as pe:
-            logger.warning(f"Pandas parsing error for CSV {file_name}: {pe}. Skipping detailed preview.")
+            logger.warning(
+                f"Pandas parsing error for CSV {file_name}: {pe}. Skipping detailed preview."
+            )
             return f"-> {file_name} could not be parsed as a standard CSV. File size: {get_file_len_size(p)[1]}."
-        except Exception as e: # Catch other pandas read_csv errors
+        except Exception as e:  # Catch other pandas read_csv errors
             logger.error(f"Error reading CSV {file_name}: {e}")
             return f"-> Error reading CSV {file_name}: {e}"
-
 
         out = [f"-> {file_name} has {df.shape[0]} rows and {df.shape[1]} columns."]
 
@@ -113,13 +112,13 @@ def preview_csv(p: Path, file_name: str, simple=True) -> str:
             for col_idx, col_name_original in enumerate(df.columns):
                 # Sanitize column name for processing if it's not a string (e.g. int from bad header)
                 col = str(col_name_original)
-                
+
                 # Check if the original column name (if different after str conversion) exists
                 # This handles cases where pandas might infer integer column names
                 actual_col_data = df.iloc[:, col_idx] if col not in df else df[col]
 
                 dtype = actual_col_data.dtype
-                name_display = f"{col} ({dtype})" # Use sanitized name for display
+                name_display = f"{col} ({dtype})"  # Use sanitized name for display
 
                 nan_count = actual_col_data.isnull().sum()
 
@@ -129,15 +128,25 @@ def preview_csv(p: Path, file_name: str, simple=True) -> str:
                 elif actual_col_data.nunique() < 10:
                     unique_vals = actual_col_data.unique().tolist()
                     # Truncate long lists of unique values
-                    if len(unique_vals) > 5: unique_vals_display = str(unique_vals[:5]) + "..."
-                    else: unique_vals_display = str(unique_vals)
-                    out.append(f"{name_display} has {actual_col_data.nunique()} unique values: {unique_vals_display}")
+                    if len(unique_vals) > 5:
+                        unique_vals_display = str(unique_vals[:5]) + "..."
+                    else:
+                        unique_vals_display = str(unique_vals)
+                    out.append(
+                        f"{name_display} has {actual_col_data.nunique()} unique values: {unique_vals_display}"
+                    )
                 elif is_numeric_dtype(actual_col_data):
-                    out.append(f"{name_display} has range: {actual_col_data.min():.2f} - {actual_col_data.max():.2f}, {nan_count} nan values")
+                    out.append(
+                        f"{name_display} has range: {actual_col_data.min():.2f} - {actual_col_data.max():.2f}, {nan_count} nan values"
+                    )
                 elif dtype == "object":
                     # Example values: take top 4, ensure they are strings for display
-                    example_values = [str(val) for val in actual_col_data.value_counts().head(4).index.tolist()]
-                    out.append(f"{name_display} has {actual_col_data.nunique()} unique values. Some example values: {example_values}")
+                    example_values = [
+                        str(val) for val in actual_col_data.value_counts().head(4).index.tolist()
+                    ]
+                    out.append(
+                        f"{name_display} has {actual_col_data.nunique()} unique values. Some example values: {example_values}"
+                    )
         return "\n".join(out)
     except Exception as e:
         logger.error(f"Failed to preview CSV {file_name}: {e}")
@@ -148,13 +157,13 @@ def preview_json(p: Path, file_name: str) -> str:
     """Generate a textual preview of a json file using a generated json schema"""
     builder = SchemaBuilder()
     try:
-        with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(p, "r", encoding="utf-8", errors="ignore") as f:
             # Attempt to read the first line to check for JSONL
             try:
                 first_line = f.readline().strip()
-                if not first_line: # Empty file
+                if not first_line:  # Empty file
                     return f"-> {file_name} is empty."
-                
+
                 first_object = json.loads(first_line)
 
                 # Check if it's likely JSONL
@@ -165,46 +174,66 @@ def preview_json(p: Path, file_name: str) -> str:
                 if isinstance(first_object, (dict, list)):
                     # Try to read the next line
                     try:
-                        second_line = f.readline().strip() # Read up to a certain number of bytes for performance
-                    except Exception: # Could be very large line
-                        second_line = "" # Assume not JSONL or handle as error
+                        second_line = (
+                            f.readline().strip()
+                        )  # Read up to a certain number of bytes for performance
+                    except Exception:  # Could be very large line
+                        second_line = ""  # Assume not JSONL or handle as error
 
-                    if second_line: # If there's a second line, assume JSONL
-                        f.seek(0) # Reset to read all lines
+                    if second_line:  # If there's a second line, assume JSONL
+                        f.seek(0)  # Reset to read all lines
                         # Limit the number of lines processed for schema generation to avoid OOM on huge JSONL
                         lines_processed = 0
-                        max_lines_for_schema = 100 # Configurable limit
+                        max_lines_for_schema = 100  # Configurable limit
                         for line_content in f:
                             if lines_processed >= max_lines_for_schema:
-                                logger.info(f"Reached max_lines_for_schema ({max_lines_for_schema}) for {file_name}. Schema might be partial.")
+                                logger.info(
+                                    f"Reached max_lines_for_schema ({max_lines_for_schema}) for {file_name}. Schema might be partial."
+                                )
                                 break
                             try:
                                 builder.add_object(json.loads(line_content.strip()))
-                                lines_processed +=1
+                                lines_processed += 1
                             except json.JSONDecodeError as line_e:
-                                logger.warning(f"Skipping invalid JSON line in {file_name}: {line_e} - Content: {line_content[:100]}...")
-                                continue # Skip malformed lines in JSONL
-                        schema_info = " (schema from first " + str(lines_processed) + " lines)" if lines_processed >= 1 else ""
+                                logger.warning(
+                                    f"Skipping invalid JSON line in {file_name}: {line_e} - Content: {line_content[:100]}..."
+                                )
+                                continue  # Skip malformed lines in JSONL
+                        schema_info = (
+                            " (schema from first " + str(lines_processed) + " lines)"
+                            if lines_processed >= 1
+                            else ""
+                        )
 
-                    else: # Only one line, and it was a valid JSON object
+                    else:  # Only one line, and it was a valid JSON object
                         builder.add_object(first_object)
                         schema_info = " (schema from single JSON object)"
-                else: # First line was valid JSON, but not a dict/list (e.g. just a string or number)
-                    f.seek(0) # Read the whole file as one JSON entity
-                    builder.add_object(json.load(f)) # This might fail if it's not valid JSON overall
+                else:  # First line was valid JSON, but not a dict/list (e.g. just a string or number)
+                    f.seek(0)  # Read the whole file as one JSON entity
+                    builder.add_object(
+                        json.load(f)
+                    )  # This might fail if it's not valid JSON overall
                     schema_info = " (schema from full file content)"
 
-            except json.JSONDecodeError: # First line wasn't valid JSON, assume multi-line single JSON object
+            except (
+                json.JSONDecodeError
+            ):  # First line wasn't valid JSON, assume multi-line single JSON object
                 f.seek(0)
-                builder.add_object(json.load(f)) # This is where your original error happened
+                builder.add_object(json.load(f))  # This is where your original error happened
                 schema_info = " (schema from full file content, assuming single multi-line JSON)"
-            except Exception as e_read: # Catch other read errors
-                logger.error(f"Error reading lines from JSON file {file_name} for schema generation: {e_read}")
+            except Exception as e_read:  # Catch other read errors
+                logger.error(
+                    f"Error reading lines from JSON file {file_name} for schema generation: {e_read}"
+                )
                 return f"-> Error reading JSON file {file_name} for schema: {e_read}"
 
-        return f"-> {file_name} has auto-generated json schema{schema_info}:\n" + builder.to_json(indent=2)
+        return f"-> {file_name} has auto-generated json schema{schema_info}:\n" + builder.to_json(
+            indent=2
+        )
 
-    except json.JSONDecodeError as e: # This catches the error from the final json.load(f) if it fails
+    except (
+        json.JSONDecodeError
+    ) as e:  # This catches the error from the final json.load(f) if it fails
         logger.error(f"Failed to parse {file_name} as JSON: {e}. Error at char {e.pos}.")
         return f"-> Error: {file_name} is not a valid JSON file or contains syntax errors (e.g., unterminated string at char {e.pos}). File size: {get_file_len_size(p)[1]}."
     except Exception as e:
@@ -212,12 +241,14 @@ def preview_json(p: Path, file_name: str) -> str:
         return f"-> Unexpected error previewing JSON {file_name}: {e}. File size: {get_file_len_size(p)[1]}."
 
 
-def generate(base_path: Path, include_file_details=True, simple=False, log_start=True) -> str: # Added Path type hint and log_start
+def generate(
+    base_path: Path, include_file_details=True, simple=False, log_start=True
+) -> str:  # Added Path type hint and log_start
     """
     Generate a textual preview of a directory, including an overview of the directory
     structure and previews of individual files
     """
-    if not isinstance(base_path, Path): # Ensure base_path is a Path object
+    if not isinstance(base_path, Path):  # Ensure base_path is a Path object
         base_path = Path(base_path)
 
     if log_start:
@@ -228,14 +259,16 @@ def generate(base_path: Path, include_file_details=True, simple=False, log_start
 
     if include_file_details:
         files_processed_count = 0
-        max_files_to_detail = 3 # Limit number of files to detail to prevent overly long previews
+        max_files_to_detail = 3  # Limit number of files to detail to prevent overly long previews
 
-        for fn in _walk(base_path): # _walk should also be robust
+        for fn in _walk(base_path):  # _walk should also be robust
             if files_processed_count >= max_files_to_detail:
-                logger.info(f"Reached max_files_to_detail ({max_files_to_detail}). Skipping details for remaining files.")
-                out.append(f"... and more files (details omitted for brevity).")
+                logger.info(
+                    f"Reached max_files_to_detail ({max_files_to_detail}). Skipping details for remaining files."
+                )
+                out.append("... and more files (details omitted for brevity).")
                 break
-            
+
             file_name = str(fn.relative_to(base_path))
             preview_text = None
 
@@ -247,13 +280,13 @@ def generate(base_path: Path, include_file_details=True, simple=False, log_start
                 elif fn.suffix in plaintext_files:
                     # For plaintext, only show content if small, otherwise just mention existence and size
                     file_len, file_size_str = get_file_len_size(fn)
-                    if file_len < 30 and file_len > 0 : # Show content for small files
-                        with open(fn, 'r', encoding='utf-8', errors='ignore') as f_content:
+                    if file_len < 30 and file_len > 0:  # Show content for small files
+                        with open(fn, "r", encoding="utf-8", errors="ignore") as f_content:
                             content = f_content.read()
                         if fn.suffix in code_files:
                             content = f"```\n{content}\n```"
                         preview_text = f"-> {file_name} ({file_size_str}) has content:\n\n{content}"
-                    else: # For larger plaintext files, just note their existence
+                    else:  # For larger plaintext files, just note their existence
                         preview_text = f"-> {file_name} ({file_size_str}) exists."
                 # else: skip binary files or add specific handlers
 
@@ -264,18 +297,23 @@ def generate(base_path: Path, include_file_details=True, simple=False, log_start
             except Exception as e_file_prev:
                 logger.error(f"Error generating preview for file {file_name}: {e_file_prev}")
                 out.append(f"-> Error generating preview for {file_name}: {e_file_prev}")
-                files_processed_count += 1 # Count it as processed even if error
-
+                files_processed_count += 1  # Count it as processed even if error
 
     result = "\n\n".join(out)
-    max_len = 2000 # Increased max length a bit, but still needs a limit
+    max_len = 2000  # Increased max length a bit, but still needs a limit
 
     if len(result) > max_len:
-        if not simple: # If it's too long and not already simple, try simple
-            logger.info(f"Data preview length ({len(result)}) > max_len ({max_len}). Retrying with simple=True.")
-            return generate(base_path, include_file_details=include_file_details, simple=True, log_start=False)
-        else: # If already simple and still too long, truncate
-            logger.info(f"Data preview length ({len(result)}) > max_len ({max_len}) even with simple=True. Truncating.")
+        if not simple:  # If it's too long and not already simple, try simple
+            logger.info(
+                f"Data preview length ({len(result)}) > max_len ({max_len}). Retrying with simple=True."
+            )
+            return generate(
+                base_path, include_file_details=include_file_details, simple=True, log_start=False
+            )
+        else:  # If already simple and still too long, truncate
+            logger.info(
+                f"Data preview length ({len(result)}) > max_len ({max_len}) even with simple=True. Truncating."
+            )
             return result[:max_len] + f"\n... (data preview truncated at {max_len} characters)"
 
     return result

@@ -1,170 +1,274 @@
-# AIDE: AI-Driven Exploration for ML Engineering
-### An Open-Source Agentic Framework for Autonomous Problem-Solving
+# AIDE Agent - Autonomous AI for Data Science
 
-AIDE (AI-Driven Exploration) is an open-source, autonomous agent designed to tackle end-to-end machine learning engineering tasks. It frames the complex, iterative process of ML development as a tree search through the space of possible code solutions. Powered by Large Language Models (LLMs), AIDE can draft initial solutions, debug faulty code, and iteratively improve upon working scripts to enhance performance, mirroring the workflow of a human data scientist.
+Open source autonomous AI agent powered by LLMs for data science and machine learning tasks.
 
-This repository contains the implementation of the AIDE agent, along with several advanced **Inference-Time Scaling (ITS)** strategies designed to enhance the performance of smaller, open-source LLMs, making them competitive with large, proprietary models on challenging benchmarks like [MLE-Bench](https://github.com/openai/mle-bench).
+## 🚀 Quick Start
 
-![Solution Tree Visualization](https://github.com/WecoAI/aideml/assets/8918572/2401529c-b97e-4029-aed2-c3f376f54c3c)
-
----
-
-## Features
-- **Agentic Tree Search:** Models ML engineering as a tree search, intelligently navigating through drafting, debugging, and improvement steps.
-- **Local LLM Integration:** Comes with a high-throughput backend powered by [vLLM](https://github.com/vllm-project/vllm) for serving local, open-source models efficiently.
-- **Plug-and-Play ITS Strategies:** Easily switch between different reasoning strategies via a simple configuration flag to find the best approach for your model and task.
-- **Supported Strategies:** Includes implementations for `Self-Reflection`, `Planner-Coder` (Task Decomposition), `Self-Consistency`, and more.
-- **Benchmark Ready:** Designed for rigorous evaluation on benchmarks like MLE-Bench.
-
----
-
-## Quickstart
-
-### 1. Setup Environment
-Ensure you have Python >= 3.11 and `uv` installed.
-
+### TPU Installation
 ```bash
-# Clone the repository
-git clone https://github.com/Asimawad/aide-agent.git
-cd aide-agent
+# Option 1: One command (recommended)
+uv pip install -e ".[tpu]"
 
-# Create and activate a virtual environment
-uv venv .aide-ds --python 3.11
-source .aide-ds/bin/activate
+# Option 2: Automated script
+./install-tpu-fast.sh
+```
 
-# Install dependencies (including PyTorch for CUDA 12.1)
-uv pip install  --index-strategy unsafe-best-match  --extra-index-url https://download.pytorch.org/whl/cu124 -e .
-
-
-uv pip install torch~=2.6.0
-uv pip install --prerelease=allow torch-xla[tpu]~=2.6.0 
--f https://storage.googleapis.com/libtpu-releases/index.html
-# Set your OpenAI API Key (used for the reliable feedback/judge model)
-export OPENAI_API_KEY="<your-openai-api-key>"```
-
-### 2. Launch the Local LLM Server
-AIDE works best with a locally served open-source model for code generation. We use `vLLM` for high-performance inference.
-
-In a separate terminal, launch the vLLM server with your chosen model. For example, to serve the DeepSeek 14B model:
+### CUDA/GPU Installation
 ```bash
-# Make sure your environment is activated: source .aide-ds/bin/activate
-python -m vllm.entrypoints.openai.api_server \
-    --model "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" \
+# Option 1: One command (recommended)
+uv pip install -e ".[cuda]"
+
+# Option 2: Automated script
+./install-cuda-fast.sh
+```
+
+**That's it!** All dependencies including vLLM are installed in one go.
+
+## 📦 What Gets Installed
+
+### TPU (`[tpu]`)
+- **vllm-tpu** - Complete TPU stack including:
+  - PyTorch + torch-xla
+  - JAX + jaxlib
+  - tpu-inference backend (optimized)
+  - libtpu runtime
+- **150+ packages** - All data science, ML, and AI dependencies
+- **AIDE-DS** - The autonomous agent framework
+
+### CUDA (`[cuda]`)
+- **vLLM** - High-performance LLM inference
+- **PyTorch** - torch + torchvision + torchaudio (2.6.0)
+- **bitsandbytes** - Quantization support
+- **150+ packages** - All data science, ML, and AI dependencies
+- **AIDE-DS** - The autonomous agent framework
+
+## 🏃 Running AIDE
+
+### Start vLLM Server
+
+**TPU:**
+```bash
+vllm serve "Qwen/Qwen2.5-0.5B-Instruct" \
     --port 8000 \
     --dtype bfloat16 \
-    --gpu-memory-utilization 0.85 \
+    --tensor-parallel-size 2 \
+    --max-model-len 2048 \
     --trust-remote-code
 ```
 
-### 3. Run Your First AIDE Experiment
-Now, in your original terminal, you can run an AIDE experiment.
-
-**Example: House Price Prediction Task**
+**CUDA:**
 ```bash
-aide data_dir="aide/example_tasks/house_prices" \
-     goal="Predict the sales price for each house" \
-     eval="Use the RMSE metric between the logarithm of the predicted and observed values." \
-     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" \
-     agent.steps=25
+vllm serve "Qwen/Qwen2.5-0.5B-Instruct" \
+    --port 8000 \
+    --device cuda \
+    --dtype bfloat16 \
+    --tensor-parallel-size 1 \
+    --max-model-len 2048 \
+    --trust-remote-code
 ```
-AIDE will now start the run. You can monitor its progress in the console and find the results in the `runs/` and `workspaces/` directories upon completion.
+
+### Run the Agent
+```bash
+# Set your model
+export CODER_MODEL="your-model-name"
+
+# Run using entrypoint
+./entrypoint.sh
+```
+
+## 📖 Documentation
+
+- **[INSTALL.md](./INSTALL.md)** - Complete installation guide
+- **[QUICKSTART.md](./QUICKSTART.md)** - Quick reference commands
+- **[SETUP_SUMMARY.md](./SETUP_SUMMARY.md)** - Architecture and design decisions
+- **Configuration**: Edit `aide/utils/config.yaml` for agent settings
+
+## 📊 Features
+
+- Autonomous data science workflows
+- Multi-step reasoning and planning
+- Code generation and execution
+- Automated model training and evaluation
+- Experiment tracking with Weights & Biases
+- Support for tabular, text, image, and audio data
+- TPU and CUDA/GPU acceleration
+- Multiple ML frameworks (scikit-learn, XGBoost, LightGBM, CatBoost, PyTorch, TensorFlow)
+
+## 🔧 Configuration
+
+The project uses modern Python packaging with `pyproject.toml`:
+
+```toml
+[project.optional-dependencies]
+tpu = ["vllm-tpu>=0.11.1", "tensorflow-cpu>=2.15.0"]
+cuda = ["vllm>=0.7.0", "torch==2.6.0", "torchvision", "torchaudio", "bitsandbytes"]
+dev = ["pytest", "black", "ruff", "mypy"]
+```
+
+Install with extras:
+```bash
+uv pip install -e ".[tpu-all]"    # TPU + dev tools
+uv pip install -e ".[cuda-all]"   # CUDA + dev tools
+```
+
+## 🛠️ Development
+
+```bash
+# Install with development dependencies
+uv pip install -e ".[tpu-all]"   # or .[cuda-all]
+
+# Run tests
+pytest
+
+# Format code
+black .
+
+# Lint code
+ruff check .
+```
+
+## 📝 Requirements
+
+- **Python**: 3.11+
+- **Environment**: TPU VM (v3/v4/v5) or CUDA GPU
+- **RAM**: 32GB+ recommended
+- **Disk**: 50GB+ free space
+- **Package Manager**: [uv](https://github.com/astral-sh/uv) (fast Python package installer)
+
+### Install uv
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+## 🎯 Monitoring
+
+### TPU
+```bash
+# Check TPU info
+tpu-info
+
+# Monitor memory utilization
+tpu-info --utilization
+
+# Watch in real-time
+watch -n 1 tpu-info --utilization
+```
+
+### CUDA
+```bash
+# Check GPU status
+nvidia-smi
+
+# Watch in real-time
+watch -n 1 nvidia-smi
+```
+
+## 🐛 Troubleshooting
+
+### Fresh Installation
+```bash
+# Remove old environment
+rm -rf .venv
+
+# Create new environment
+uv venv .venv --python 3.11
+source .venv/bin/activate
+
+# Install
+uv pip install -e ".[tpu]"   # or .[cuda]
+```
+
+### TPU: Check Devices
+```bash
+ls /dev/accel*
+tpu-info
+```
+
+### CUDA: Check GPU
+```bash
+nvidia-smi
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+### Verify vLLM
+```bash
+vllm --version
+python -c "import vllm; print(vllm.__version__)"
+```
+
+## 🏗️ Project Structure
+
+```
+aide-agent/
+├── pyproject.toml              # All dependencies unified here
+├── aide/                       # Main agent code
+│   ├── backend/                # Backend logic
+│   ├── utils/                  # Utilities and config
+│   └── run.py                  # Entry point
+├── entrypoint.sh               # vLLM server startup
+├── install-tpu-fast.sh         # Automated TPU setup
+├── install-cuda-fast.sh        # Automated CUDA setup
+├── INSTALL.md                  # Installation guide
+└── QUICKSTART.md               # Quick reference
+```
+
+## 🌟 Key Features
+
+### Multi-Framework Support
+- **Traditional ML**: scikit-learn, XGBoost, LightGBM, CatBoost
+- **Deep Learning**: PyTorch, TensorFlow, Keras
+- **NLP**: transformers, nltk, gensim, spacy
+- **Computer Vision**: opencv, albumentations, timm
+- **Audio**: librosa
+
+### Data Science Tools
+- pandas, numpy, scipy
+- matplotlib, seaborn
+- Bayesian optimization, Optuna
+- Experiment tracking with W&B
+
+### LLM Serving
+- High-performance inference with vLLM
+- TPU and CUDA acceleration
+- Tensor parallelism support
+- Multiple model formats (HuggingFace, GGUF, etc.)
+
+## 📜 License
+
+MIT License - see [LICENSE](./LICENSE) file
+
+## 🙏 Acknowledgments
+
+- Built with [vLLM](https://github.com/vllm-project/vllm) for LLM inference
+- TPU support via [vllm-tpu](https://github.com/vllm-project/tpu-inference)
+- Powered by [JAX](https://github.com/google/jax), [PyTorch](https://pytorch.org/), and [transformers](https://huggingface.co/docs/transformers)
+- Fast package management with [uv](https://github.com/astral-sh/uv)
+
+## 🔗 Links
+
+- **Repository**: https://github.com/Asimawad/aide-agent
+- **Issues**: https://github.com/Asimawad/aide-agent/issues
+- **vLLM Documentation**: https://docs.vllm.ai/
+- **vLLM TPU Backend**: https://github.com/vllm-project/tpu-inference
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
-## How AIDE Works
-AIDE's problem-solving approach is centered around a **Solution Space Tree Search**. This process has three main components:
+**Made with ❤️ for the AI and Data Science community**
 
-1.  **The Solution Generator (The LLM):** Proposes new solutions by either creating novel drafts or making changes to existing solutions by fixing bugs or introducing improvements.
-2.  **The Evaluator:** Assesses the quality of each proposed solution by executing the code in a sandboxed environment and parsing the output (tracebacks, printed metrics) to determine if the solution is buggy and what its performance score is.
-3.  **The Search Policy:** A simple set of heuristics that selects the most promising node from the solution tree to serve as the base for the next iteration of refinement.
-
-By repeatedly applying these steps, AIDE navigates the vast space of possible solutions, progressively refining its approach until it converges on an optimal solution.
-
-## Using Inference-Time Scaling (ITS) Strategies
-
-The true power of this framework lies in its ability to apply different reasoning strategies to the LLM. You can activate these via a single command-line flag.
-
-### Self-Reflection (SR)
-**What it does:** After a code execution fails, the agent is forced to first critique its own code and then revise it based on that critique. This is excellent for fixing contained bugs.
-
-**How to run:**
-```bash
-aide data_dir="..." goal="..." \
-     agent.ITS_Strategy="self-reflection" \
-     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
 ```
 
-### Decomposed Task Generation (Planner-Coder / "DG")
-**What it does:** This strategy separates the task into two phases: a "Planner" LLM creates a detailed, high-level plan, and then a "Coder" LLM implements that plan segment by segment. This is our best-performing strategy for high-capability models.
-
-**How to run:**
-```bash
-aide data_dir="..." goal="..." \
-     agent.ITS_Strategy="codechain" \
-     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B" \
-     agent.code.planner_model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B" # You can use a different model for planning
+**you absolutely need a requirements.txt for legacy tools, generate it:**
+pip install pip-tools
+pip-compile pyproject.toml --extra=tpu -o requirements-tpu.txt
+pip-compile pyproject.toml --extra=cuda -o requirements-cuda.txt
 ```
-*Note: The `codechain_v2` (per-segment reflection) and `codechain_v3` (chunked reflection) variants can also be set via the `ITS_Strategy` flag.*
-
-### Self-Consistency (SC)
-**What it does:** Generates *N* different solutions in parallel for the same prompt and then uses execution feedback to select the best one. This improves robustness and the chance of finding a working solution.
-
-**How to run:**
-```bash
-aide data_dir="..." goal="..." \
-     agent.ITS_Strategy="self-consistency" \
-     agent.code.model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B" \
-     agent.selfConsistency.num_responses=3 \
-     agent.selfConsistency.selection_strategy="interpreter_first_success"
-```
-
----
-
-## Advanced Configuration
-You can override any parameter from the command line. Key options include:
-- `agent.steps=...`: Number of iterations for the agent (default: 25).
-- `agent.search.num_drafts=...`: Number of initial solutions to explore (default: 5).
-- `agent.code.temp=...`: The sampling temperature for the coding model (higher values increase creativity/randomness).
-- `wandb.project=...`: To log your experiment results to Weights & Biases.
-
-For a full list of configurable parameters, see the `aide/utils/config.yaml` file.
-
-## Using AIDE as a Python Library
-You can also integrate AIDE directly into your Python projects.
-
-```python
-import aide
-
-# Initialize the experiment
-exp = aide.Experiment(
-    data_dir="aide/example_tasks/spooky-author-identification",
-    goal="Predict the author of a sentence (Poe, Lovecraft, or Shelley).",
-    eval="Use multi-class logarithmic loss."
-)
-
-# Configure the agent programmatically (optional)
-exp.cfg.agent.ITS_Strategy = "self-consistency"
-exp.cfg.agent.code.model = "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
-exp.cfg.agent.selfConsistency.num_responses = 3
-
-# Run the agent for 15 steps
-best_solution = exp.run(steps=15)
-
-print(f"Best solution's validation metric: {best_solution.valid_metric}")
-print("--- Best Solution Code ---")
-print(best_solution.code)
-```
-
-## Development
-To install AIDE for development:
-```bash
-git clone https://github.com/Asimawad/aide-agent.git
-cd aide-agent
-uv pip install -e .
-```
-
-
-
-
-
-

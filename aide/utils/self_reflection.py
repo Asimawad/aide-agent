@@ -1,7 +1,6 @@
 # Inside ./utils/self_reflection.py
 import logging  # Import logging
-from typing import Callable, Optional, Any  # Added Optional and Any
-import re
+from typing import Any, Callable, Optional  # Added Optional and Any
 
 # Assuming query, wrap_code, extract_code are accessible or passed in.
 # Define necessary type hints for the functions being passed
@@ -17,10 +16,12 @@ from .config import load_cfg  # Assuming this is your config loader
 cfg = load_cfg()
 logger = logging.getLogger("aide")  # Use the same logger instance
 
-from .config import load_cfg # Assuming this is your config loader
+from .config import load_cfg  # Assuming this is your config loader
+
 # --- Configuration ---
 cfg = load_cfg()
-logger = logging.getLogger("aide") # Use the same logger instance
+logger = logging.getLogger("aide")  # Use the same logger instance
+
 
 def perform_two_step_reflection(
     code: str,
@@ -42,9 +43,7 @@ def perform_two_step_reflection(
     2. Applies only those edits to the original code.
     """
     log_prefix_main = f"SELF_REFLECT_STEP{current_step}"
-    logger.info(
-        f"{log_prefix_main}: Starting two-step reflection.", extra={"verbose": True}
-    )
+    logger.info(f"{log_prefix_main}: Starting two-step reflection.", extra={"verbose": True})
     # logger.debug(f"{log_prefix_main}_INITIAL_CODE_START\n{code}\n{log_prefix_main}_INITIAL_CODE_END", extra={"verbose": True})
     # logger.debug(f"{log_prefix_main}_INITIAL_ANALYSIS_START\n{analysis}\n{log_prefix_main}_INITIAL_ANALYSIS_END", extra={"verbose": True})
     # logger.debug(f"{log_prefix_main}_INITIAL_TERM_OUT_START\n{term_out}\n{log_prefix_main}_INITIAL_TERM_OUT_END", extra={"verbose": True})
@@ -199,7 +198,7 @@ def perform_two_step_reflection(
             current_step=current_step,  # Pass current_step
         )
         logger.info(
-            f"Received code revision response.",
+            "Received code revision response.",
             extra={"verbose": True},
         )
         logger.debug(
@@ -240,8 +239,6 @@ def perform_two_step_reflection(
             extra={"verbose": True},
         )
     else:
-        logger.info(
-            f"{log_prefix_main}: Successfully revised code.", extra={"verbose": True}
-        )
+        logger.info(f"{log_prefix_main}: Successfully revised code.", extra={"verbose": True})
 
     return reflection_plan, final_revised_code

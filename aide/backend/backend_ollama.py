@@ -3,16 +3,16 @@
 import json
 import logging
 import time
-from funcy import notnone, once, select_values
+
 import openai
 from dotenv import load_dotenv
-import os
+from funcy import notnone, once, select_values
 
 from aide.backend.utils import (
     FunctionSpec,
     OutputType,
-    opt_messages_to_list,
     backoff_create,
+    opt_messages_to_list,
 )
 
 logger = logging.getLogger("aide")
@@ -32,9 +32,7 @@ OLLAMA_API_EXCEPTIONS = (
 @once
 def _setup_ollama_client():
     global _client
-    _client = openai.OpenAI(
-        base_url="http://localhost:11434/v1/", api_key="ollama", max_retries=0
-    )
+    _client = openai.OpenAI(base_url="http://localhost:11434/v1/", api_key="ollama", max_retries=0)
 
 
 import traceback
@@ -125,7 +123,7 @@ def query(
         }
 
         return output, req_time, in_tokens, out_tokens, info
-    except Exception as e:
+    except Exception:
         logger.error("Exception during backoff_create call:")
         logger.error(traceback.format_exc())
 

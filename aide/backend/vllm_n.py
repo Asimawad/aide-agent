@@ -1,11 +1,13 @@
 import logging
-import time
 import os
-from typing import Optional, Dict, Any, Tuple, List
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
 import openai
-from omegaconf import OmegaConf
 from funcy import notnone, once, select_values
-from aide.backend.utils import OutputType, opt_messages_to_list, backoff_create
+from omegaconf import OmegaConf
+
+from aide.backend.utils import backoff_create, opt_messages_to_list
 
 logger = logging.getLogger("aide")
 
@@ -29,34 +31,48 @@ VLLM_API_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
+
 @once
 def _setup_vllm_client():
     global _client
-    logger.info(f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}", extra={"verbose": True})
+    logger.info(
+        f"Setting up planner vLLM client with base_url: {_vllm_config['base_url']}",
+        extra={"verbose": True},
+    )
     _client = openai.OpenAI(
         base_url=_vllm_config["base_url"],
         api_key=_vllm_config["api_key"],
         max_retries=0,
     )
 
+
 @once
 def _setup_vllm_client1():
     global _client1
-    logger.info(f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}", extra={"verbose": True})
+    logger.info(
+        f"Setting up coder vLLM client with base_url: {_vllm_config1['base_url']}",
+        extra={"verbose": True},
+    )
     _client1 = openai.OpenAI(
         base_url=_vllm_config1["base_url"],
         api_key=_vllm_config1["api_key"],
         max_retries=0,
     )
 
+
 def set_vllm_config(cfg: OmegaConf):
     global _vllm_config
     if cfg.get("vllm"):
-        _vllm_config.update({
-            "base_url": cfg.vllm.get("base_url", _vllm_config["base_url"]),
-            "api_key": cfg.vllm.get("api_key", _vllm_config["api_key"]),
-        })
-    logger.debug(f"Updated vLLM config: base_url={_vllm_config['base_url']}", extra={"verbose": True})
+        _vllm_config.update(
+            {
+                "base_url": cfg.vllm.get("base_url", _vllm_config["base_url"]),
+                "api_key": cfg.vllm.get("api_key", _vllm_config["api_key"]),
+            }
+        )
+    logger.debug(
+        f"Updated vLLM config: base_url={_vllm_config['base_url']}", extra={"verbose": True}
+    )
+
 
 def query(
     system_message: Optional[str] = None,
@@ -71,7 +87,7 @@ def query(
 ) -> Tuple[List[str], float, List[int], List[int], List[Dict[str, Any]]]:
     """
     Query a vLLM-hosted model and return `n` samples.
-    
+
     Returns:
       - outputs:  List of `n` response strings
       - req_time: total round-trip time
@@ -99,7 +115,7 @@ def query(
             "stop": model_kwargs.get("stop"),
             "frequency_penalty": model_kwargs.get("frequency_penalty"),
             "presence_penalty": model_kwargs.get("presence_penalty"),
-            "n": n,   # request `n` completions
+            "n": n,  # request `n` completions
         }
         filtered = {k: v for k, v in api_params.items() if v is not None}
         filtered["model"] = model
@@ -132,14 +148,14 @@ def query(
 
             # extract all samples
             outputs = [c.message.content or "" for c in choices]
-            input_toks  = [c.usage.prompt_tokens     for c in choices]
+            input_toks = [c.usage.prompt_tokens for c in choices]
             output_toks = [c.usage.completion_tokens for c in choices]
             infos = [
                 {
-                  "model":   completion.model,
-                  "finish_reason": c.finish_reason,
-                  "id":      c.id,
-                  "created": completion.created,
+                    "model": completion.model,
+                    "finish_reason": c.finish_reason,
+                    "id": c.id,
+                    "created": completion.created,
                 }
                 for c in choices
             ]

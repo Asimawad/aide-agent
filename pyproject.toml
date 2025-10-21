@@ -1,0 +1,185 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aide-ds"
+version = "0.1.4"
+description = "Open source Autonomous AI for Data Science and Machine Learning"
+readme = "README.md"
+authors = [
+    {name = "Asim Osman", email = "asim@aims.ac.za"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.11"
+keywords = ["ai", "machine-learning", "autonomous-agent", "llm", "data-science"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Core dependencies (common to both GPU and TPU)
+dependencies = [
+    # Core Agent
+    "accelerate>=1.6.0",
+    "backoff>=2.2.1",
+    "wandb>=0.19.10",
+    "black>=25.0.0",
+    "coolname>=2.0.0",
+    "dataclasses-json>=0.6.0",
+    "funcy>=2.0",
+    "genson>=1.3.0",
+    "humanize>=4.0.0",
+    "ipython>=8.0.0",
+    "jsonschema>=4.0.0",
+    "omegaconf>=2.3.0",
+    "openai>=2.0.0",  # Required for vLLM 0.11.1
+    "pandas>=2.0.0",
+    "psutil>=5.9.0",
+    "python-dotenv>=1.0.0",
+    "python-igraph>=0.11.0",
+    "rich>=13.0.0",
+    "shutup>=0.2.0",
+    "tqdm>=4.66.0",
+    "transformers>=4.40.0",
+    "setuptools>=61.0",
+    "packaging>=23.0",
+    "wheel>=0.42.0",
+    
+    # Data Science & ML
+    "datasets>=2.18.0",
+    "scikit-learn>=1.4.0",
+    "xgboost>=2.0.0",
+    "lightgbm>=4.3.0",
+    "catboost>=1.2.0",
+    "keras>=3.0.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "scipy>=1.12.0",
+    "statsmodels>=0.14.0",
+    "optuna>=3.5.0",
+    "bayesian-optimization>=3.0.0",
+    
+    # NLP
+    "nltk>=3.8.0",
+    "gensim>=4.3.0",
+    "spacy>=3.7.0",
+    
+    # Image Processing
+    "albumentations>=1.4.0",
+    "opencv-python-headless>=4.9.0",  # Headless version for server environments
+    "Pillow>=10.2.0",
+    "timm>=0.9.0",
+    "scikit-image>=0.22.0",
+    
+    # Audio
+    "librosa>=0.10.0",
+    
+    # PyTorch ecosystem (generic - version specified in extras)
+    "pytorch-lightning>=2.2.0",
+    "torchmetrics>=1.3.0",
+    "torchtext>=0.17.0",
+    "torchinfo>=1.8.0",
+    "torch-geometric>=2.5.0",
+    
+    # Other ML tools
+    "peft>=0.9.0",
+    "pypdf>=4.0.0",
+    "rouge-score>=0.1.2",
+    "sacrebleu>=2.4.0",
+    "scikit-optimize>=0.10.0",
+    
+    # Utilities
+    "httpx>=0.27.0",
+    "igraph>=0.11.0",
+    "cairocffi>=1.6.0",
+    "radon>=6.0.0",
+    "inflect>=7.0.0",
+    "num2words>=0.5.0",
+    "pymorphy2>=0.9.0",
+    "s3fs>=2024.0.0",
+    "pytest>=8.0.0",
+]
+
+[project.optional-dependencies]
+# CUDA (GPU) dependencies
+cuda = [
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+    "torchaudio==2.6.0",
+    "bitsandbytes>=0.45.5",
+    "vllm>=0.7.0",
+    "tensorflow>=2.15.0",
+]
+
+# TPU dependencies - vllm-tpu includes all TPU packages (torch, jax, torch-xla, tpu-inference)
+tpu = [
+    "vllm-tpu>=0.11.1",  # Includes torch, jax, torch-xla, libtpu, and tpu-inference backend
+    "tensorflow-cpu>=2.15.0",  # CPU-only version to avoid conflicts with torch-xla
+]
+
+# Development dependencies
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "black>=25.0.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+]
+
+# All extras
+cuda-all = [
+    "aide-ds[cuda,dev]",
+]
+
+tpu-all = [
+    "aide-ds[tpu,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/Asimawad/aide-agent"
+Repository = "https://github.com/Asimawad/aide-agent"
+Issues = "https://github.com/Asimawad/aide-agent/issues"
+
+[project.scripts]
+aide = "aide.run:run"
+
+[tool.setuptools]
+packages = ["aide", "aide.backend", "aide.utils"]
+
+[tool.setuptools.package-data]
+aide = [
+    "utils/config.yaml",
+    "utils/competition_template.json",
+    "utils/viz_templates/*",
+    "example_tasks/**/*",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+

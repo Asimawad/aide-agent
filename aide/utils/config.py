@@ -1,21 +1,19 @@
 """configuration and setup utils"""
 
-from dataclasses import dataclass,field
 import json
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Hashable, cast
-from dataclasses import field 
+
 import rich
+import shutup
 from omegaconf import OmegaConf
 from rich.syntax import Syntax
-import shutup
-from rich.logging import RichHandler
-import logging
 
 from aide.journal import Journal, filter_journal
 
-from . import tree_export
-from . import copytree, preproc_data, serialize, parse_model_id
+from . import copytree, parse_model_id, preproc_data, serialize, tree_export
 
 shutup.mute_warnings()
 logger = logging.getLogger("aide")
@@ -27,7 +25,10 @@ logger = logging.getLogger("aide")
 @dataclass
 class SelfConsistencyConfig:
     num_responses: int = 1  # Number of candidates to generate. Default to 1 (no SC).
-    selection_strategy: str = "interpreter_first_success" # Options: "interpreter_first_success", "interpreter_best_metric"
+    selection_strategy: str = (
+        "interpreter_first_success"  # Options: "interpreter_first_success", "interpreter_best_metric"
+    )
+
 
 @dataclass
 class WandbConfig:
@@ -38,10 +39,13 @@ class WandbConfig:
     log_code: bool = True
     log_artifacts: bool = True
 
+
 @dataclass
 class SelfConsistencyConfig:
     num_responses: int = 1  # Number of candidates to generate. Default to 1 (no SC).
-    selection_strategy: str = "interpreter_first_success" # Options: "interpreter_first_success", "interpreter_best_metric"
+    selection_strategy: str = (
+        "interpreter_first_success"  # Options: "interpreter_first_success", "interpreter_best_metric"
+    )
 
 
 @dataclass
@@ -61,9 +65,11 @@ class SearchConfig:
     debug_prob: float
     num_drafts: int
 
+
 @dataclass
 class SStarIterativeDebugConfig:
     max_rounds: int = 0
+
 
 @dataclass
 class AgentConfig:
@@ -78,8 +84,10 @@ class AgentConfig:
     code: StageConfig
     feedback: StageConfig
     search: SearchConfig
-    s_star_iterative_debug: SStarIterativeDebugConfig = field(default_factory=SStarIterativeDebugConfig)
-    selfConsistency: SelfConsistencyConfig = field(default_factory=SelfConsistencyConfig) 
+    s_star_iterative_debug: SStarIterativeDebugConfig = field(
+        default_factory=SStarIterativeDebugConfig
+    )
+    selfConsistency: SelfConsistencyConfig = field(default_factory=SelfConsistencyConfig)
 
     # # MCTS specific parameters
     # mcts_iterations: int = 10  # Number of MCTS iterations per step
@@ -131,9 +139,7 @@ def _get_next_logindex(dir: Path) -> int:
     return max_index + 1
 
 
-def _load_cfg(
-    path: Path = Path(__file__).parent / "config.yaml", use_cli_args=True
-) -> Config:
+def _load_cfg(path: Path = Path(__file__).parent / "config.yaml", use_cli_args=True) -> Config:
     cfg = OmegaConf.load(path)
     if use_cli_args:
         cfg = OmegaConf.merge(cfg, OmegaConf.from_cli())
@@ -179,7 +185,8 @@ def prep_cfg(cfg: Config):
         org1, model1 = parse_model_id(cfg.agent.code.model)
 
     experiement_id = (
-        org1 or ""
+        org1
+        or ""
         + "_"
         + model1
         + str(cfg.competition_name or str(cfg.data_dir.name))
@@ -217,9 +224,7 @@ def load_task_desc(cfg: Config):
     # either load the task description from a file
     if cfg.desc_file is not None:
         if not (cfg.goal is None and cfg.eval is None):
-            logger.warning(
-                "Ignoring goal and eval args because task description file is provided."
-            )
+            logger.warning("Ignoring goal and eval args because task description file is provided.")
 
         with open(cfg.desc_file) as f:
             return f.read()
@@ -302,4 +307,4 @@ def output_file_or_placeholder(file: Path):
         else:
             return json.dumps(json.loads(file.read_text()), indent=4)
     else:
-        return f"File not found."
+        return "File not found."

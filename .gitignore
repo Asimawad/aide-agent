@@ -10,8 +10,6 @@ tree.txt
 arrk.py
 # Distribution / packaging
 .Python
-pyproject.toml
-uv.lock
 info/
 scratch
 helpers/
@@ -197,3 +195,4 @@ prompt_playground
 
 data.zip
 vllm/
+docs/

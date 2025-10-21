@@ -29,9 +29,7 @@ def sanitize_model_name(model_name: str) -> str:
     return sanitized
 
 
-def get_model_directory(
-    model_name: str, base_dir: Optional[Union[str, Path]] = None
-) -> Path:
+def get_model_directory(model_name: str, base_dir: Optional[Union[str, Path]] = None) -> Path:
     """
     Get a directory path for model-related files that's safe regardless of model name format.
 

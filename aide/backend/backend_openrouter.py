@@ -3,10 +3,10 @@
 import logging
 import os
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from funcy import notnone, once, select_values
 import openai
+from funcy import notnone, once, select_values
 
 from .utils import FunctionSpec, OutputType, backoff_create
 
@@ -49,9 +49,7 @@ def query(
     filtered_kwargs: dict = select_values(notnone, model_kwargs)  # type: ignore
 
     if func_spec is not None:
-        raise NotImplementedError(
-            "We are not supporting function calling in OpenRouter for now."
-        )
+        raise NotImplementedError("We are not supporting function calling in OpenRouter for now.")
 
     # in case some backends dont support system roles, just convert everything to user
     messages = [

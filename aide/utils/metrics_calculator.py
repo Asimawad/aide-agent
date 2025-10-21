@@ -1,60 +1,61 @@
 # aide/utils/metrics_calculator.py
+import argparse
 import json
 import logging
-import pandas as pd
-import numpy as np
-import re
-import time
 import os
 import shutil
-from pathlib import Path
-import argparse
-from collections import Counter, defaultdict
-from omegaconf import OmegaConf
-from typing import Optional, cast, List, Dict, Any
 import sys
-from . import copytree
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, cast
 
-from .config import load_cfg
+import numpy as np
 import pandas as pd
+from omegaconf import OmegaConf
+
+from . import copytree
+from .config import load_cfg
 
 # --- Configuration ---
 cfg = load_cfg()
 try:
     from radon.complexity import cc_visit
+
     RADON_AVAILABLE = True
-    logger_radon = logging.getLogger("radon") 
-    logger_radon.setLevel(logging.CRITICAL) 
+    logger_radon = logging.getLogger("radon")
+    logger_radon.setLevel(logging.CRITICAL)
 except ImportError:
     RADON_AVAILABLE = False
-    logger_radon = None # Define to avoid UnboundLocalError if radon is not available
+    logger_radon = None  # Define to avoid UnboundLocalError if radon is not available
 
 
 try:
     import wandb
+
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
-    wandb = None #
-    
+    wandb = None  #
+
 
 try:
     from ..journal import Journal, Node, filter_journal, get_path_to_node
-    from .config import Config # For type hinting config
     from . import serialize
-    from .metric import MetricValue, WorstMetricValue 
-except ImportError: 
-    print("Warning: Could not perform relative imports for metrics_calculator.py. Ensure script is run as a module or PYTHONPATH is set.")
-    sys.path.append(str(Path(__file__).resolve().parent.parent.parent)) 
-    from aide.journal import Journal, Node, filter_journal, get_path_to_node
-    from aide.utils.config import Config
+    from .config import Config  # For type hinting config
+    from .metric import MetricValue, WorstMetricValue
+except ImportError:
+    print(
+        "Warning: Could not perform relative imports for metrics_calculator.py. Ensure script is run as a module or PYTHONPATH is set."
+    )
+    sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+    from aide.journal import Journal
     from aide.utils import serialize
-    from aide.utils.metric import MetricValue, WorstMetricValue
+    from aide.utils.config import Config
 
 logger = logging.getLogger("aide.metrics_calculator")
-if not logger.handlers: # Setup basic logging if run standalone
+if not logger.handlers:  # Setup basic logging if run standalone
     handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
@@ -84,10 +85,13 @@ def copy_best_solution_and_submission():
     try:
         if os.path.exists(best_submission_dir):
             copytree(best_submission_dir, logs_dir, use_symlinks=False)
-            
-        shutil.copy(os.path.join(best_submission_dir, "submission.csv"), os.path.join(logs_dir, "submission.csv"))
+
+        shutil.copy(
+            os.path.join(best_submission_dir, "submission.csv"),
+            os.path.join(logs_dir, "submission.csv"),
+        )
         logger.info(f"Copied best_submission directory to {logs_dir}")
-    except Exception as e:
+    except Exception:
         logger.error(f"Error copying best_submission directory to {logs_dir}")
 
 
@@ -106,13 +110,16 @@ def load_run_config(run_logs_path: Path) -> Optional[Config]:
         return None
     try:
         cfg_loaded = OmegaConf.load(config_path)
-        if not (hasattr(cfg_loaded, 'agent') and hasattr(cfg_loaded.agent, 'code')):
-             logger.error(f"Loaded config from {config_path} does not appear to be a valid AIDE Config structure.")
-             return None
-        return cast(Config, cfg_loaded) 
+        if not (hasattr(cfg_loaded, "agent") and hasattr(cfg_loaded.agent, "code")):
+            logger.error(
+                f"Loaded config from {config_path} does not appear to be a valid AIDE Config structure."
+            )
+            return None
+        return cast(Config, cfg_loaded)
     except Exception as e:
         logger.error(f"Error loading config from {config_path}: {e}", exc_info=True)
         return cfg
+
 
 def load_run_journal(run_logs_path: Path) -> Optional[Journal]:
     journal_path = run_logs_path / "journal.json"
@@ -121,20 +128,27 @@ def load_run_journal(run_logs_path: Path) -> Optional[Journal]:
         return None
     try:
         journal = serialize.load_json(journal_path, Journal)
-        logger.info(f"Successfully loaded journal with {len(journal.nodes if journal and journal.nodes else [])} nodes from {journal_path}")
+        logger.info(
+            f"Successfully loaded journal with {len(journal.nodes if journal and journal.nodes else [])} nodes from {journal_path}"
+        )
         return journal
     except Exception as e:
         logger.error(f"Error loading journal from {journal_path}: {e}", exc_info=True)
         return None
 
+
 def load_best_solution_code(run_logs_path: Path) -> Optional[str]:
     # Check primary location first (saved by save_run directly into logs/{exp_name})
     code_path_primary = run_logs_path / "best_solution.py"
     # Check secondary location (staged for artifacts by WandbLogger)
-    code_path_secondary = run_logs_path / "wandb_artifacts_final" / "best_solution_code" / "solution.py"
+    code_path_secondary = (
+        run_logs_path / "wandb_artifacts_final" / "best_solution_code" / "solution.py"
+    )
     # Check older/alternative staging location (from workspace directly copied)
-    code_path_tertiary = run_logs_path / "best_solution_code" / "solution.py" # if 'best_solution' folder was copied
-    
+    code_path_tertiary = (
+        run_logs_path / "best_solution_code" / "solution.py"
+    )  # if 'best_solution' folder was copied
+
     code_path_to_try = None
     if code_path_primary.exists():
         code_path_to_try = code_path_primary
@@ -146,25 +160,33 @@ def load_best_solution_code(run_logs_path: Path) -> Optional[str]:
         code_path_to_try = code_path_tertiary
         logger.debug(f"Found best_solution.py at alternative staging location: {code_path_to_try}")
     else:
-        logger.warning(f"Best solution code file not found at expected locations in {run_logs_path}")
+        logger.warning(
+            f"Best solution code file not found at expected locations in {run_logs_path}"
+        )
         return None
     try:
         with open(code_path_to_try, "r", encoding="utf-8") as f:
             return f.read()
     except Exception as e:
-        logger.error(f"Error loading best solution code from {code_path_to_try}: {e}", exc_info=True)
+        logger.error(
+            f"Error loading best solution code from {code_path_to_try}: {e}", exc_info=True
+        )
         return None
+
+
 logger = logging.getLogger("aide.metrics_calculator")
 if not logger.handlers:
     h = logging.StreamHandler()
-    h.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
     logger.addHandler(h)
     logger.setLevel(logging.INFO)
 
 cfg = load_cfg()
 
+
 def calculate_loc_metric(code: Optional[str]) -> Optional[int]:
     return len(code.splitlines()) if code else None
+
 
 def calculate_cyclomatic_complexity(code: Optional[str]) -> Optional[float]:
     try:
@@ -174,21 +196,23 @@ def calculate_cyclomatic_complexity(code: Optional[str]) -> Optional[float]:
     if not code:
         return None
     blocks = cc_visit(code)
-    comps = [b.complexity for b in blocks if hasattr(b, 'complexity')]
+    comps = [b.complexity for b in blocks if hasattr(b, "complexity")]
     return float(np.mean(comps)) if comps else 0.0
+
 
 def calculate_imported_modules(code: Optional[str]) -> Optional[List[str]]:
     if not code:
         return None
     imports = set()
     for line in code.splitlines():
-        line=line.strip()
+        line = line.strip()
         if line.startswith("import "):
-            for part in line.split("import",1)[1].split(","):
+            for part in line.split("import", 1)[1].split(","):
                 imports.add(part.strip().split()[0])
         elif line.startswith("from "):
             imports.add(line.split()[1].split(".")[0])
     return sorted(imports)
+
 
 def calculate_tree_and_journal_metrics(journal: Optional[Journal], run_cfg: Any) -> Dict[str, Any]:
     # **unchanged**: tally nodes, depths, branching, successes, times…
@@ -198,51 +222,77 @@ def calculate_tree_and_journal_metrics(journal: Optional[Journal], run_cfg: Any)
     # … your existing logic …
     return metrics
 
+
 def aggregate_wandb_history_metrics(history_df: pd.DataFrame, steps: int) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {}
     if history_df is None or history_df.empty:
         return {"status": "no history.csv"}
-    metrics["avg_exec_time_per_step_secs_wb"] = history_df.get('exec/exec_time_s', pd.Series()).mean()
-    metrics["total_buggy_steps_wb"] = int(history_df.get('eval/is_buggy', pd.Series()).sum())
-    if steps>0:
-        good = (history_df['eval/is_buggy']==0).sum()
-        metrics["vcgr_percent_wb"] = good/steps*100
-        sub = (history_df.get('eval/submission_produced_this_step',pd.Series())==1).sum()
-        metrics["csar_percent_wb"] = sub/steps*100
-    metrics["total_effective_fixes_wb"] = int(history_df.get('eval/effective_fix_this_step',pd.Series()).sum())
-    metrics["total_effective_reflection_fixes_wb"] = int(history_df.get('eval/effective_reflection_fix_this_step',pd.Series()).sum())
+    metrics["avg_exec_time_per_step_secs_wb"] = history_df.get(
+        "exec/exec_time_s", pd.Series()
+    ).mean()
+    metrics["total_buggy_steps_wb"] = int(history_df.get("eval/is_buggy", pd.Series()).sum())
+    if steps > 0:
+        good = (history_df["eval/is_buggy"] == 0).sum()
+        metrics["vcgr_percent_wb"] = good / steps * 100
+        sub = (history_df.get("eval/submission_produced_this_step", pd.Series()) == 1).sum()
+        metrics["csar_percent_wb"] = sub / steps * 100
+    metrics["total_effective_fixes_wb"] = int(
+        history_df.get("eval/effective_fix_this_step", pd.Series()).sum()
+    )
+    metrics["total_effective_reflection_fixes_wb"] = int(
+        history_df.get("eval/effective_reflection_fix_this_step", pd.Series()).sum()
+    )
     # errors:
-    if 'exec/exception_type' in history_df:
-        errs = history_df['exec/exception_type'].replace("None", np.nan).dropna()
+    if "exec/exception_type" in history_df:
+        errs = history_df["exec/exception_type"].replace("None", np.nan).dropna()
         cnt = errs.value_counts().to_dict()
         metrics["error_type_distribution_wb"] = cnt
         metrics["most_frequent_error_type_wb"] = next(iter(cnt)) if cnt else None
     return metrics
 
+
 def extract_wandb_summary_metrics(summary_dict: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "steps_to_first_wo_wb_summary": summary_dict.get("summary/steps_to_first_working_code"),
-        "best_validation_metric_wb_summary": summary_dict.get("summary/best_validation_metric_overall"),
-        "total_submissions_by_non_buggy_nodes_wb_summary": summary_dict.get("summary/total_submissions_by_non_buggy_nodes"),
-        "total_gold_medals_achieved_wb_summary": summary_dict.get("summary/total_gold_medals_achieved"),
-        "total_silver_medals_achieved_wb_summary": summary_dict.get("summary/total_silver_medals_achieved"),
-        "total_bronze_medals_achieved_wb_summary": summary_dict.get("summary/total_bronze_medals_achieved"),
+        "best_validation_metric_wb_summary": summary_dict.get(
+            "summary/best_validation_metric_overall"
+        ),
+        "total_submissions_by_non_buggy_nodes_wb_summary": summary_dict.get(
+            "summary/total_submissions_by_non_buggy_nodes"
+        ),
+        "total_gold_medals_achieved_wb_summary": summary_dict.get(
+            "summary/total_gold_medals_achieved"
+        ),
+        "total_silver_medals_achieved_wb_summary": summary_dict.get(
+            "summary/total_silver_medals_achieved"
+        ),
+        "total_bronze_medals_achieved_wb_summary": summary_dict.get(
+            "summary/total_bronze_medals_achieved"
+        ),
         "total_steps_above_median_wb_summary": summary_dict.get("summary/total_steps_above_median"),
-        "avg_code_quality_non_buggy_nodes_wb_summary": summary_dict.get("summary/avg_code_quality_non_buggy_nodes"),
-        "total_effective_fixes_in_run_wb_summary": summary_dict.get("summary/total_effective_fixes_in_run"),
-        "total_effective_reflection_fixes_in_run_wb_summary": summary_dict.get("summary/total_effective_reflection_fixes_in_run"),
-        "best_overall_solution_produced_submission_csv_wb_summary": summary_dict.get("summary/best_overall_solution_produced_submission_csv"),
-        "num_working_code_steps_total_wb_summary": summary_dict.get("summary/num_working_code_steps_total"),
+        "avg_code_quality_non_buggy_nodes_wb_summary": summary_dict.get(
+            "summary/avg_code_quality_non_buggy_nodes"
+        ),
+        "total_effective_fixes_in_run_wb_summary": summary_dict.get(
+            "summary/total_effective_fixes_in_run"
+        ),
+        "total_effective_reflection_fixes_in_run_wb_summary": summary_dict.get(
+            "summary/total_effective_reflection_fixes_in_run"
+        ),
+        "best_overall_solution_produced_submission_csv_wb_summary": summary_dict.get(
+            "summary/best_overall_solution_produced_submission_csv"
+        ),
+        "num_working_code_steps_total_wb_summary": summary_dict.get(
+            "summary/num_working_code_steps_total"
+        ),
         "num_buggy_nodes_total_wb_summary": summary_dict.get("summary/num_buggy_nodes_total"),
     }
 
-def generate_all_metrics(run_name: str, run_id_for_wandb: Optional[str]=None) -> Dict[str, Any]:
+
+def generate_all_metrics(run_name: str, run_id_for_wandb: Optional[str] = None) -> Dict[str, Any]:
     logger.info(f"Generating metrics for run {run_name}")
-    run_logs = Path("logs")/run_name
-    report: Dict[str, Any] = {
-        "run_name": run_name,
-        "report_generation_timestamp": time.time()
-    }
+    run_logs = Path("logs") / run_name
+    report: Dict[str, Any] = {"run_name": run_name, "report_generation_timestamp": time.time()}
 
     # 1) config & journal & code
     run_cfg = load_run_config(run_logs)
@@ -267,41 +317,41 @@ def generate_all_metrics(run_name: str, run_id_for_wandb: Optional[str]=None) ->
     report["journal_analysis_metrics"] = calculate_tree_and_journal_metrics(journal, run_cfg)
 
     # 2) history.csv
-    hist_path = run_logs/"history.csv"
+    hist_path = run_logs / "history.csv"
     if hist_path.exists():
         df = pd.read_csv(hist_path)
         report["wandb_history_metrics"] = aggregate_wandb_history_metrics(df, run_cfg.agent.steps)
     else:
-        report["wandb_history_metrics"] = {"status":"history.csv missing"}
+        report["wandb_history_metrics"] = {"status": "history.csv missing"}
 
     # 3) wandb_summary_metrics.json
-    sum_path = run_logs/"wandb_summary_metrics.json"
+    sum_path = run_logs / "wandb_summary_metrics.json"
     if sum_path.exists():
         summary = json.loads(sum_path.read_text())
         report["wandb_summary_metrics"] = extract_wandb_summary_metrics(summary)
     else:
-        report["wandb_summary_metrics"] = {"status":"wandb_summary_metrics.json missing"}
+        report["wandb_summary_metrics"] = {"status": "wandb_summary_metrics.json missing"}
 
     # 4) cross-check
     jm = report["journal_analysis_metrics"].get("best_metric_value_journal")
     sm = report["wandb_summary_metrics"].get("best_validation_metric_wb_summary")
     if jm is not None and sm is not None:
         try:
-            report["cross_check_metrics"] = {
-                "consistent": np.isclose(float(jm), float(sm))
-            }
+            report["cross_check_metrics"] = {"consistent": np.isclose(float(jm), float(sm))}
         except:
             report["cross_check_metrics"] = {"consistent": False}
 
     # 5) write out comprehensive report
-    out = run_logs/"comprehensive_metrics_report.json"
+    out = run_logs / "comprehensive_metrics_report.json"
     with open(out, "w") as f:
         json.dump(report, f, indent=2)
     logger.info(f"Wrote comprehensive_metrics_report.json to {out}")
     return report
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     import argparse
+
     p = argparse.ArgumentParser()
     p.add_argument("run_name")
     args = p.parse_args()
@@ -333,8 +383,8 @@ if __name__=="__main__":
 # try:
 #     from radon.complexity import cc_visit
 #     RADON_AVAILABLE = True
-#     logger_radon = logging.getLogger("radon") 
-#     logger_radon.setLevel(logging.CRITICAL) 
+#     logger_radon = logging.getLogger("radon")
+#     logger_radon.setLevel(logging.CRITICAL)
 # except ImportError:
 #     RADON_AVAILABLE = False
 #     logger_radon = None # Define to avoid UnboundLocalError if radon is not available
@@ -346,16 +396,16 @@ if __name__=="__main__":
 # except ImportError:
 #     WANDB_AVAILABLE = False
 #     wandb = None #
-    
+
 
 # try:
 #     from ..journal import Journal, Node, filter_journal, get_path_to_node
 #     from .config import Config # For type hinting config
 #     from . import serialize
-#     from .metric import MetricValue, WorstMetricValue 
-# except ImportError: 
+#     from .metric import MetricValue, WorstMetricValue
+# except ImportError:
 #     print("Warning: Could not perform relative imports for metrics_calculator.py. Ensure script is run as a module or PYTHONPATH is set.")
-#     sys.path.append(str(Path(__file__).resolve().parent.parent.parent)) 
+#     sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 #     from aide.journal import Journal, Node, filter_journal, get_path_to_node
 #     from aide.utils.config import Config
 #     from aide.utils import serialize
@@ -387,7 +437,6 @@ if __name__=="__main__":
 # FILE_FILTER_PATTERN = cfg.wandb.run_name  # solve me
 
 
-
 # def copy_best_solution_and_submission():
 #     workspaces_dir = os.path.join("workspaces", cfg.exp_name)
 #     logs_dir = Path(os.path.join("logs", cfg.exp_name))
@@ -395,7 +444,7 @@ if __name__=="__main__":
 
 #     if os.path.exists(best_submission_dir):
 #         copytree(best_submission_dir, logs_dir, use_symlinks=False)
-        
+
 #         shutil.copy(os.path.join(best_submission_dir, "submission.csv"), os.path.join(logs_dir, "submission.csv"))
 #         print(f"Copied best_submission directory to {logs_dir}")
 #     else:
@@ -420,7 +469,7 @@ if __name__=="__main__":
 #         if not (hasattr(cfg_loaded, 'agent') and hasattr(cfg_loaded.agent, 'code')):
 #              logger.error(f"Loaded config from {config_path} does not appear to be a valid AIDE Config structure.")
 #              return None
-#         return cast(Config, cfg_loaded) 
+#         return cast(Config, cfg_loaded)
 #     except Exception as e:
 #         logger.error(f"Error loading config from {config_path}: {e}", exc_info=True)
 #         return None
@@ -445,7 +494,7 @@ if __name__=="__main__":
 #     code_path_secondary = run_logs_path / "wandb_artifacts_final" / "best_solution_code" / "solution.py"
 #     # Check older/alternative staging location (from workspace directly copied)
 #     code_path_tertiary = run_logs_path / "best_solution_code" / "solution.py" # if 'best_solution' folder was copied
-    
+
 #     code_path_to_try = None
 #     if code_path_primary.exists():
 #         code_path_to_try = code_path_primary
@@ -466,16 +515,16 @@ if __name__=="__main__":
 #         logger.error(f"Error loading best solution code from {code_path_to_try}: {e}", exc_info=True)
 #         return None
 
-# def fetch_wandb_run_data(entity: str, project: str, run_identifier: str, 
-#                          max_retries: int = DEFAULT_MAX_API_RETRIES, 
+# def fetch_wandb_run_data(entity: str, project: str, run_identifier: str,
+#                          max_retries: int = DEFAULT_MAX_API_RETRIES,
 #                          retry_delay: int = DEFAULT_API_RETRY_DELAY) -> Optional[Dict[str, Any]]:
 #     if not WANDB_AVAILABLE:
 #         logger.warning("wandb library not available. Skipping W&B data fetching.")
 #         return None
-    
+
 #     api = wandb.Api(timeout=30)
 #     target_run_obj = None
-    
+
 #     logger.info(f"Attempting to fetch W&B run: {entity}/{project}/{run_identifier}")
 #     for attempt in range(max_retries):
 #         try:
@@ -493,7 +542,7 @@ if __name__=="__main__":
 #                         if len(runs) > 1: logger.warning(f"Multiple runs found for display_name '{run_identifier}'. Using most recent.")
 #                         target_run_obj = sorted(runs, key=lambda r: r.createdAt, reverse=True)[0]
 #                         logger.info(f"Successfully fetched W&B run '{target_run_obj.name}' (ID: {target_run_obj.id}) by display_name.")
-#                         break 
+#                         break
 #                 except Exception as e_disp:
 #                     logger.warning(f"Attempt to fetch by display_name '{run_identifier}' also failed: {e_disp}")
 #             if attempt < max_retries - 1: time.sleep(retry_delay)
@@ -512,7 +561,7 @@ if __name__=="__main__":
 #     except Exception as e:
 #         print(f"the history is not retrieved")
 #     try:
-#         summary_dict = dict(target_run_obj.summary) 
+#         summary_dict = dict(target_run_obj.summary)
 #         config_dict = dict(target_run_obj.config)
 #     except Exception as e:
 #         logger.error(f"Error processing data for W&B run '{target_run_obj.id}': {e}", exc_info=True)
@@ -557,7 +606,7 @@ if __name__=="__main__":
 #     return sorted(list(imports))
 
 # def calculate_tree_and_journal_metrics(journal: Optional[Journal], run_cfg: Optional[Config]) -> Dict[str, Any]:
-#     metrics: Dict[str, Any] = {} 
+#     metrics: Dict[str, Any] = {}
 #     default_journal_metrics = {
 #         "total_nodes": 0, "max_tree_depth": 0, "avg_branching_factor": 0.0,
 #         "num_draft_nodes": 0, "num_improve_nodes": 0, "num_debug_nodes": 0,
@@ -581,7 +630,7 @@ if __name__=="__main__":
 
 #     max_depth_val = 0
 #     if nodes:
-#         node_depths = {} 
+#         node_depths = {}
 #         root_nodes_ids = [n.id for n in nodes if n.parent is None]
 #         for root_id in root_nodes_ids:
 #             queue = [(root_id, 1)]; visited_bfs = {root_id}; node_depths[root_id] = 1
@@ -591,15 +640,15 @@ if __name__=="__main__":
 #                 curr_id, depth = queue[head]; head += 1
 #                 curr_node_obj = next((n_obj for n_obj in nodes if n_obj.id == curr_id), None)
 #                 if curr_node_obj:
-#                     for child_node_obj in curr_node_obj.children: 
+#                     for child_node_obj in curr_node_obj.children:
 #                         child_id = child_node_obj.id
 #                         if child_id not in visited_bfs:
 #                             visited_bfs.add(child_id); node_depths[child_id] = depth + 1
 #                             max_depth_val = max(max_depth_val, depth + 1)
 #                             queue.append((child_id, depth + 1))
 #     metrics["max_tree_depth"] = max_depth_val
-    
-#     parent_child_counts = [len(n.children) for n in nodes if n.children] 
+
+#     parent_child_counts = [len(n.children) for n in nodes if n.children]
 #     metrics["avg_branching_factor"] = np.mean(parent_child_counts) if parent_child_counts else 0.0
 
 #     metrics["num_draft_nodes"] = len(journal.draft_nodes)
@@ -609,14 +658,14 @@ if __name__=="__main__":
 #     metrics["num_non_buggy_nodes"] = len(journal.good_nodes)
 
 #     buggy_node_ids_set = {n.id for n in journal.buggy_nodes}
-#     debug_nodes_list = [n for n in nodes if n.stage_name == "debug"] 
+#     debug_nodes_list = [n for n in nodes if n.stage_name == "debug"]
 #     debug_attempts_on_buggy_nodes = 0; successful_debugs = 0
 #     debug_chain_lengths_successful: List[int] = []
 
 #     for dn in debug_nodes_list:
-#         if dn.parent and dn.parent.id in buggy_node_ids_set: 
+#         if dn.parent and dn.parent.id in buggy_node_ids_set:
 #             debug_attempts_on_buggy_nodes += 1
-#             if not dn.is_buggy: 
+#             if not dn.is_buggy:
 #                 successful_debugs += 1
 #                 path = get_path_to_node(journal, dn.id)
 #                 chain_len = 0
@@ -629,13 +678,13 @@ if __name__=="__main__":
 #     metrics["debug_attempt_rate_on_buggy_nodes"] = (debug_attempts_on_buggy_nodes / len(buggy_node_ids_set)) * 100 if buggy_node_ids_set else 0.0
 #     metrics["successful_debug_rate_among_attempts"] = (successful_debugs / debug_attempts_on_buggy_nodes) * 100 if debug_attempts_on_buggy_nodes > 0 else 0.0
 #     metrics["avg_successful_debug_chain_length"] = np.mean(debug_chain_lengths_successful) if debug_chain_lengths_successful else 0.0
-    
+
 #     metrics["num_effective_debug_steps_journal"] = sum(1 for n in nodes if hasattr(n, 'effective_debug_step') and n.effective_debug_step)
 #     metrics["num_effective_reflection_fixes_journal"] = sum(1 for n in nodes if hasattr(n, 'effective_reflections') and n.effective_reflections)
-    
+
 #     first_wo_node_time_val = float('inf'); best_node_time_val = float('inf')
 #     first_wo_node_step_val = -1; best_node_step_val = -1
-#     best_metric_obj: Optional[MetricValue] = None 
+#     best_metric_obj: Optional[MetricValue] = None
 #     best_metric_node_id_local_val: Optional[str] = None
 #     run_start_time_val = min(n.ctime for n in nodes) if nodes else time.time()
 
@@ -644,8 +693,8 @@ if __name__=="__main__":
 #             if node.ctime < first_wo_node_time_val:
 #                 first_wo_node_time_val = node.ctime
 #                 first_wo_node_step_val = node.step
-            
-#             if node.metric is not None and not isinstance(node.metric, WorstMetricValue): 
+
+#             if node.metric is not None and not isinstance(node.metric, WorstMetricValue):
 #                 if best_metric_obj is None or node.metric > best_metric_obj: # MetricValue comparison
 #                     best_metric_obj = node.metric
 #                     best_node_time_val = node.ctime
@@ -666,7 +715,7 @@ if __name__=="__main__":
 #     if best_metric_node_id_local_val:
 #         best_node_obj_val = next((n for n in nodes if n.id == best_metric_node_id_local_val), None)
 #         metrics["code_quality_of_best_node_journal"] = best_node_obj_val.code_quality if best_node_obj_val and hasattr(best_node_obj_val, 'code_quality') else None
-    
+
 #     return metrics
 
 # def aggregate_wandb_history_metrics(history_df: Optional[pd.DataFrame], agent_steps_config: int) -> Dict[str, Any]:
@@ -683,7 +732,7 @@ if __name__=="__main__":
 
 #     metrics["avg_exec_time_per_step_secs_wb"] = history_df['exec/exec_time_s'].mean() if 'exec/exec_time_s' in history_df.columns else None
 #     metrics["total_buggy_steps_wb"] = int(history_df['eval/is_buggy'].sum()) if 'eval/is_buggy' in history_df.columns else None
-    
+
 #     if 'eval/is_buggy' in history_df.columns and agent_steps_config > 0:
 #         valid_code_count = (history_df["eval/is_buggy"] == 0).sum()
 #         metrics["vcgr_percent_wb"] = (valid_code_count / agent_steps_config) * 100
@@ -691,13 +740,13 @@ if __name__=="__main__":
 #         metrics["vcgr_percent_wb"] = 0.0 if agent_steps_config > 0 else None # Default to 0% if steps exist but no buggy info
 
 #     # Key for submission produced by non-buggy code THIS STEP
-#     submission_key = "eval/submission_produced_this_step" 
+#     submission_key = "eval/submission_produced_this_step"
 #     if submission_key in history_df.columns and agent_steps_config > 0:
 #         submission_produced_count = (history_df[submission_key] == 1).sum()
 #         metrics["csar_percent_wb"] = (submission_produced_count / agent_steps_config) * 100
 #     else:
 #         metrics["csar_percent_wb"] = 0.0 if agent_steps_config > 0 else None
-        
+
 #     metrics["total_effective_fixes_wb"] = int(history_df['eval/effective_fix_this_step'].sum()) if 'eval/effective_fix_this_step' in history_df.columns else None
 #     metrics["total_effective_reflection_fixes_wb"] = int(history_df['eval/effective_reflection_fix_this_step'].sum()) if 'eval/effective_reflection_fix_this_step' in history_df.columns else None # Key name from agent step
 
@@ -713,9 +762,8 @@ if __name__=="__main__":
 #     else:
 #         metrics["error_type_distribution_wb"] = None
 #         metrics["most_frequent_error_type_wb"] = None
-        
-#     return metrics
 
+#     return metrics
 
 
 # def extract_wandb_summary_metrics(summary_dict: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -738,7 +786,7 @@ if __name__=="__main__":
 #     if summary_dict is None:
 #         logger.warning("W&B summary_dict is missing. Returning default W&B summary metrics.")
 #         return default_summary
-    
+
 #     # Extract with .get() to gracefully handle missing keys
 #     return {
 #         "steps_to_first_wo_wb_summary": summary_dict.get("summary/steps_to_first_working_code"),
@@ -787,23 +835,23 @@ if __name__=="__main__":
 #     }
 
 #     all_metrics_report["journal_analysis_metrics"] = calculate_tree_and_journal_metrics(journal, run_cfg)
-    
+
 #     wandb_data = None
 #     if WANDB_AVAILABLE and run_cfg and hasattr(run_cfg, 'wandb') and run_cfg.wandb.enabled:
 #         entity = run_cfg.wandb.entity or os.getenv("WANDB_ENTITY_OVERRIDE", DEFAULT_WANDB_ENTITY)
 #         project = run_cfg.wandb.project or os.getenv("WANDB_PROJECT_OVERRIDE", DEFAULT_WANDB_PROJECT)
 #         identifier_for_wandb = run_id_for_wandb if run_id_for_wandb else run_name
-        
+
 #         logger.info(f"Fetching W&B data for {entity}/{project}, identifier: {identifier_for_wandb}")
-#         wandb_data = fetch_wandb_run_data(entity, project, identifier_for_wandb) 
-    
+#         wandb_data = fetch_wandb_run_data(entity, project, identifier_for_wandb)
+
 #     if wandb_data and run_cfg: # run_cfg must exist to get agent_steps_config
 #         all_metrics_report["wandb_history_metrics"] = aggregate_wandb_history_metrics(
-#             wandb_data.get("history_df"), 
-#             run_cfg.agent.steps 
+#             wandb_data.get("history_df"),
+#             run_cfg.agent.steps
 #         )
 #         all_metrics_report["wandb_summary_metrics"] = extract_wandb_summary_metrics(wandb_data.get("summary_dict"))
-        
+
 #         journal_best_metric = all_metrics_report["journal_analysis_metrics"].get("best_metric_value_journal")
 #         wb_summary_best_metric = all_metrics_report["wandb_summary_metrics"].get("best_validation_metric_wb_summary")
 #         if journal_best_metric is not None and wb_summary_best_metric is not None:
@@ -827,11 +875,11 @@ if __name__=="__main__":
 #         all_metrics_report["wandb_summary_metrics"] = {"status": "W&B data not fetched or run_cfg not available."}
 
 #     logger.info("Comprehensive metrics generation complete.")
-    
+
 #     output_path = run_logs_path / "comprehensive_metrics_report.json"
 #     try:
 #         with open(output_path, "w", encoding="utf-8") as f:
-#             class NpEncoder(json.JSONEncoder): 
+#             class NpEncoder(json.JSONEncoder):
 #                 def default(self, obj):
 #                     if isinstance(obj, np.integer): return int(obj)
 #                     if isinstance(obj, np.floating): return float(obj)
@@ -859,7 +907,7 @@ if __name__=="__main__":
 
 #     final_metrics_report = generate_all_metrics(args.run_name, run_id_for_wandb=args.run_id)
 
-#     console_output = { 
+#     console_output = {
 #         "Run Name": final_metrics_report.get("run_name"),
 #         "Config Summary": final_metrics_report.get("config_summary", {}),
 #         "Key Journal Metrics": {
@@ -881,7 +929,7 @@ if __name__=="__main__":
 #         "Best Solution LOC": final_metrics_report.get("best_solution_code_metrics", {}).get("loc")
 #     }
 #     try:
-#         import yaml 
+#         import yaml
 #         print("\n--- Metrics Calculator Summary ---")
 #         print(yaml.dump(console_output, sort_keys=False, indent=2, allow_unicode=True))
 #     except ImportError:

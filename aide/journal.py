@@ -14,13 +14,14 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 from dataclasses_json import DataClassJsonMixin
+from rich.console import Console
+
 from .interpreter import ExecutionResult
 from .utils.metric import MetricValue
 from .utils.response import trim_long_string
 
-from rich.console import Console
-
 console = Console()
+
 
 @dataclass(eq=False)
 class Node(DataClassJsonMixin):
@@ -190,12 +191,20 @@ class Journal(DataClassJsonMixin):
         else:
             nodes = self.nodes
         return max(nodes, key=lambda n: n.metric)
-# aide/journal.py -> Journal.generate_summary method
 
-    def generate_summary(self, include_code: bool = True, max_nodes_to_summarize: int = 2, 
-                         code_threshold: int = 1000, code_k: int = 400,
-                         plan_threshold: int = 1000, plan_k: int = 400, # Added plan truncation
-                         analysis_threshold: int = 500, analysis_k: int = 200) -> str:
+    # aide/journal.py -> Journal.generate_summary method
+
+    def generate_summary(
+        self,
+        include_code: bool = True,
+        max_nodes_to_summarize: int = 2,
+        code_threshold: int = 1000,
+        code_k: int = 400,
+        plan_threshold: int = 1000,
+        plan_k: int = 400,  # Added plan truncation
+        analysis_threshold: int = 500,
+        analysis_k: int = 200,
+    ) -> str:
         summary_parts = []
         nodes_to_consider = []
 
@@ -206,42 +215,56 @@ class Journal(DataClassJsonMixin):
         elif self.draft_nodes:
             sorted_draft_nodes = sorted(self.draft_nodes, key=lambda n: n.step, reverse=True)
             nodes_to_consider = sorted_draft_nodes[:max_nodes_to_summarize]
-        
-        if not nodes_to_consider and self.nodes: # Fallback to most recent nodes
+
+        if not nodes_to_consider and self.nodes:  # Fallback to most recent nodes
             sorted_all_nodes = sorted(self.nodes, key=lambda n: n.step, reverse=True)
             nodes_to_consider = sorted_all_nodes[:max_nodes_to_summarize]
 
         for n_idx, n in enumerate(nodes_to_consider):
-            current_entry_parts = [f"--- Attempt {n_idx+1} (Node ID: {n.id}, Stage: {n.stage_name}) ---"]
+            current_entry_parts = [
+                f"--- Attempt {n_idx+1} (Node ID: {n.id}, Stage: {n.stage_name}) ---"
+            ]
             plan_to_use = n.plan
             if n.plan and "</think>" in n.plan:
                 split_plan = n.plan.split("</think>")
                 if len(split_plan) > 1:
                     plan_to_use = split_plan[1]
-            
-            if plan_to_use:
-                 current_entry_parts.append(f"Design: {trim_long_string(plan_to_use.strip(), threshold=plan_threshold, k=plan_k)}")
-            else:
-                 current_entry_parts.append("Design: No plan provided.")
 
-            if include_code and n.code: # Check if n.code exists
-                current_entry_parts.append(f"Code: {trim_long_string(n.code.strip(), threshold=code_threshold, k=code_k)}")
+            if plan_to_use:
+                current_entry_parts.append(
+                    f"Design: {trim_long_string(plan_to_use.strip(), threshold=plan_threshold, k=plan_k)}"
+                )
+            else:
+                current_entry_parts.append("Design: No plan provided.")
+
+            if include_code and n.code:  # Check if n.code exists
+                current_entry_parts.append(
+                    f"Code: {trim_long_string(n.code.strip(), threshold=code_threshold, k=code_k)}"
+                )
             elif include_code:
                 current_entry_parts.append("Code: No code available.")
 
             if n.analysis:
-                current_entry_parts.append(f"Results: {trim_long_string(n.analysis.strip(), threshold=analysis_threshold, k=analysis_k)}")
+                current_entry_parts.append(
+                    f"Results: {trim_long_string(n.analysis.strip(), threshold=analysis_threshold, k=analysis_k)}"
+                )
             if n.metric and n.metric.value is not None:
-                current_entry_parts.append(f"Validation Metric: {n.metric.value:.4f} ({'Maximize' if n.metric.maximize else 'Minimize'})")
+                current_entry_parts.append(
+                    f"Validation Metric: {n.metric.value:.4f} ({'Maximize' if n.metric.maximize else 'Minimize'})"
+                )
             if n.is_buggy:
-                current_entry_parts.append(f"Outcome: Buggy (Error type: {n.exc_type or 'Unknown'})")
-            
+                current_entry_parts.append(
+                    f"Outcome: Buggy (Error type: {n.exc_type or 'Unknown'})"
+                )
+
             summary_parts.append("\n".join(current_entry_parts))
 
         if not summary_parts:
             return "No previous attempts recorded or suitable for summary."
-            
+
         return "\n\n-------------------------------\n".join(summary_parts)
+
+
 def get_path_to_node(journal: Journal, node_id: str) -> list[str]:
     path = [node_id]
 
@@ -299,7 +322,6 @@ def filter_journal(journal: Journal) -> Journal:
 def journal2report(journal: Journal, task_desc: dict):
     from .backend import query
 
-    from .backend import query
 
     """
     Generate a report from a journal, the report will be in markdown format.

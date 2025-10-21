@@ -1,18 +1,22 @@
 # aide/utils/prompt_utils.py
+import copy  # For deepcopying system prompts
 import random
-from typing import Any, Dict, List,Optional
-from typing import Any, Dict, List,Optional
-import copy # For deepcopying system prompts
-from ..backend import FunctionSpec
 from copy import deepcopy
+from typing import Any, Dict, List, Optional
+
+from ..backend import FunctionSpec
+
 
 # --- Helper for wrapping code (already in your codebase) ---
 def prompt_utils_wrap_code(code_str: str, lang: str = "python") -> str:
-    if not code_str: # Handle None or empty string gracefully
-        return f"```{lang}\n# No code provided.\n```" if lang else "```\n# No content provided.\n```"
+    if not code_str:  # Handle None or empty string gracefully
+        return (
+            f"```{lang}\n# No code provided.\n```" if lang else "```\n# No content provided.\n```"
+        )
     if lang:
         return f"```{lang}\n{code_str}\n```"
     return f"```\n{code_str}\n```"
+
 
 review_func_spec = FunctionSpec(
     name="submit_review",
@@ -68,10 +72,16 @@ review_func_spec = FunctionSpec(
 COMPETITION_METADATA = {
     "aerial-cactus-identification": {"Task Type": "Image Classification", "Size (GB)": 0.0254},
     "denoising-dirty-documents": {"Task Type": "Image To Image", "Size (GB)": 0.06},
-    "detecting-insults-in-social-commentary": {"Task Type": "Text Classification", "Size (GB)": 0.002},
+    "detecting-insults-in-social-commentary": {
+        "Task Type": "Text Classification",
+        "Size (GB)": 0.002,
+    },
     "dog-breed-identification": {"Task Type": "Image Classification", "Size (GB)": 0.75},
     "dogs-vs-cats-redux-kernels-edition": {"Task Type": "Image Classification", "Size (GB)": 0.85},
-    "jigsaw-toxic-comment-classification-challenge": {"Task Type": "Text Classification", "Size (GB)": 0.06},
+    "jigsaw-toxic-comment-classification-challenge": {
+        "Task Type": "Text Classification",
+        "Size (GB)": 0.06,
+    },
     "leaf-classification": {"Task Type": "Image Classification", "Size (GB)": 0.036},
     "mlsp-2013-birds": {"Task Type": "Audio Classification", "Size (GB)": 0.5851},
     "nomad2018-predict-transparent-conductors": {"Task Type": "Tabular", "Size (GB)": 0.00624},
@@ -91,8 +101,9 @@ PACKAGE_CATEGORIES = {
     "text": ["torch", "transformers", "nltk", "spacy"],
     "audio": ["torch", "torchaudio", "librosa"],
     "graph": ["torch-geometric", "networkx"],
-    "optimization": ["bayesian-optimization", "optuna"]
+    "optimization": ["bayesian-optimization", "optuna"],
 }
+
 
 def get_competition_environment_text(competition_name: str) -> str:
     """Generates a text string describing the environment and suggested libraries."""
@@ -110,10 +121,14 @@ def get_competition_environment_text(competition_name: str) -> str:
             task_specific_guidance = "For this image-based task, libraries like `OpenCV/Pillow`, `torchvision`, and `timm` are highly relevant."
         elif "tabular" in task_type_lower:
             suggested_pkgs.update(PACKAGE_CATEGORIES["tabular"])
-            task_specific_guidance = "For tabular data, consider `XGBoost`, `LightGBM`, `CatBoost`, and `Statsmodels`."
+            task_specific_guidance = (
+                "For tabular data, consider `XGBoost`, `LightGBM`, `CatBoost`, and `Statsmodels`."
+            )
         elif "text" in task_type_lower or "seq->seq" in task_type_lower:
             suggested_pkgs.update(PACKAGE_CATEGORIES["text"])
-            task_specific_guidance = "For text/NLP tasks, `transformers`, `NLTK`, and `spaCy` are powerful choices."
+            task_specific_guidance = (
+                "For text/NLP tasks, `transformers`, `NLTK`, and `spaCy` are powerful choices."
+            )
         elif "audio" in task_type_lower:
             suggested_pkgs.update(PACKAGE_CATEGORIES["audio"])
             task_specific_guidance = "For audio tasks, `torchaudio` and `librosa` are key."
@@ -121,8 +136,7 @@ def get_competition_environment_text(competition_name: str) -> str:
             suggested_pkgs.update(PACKAGE_CATEGORIES["graph"])
             task_specific_guidance = "For graph tasks, `torch-geometric` and `networkx` are useful."
         else:
-             task_specific_guidance = "Consider a general set of machine learning libraries."
-
+            task_specific_guidance = "Consider a general set of machine learning libraries."
 
         pkgs_list = list(suggested_pkgs)
         random.shuffle(pkgs_list)
@@ -135,11 +149,19 @@ def get_competition_environment_text(competition_name: str) -> str:
             f"Installed Packages: Your solution can use any relevant machine learning packages such as: {pkg_str}. {task_specific_guidance} "
             "Feel free to use any other packages too (all packages are already installed!). For neural networks we suggest using PyTorch rather than TensorFlow."
         )
-    else: # Fallback for unknown competition (original Agent's _prompt_environment behavior)
+    else:  # Fallback for unknown competition (original Agent's _prompt_environment behavior)
         pkgs = [
-            "numpy", "pandas", "scikit-learn", "statsmodels", "xgboost",
-            "lightGBM", "torch", "torchvision", "torch-geometric",
-            "bayesian-optimization", "timm",
+            "numpy",
+            "pandas",
+            "scikit-learn",
+            "statsmodels",
+            "xgboost",
+            "lightGBM",
+            "torch",
+            "torchvision",
+            "torch-geometric",
+            "bayesian-optimization",
+            "timm",
         ]
         random.shuffle(pkgs)
         pkg_str = ", ".join([f"`{p}`" for p in pkgs])
@@ -148,6 +170,8 @@ def get_competition_environment_text(competition_name: str) -> str:
             f"Installed Packages: Your solution can use any relevant machine learning packages such as: {pkg_str}. "
             "Feel free to use any other packages too (all packages are already installed!). For neural networks we suggest using PyTorch rather than TensorFlow."
         )
+
+
 # --- Static Prompt Components (from Agent) ---
 AGENT_IMPLEMENTATION_GUIDELINE_LIST: List[str] = [
     "1. Deliver a complete solution, composed of a plan and a code implementations that successfully solves the kaggle competition and saves the submission.csv file ",
@@ -157,7 +181,7 @@ AGENT_IMPLEMENTATION_GUIDELINE_LIST: List[str] = [
     "5. Calculate the evaluation metric on a validation set and **print it clearly** using a recognizable format, e.g., `print(f'Validation Metric: {metric_value}')`.",
     "6. **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. Ensure the file format matches the task description.",
     "7. The script must run without errors. Focus on correctness first.",
-    "8. The code should be clean and easy to understand. It should be well-documented and well-structured."
+    "8. The code should be clean and easy to understand. It should be well-documented and well-structured.",
 ]
 
 AGENT_RESPONSE_FORMAT_TEXT: str = (
@@ -166,10 +190,10 @@ AGENT_RESPONSE_FORMAT_TEXT: str = (
     "followed by a single markdown code block (wrapped in ```python ... ```) which implements this solution and prints out the evaluation metric. "
     "There should be no additional headings or text in your response. Just natural language text followed by a newline and then the markdown code block. "
     "Your entire response MUST strictly follow this format:\n\n"
-    "PLAN:\n" # No "1)"
-    "<your step-by-step reasoning here, as detailed bullet points>\n\n" # Removed "plain text, no fences" as it's implied by not having backticks
-    "---\n" # Separator
-    "CODE:\n" # No "2)"
+    "PLAN:\n"  # No "1)"
+    "<your step-by-step reasoning here, as detailed bullet points>\n\n"  # Removed "plain text, no fences" as it's implied by not having backticks
+    "---\n"  # Separator
+    "CODE:\n"  # No "2)"
     "```python\n"
     "<your python code here, with '# Thought:' comments before logical blocks>\n"
     "```\n"
@@ -181,22 +205,21 @@ AGENT_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     "user_instructions": {
         "Possible Questions you will face": "You will be asked to either come up with a plan and code to solve a Kaggle competition, debug existing code, or improve working code to get better results.",
         "How to answer the user": (
-            'Whenever you answer, always: '
+            "Whenever you answer, always: "
             '1. You strat by writing a "PLAN:" section in plain text with 7-10*highly detailed, step-by-step bullet points*. Each step should be actionable and explicit, explaining *how* it will be achieved. '
-            'Example plan step: "1. Load \'train.csv\' and \'test.csv\' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets."\n'
+            "Example plan step: \"1. Load 'train.csv' and 'test.csv' using pandas, then use train_test_split to split the data to 80%-20% training and validation sets.\"\n"
             '2. Then write a "CODE:" section containing exactly one fenced Python block: ```python. Within this code block, *before each major logical section of code*, include a comment explaining your immediate thought process, the specific purpose of that section, and how it relates to your PLAN step. '
             "Your entire response MUST strictly follow this format:\n\n"
-            "PLAN:\n" # No "1)"
-            "<your step-by-step reasoning here, as detailed bullet points>\n\n" # Removed "plain text, no fences" as it's implied by not having backticks
-            "---\n" # Separator
-            "CODE:\n" # No "2)"
+            "PLAN:\n"  # No "1)"
+            "<your step-by-step reasoning here, as detailed bullet points>\n\n"  # Removed "plain text, no fences" as it's implied by not having backticks
+            "---\n"  # Separator
+            "CODE:\n"  # No "2)"
             "```python\n"
             "<your python code here, with '# Thought:' comments before logical blocks>\n"
             "```\n"
             "There should be NO text before 'PLAN:' and NO text after the final '```'."
-
         ),
-        "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed."
+        "Critical Instruction": "Ensure your plan is explicit and your code is well-commented with your thought process as instructed.",
     },
 }
 
@@ -207,28 +230,27 @@ AGENT_draft_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     ),
     "user_instructions": {
         "Task Context / Possible Questions": "You will be provided with a description of a Kaggle competition and asked to generate a complete solution, which includes both a PLAN and the corresponding CODE.",
-        
         "How to Answer (Output Structure, Plan Details, Code Details, Examples)": (
             "Your entire response MUST be structured in two main sections: 'PLAN:' followed by 'CODE:'. Use '---' as a separator between the PLAN and CODE sections. There should be no text before 'PLAN:' and no text after the final ``` of the CODE block.\n\n"
             "**1. PLAN Section Requirements:**\n"
-            "   Construct a \"PLAN:\" section. This plan must consist of 7-10 highly detailed, sequential bullet points. "
+            '   Construct a "PLAN:" section. This plan must consist of 7-10 highly detailed, sequential bullet points. '
             "   Each point must describe a specific, actionable step required to solve the problem, including *what* to do and *how* it will be achieved (e.g., specific libraries, functions, or techniques to use). "
             "   This plan will directly guide your code implementation. Avoid overly generic steps and do NOT include steps for Exploratory Data Analysis (EDA). "
             "   Each bullet point in the PLAN must be self-contained, explaining not just *what* to do but also *how* it will be achieved, mentioning key libraries or specific functions if applicable, as if you are explaining it to someone who will implement it based solely on that plan step.\n\n"
             "   *Example plan steps demonstrating required detail for a complete simple solution (for a hypothetical customer churn prediction task):*\n"
             '   "1. **Data Loading**: Load `train.csv` and `test.csv` datasets into pandas DataFrames using `pd.read_csv()`. Store the `customerID` from the test set for later use in the submission file."\n'
             '   "2. **Target Variable Preparation**: Separate the target variable (e.g., `Churn`) from the features in the training DataFrame. If the target is categorical (e.g., Yes/No), encode it into numerical format (0/1) using `sklearn.preprocessing.LabelEncoder` or a simple map function."\n'
-            '   "3. **Basic Feature Selection & Preprocessing - Numerical**: Identify numerical features. For simplicity in this draft, select a subset of obviously relevant numerical features (e.g., `tenure`, `MonthlyCharges`). Impute any missing values in these selected features using the median strategy with `sklearn.impute.SimpleImputer(strategy=\'median\')`. Fit the imputer on the training data and transform both train and test sets for these features."\n'
+            "   \"3. **Basic Feature Selection & Preprocessing - Numerical**: Identify numerical features. For simplicity in this draft, select a subset of obviously relevant numerical features (e.g., `tenure`, `MonthlyCharges`). Impute any missing values in these selected features using the median strategy with `sklearn.impute.SimpleImputer(strategy='median')`. Fit the imputer on the training data and transform both train and test sets for these features.\"\n"
             '   "4. **Basic Feature Preprocessing - Categorical**: Identify categorical features. For simplicity, select a few key categorical features (e.g., `Contract`, `PaymentMethod`). Apply one-hot encoding using `pd.get_dummies()` to these features for both train and test sets. Ensure consistent columns by aligning them post-encoding, possibly by reindexing based on training set columns."\n'
             '   "5. **Combine Preprocessed Features**: Concatenate the preprocessed numerical and categorical features into final training (X_train_processed) and test (X_test_processed) feature sets using `pd.concat()`."\n'
             '   "6. **Data Splitting for Validation**: Split `X_train_processed` and the encoded target variable into training and validation subsets (e.g., 80% train, 20% validation) using `sklearn.model_selection.train_test_split`, setting a `random_state` for reproducibility and `stratify` by the target if it\'s a classification task."\n'
-            '   "7. **Model Training**: Instantiate a simple classification model, for example, `sklearn.linear_model.LogisticRegression(random_state=42, solver=\'liblinear\')`. Train this model on the (scaled, if done) training subset (`X_train_fold`, `y_train_fold`)."\n'
-            '   "8. **Validation and Metric Display**: Predict probabilities on the validation subset using `model.predict_proba()[:, 1]` (for the positive class). Calculate and print a relevant validation metric (e.g., ROC AUC using `sklearn.metrics.roc_auc_score`) using the format: `print(f\'Validation ROC AUC: {auc_score}\')`."\n'
+            "   \"7. **Model Training**: Instantiate a simple classification model, for example, `sklearn.linear_model.LogisticRegression(random_state=42, solver='liblinear')`. Train this model on the (scaled, if done) training subset (`X_train_fold`, `y_train_fold`).\"\n"
+            "   \"8. **Validation and Metric Display**: Predict probabilities on the validation subset using `model.predict_proba()[:, 1]` (for the positive class). Calculate and print a relevant validation metric (e.g., ROC AUC using `sklearn.metrics.roc_auc_score`) using the format: `print(f'Validation ROC AUC: {auc_score}')`.\"\n"
             '   "9. **Test Set Prediction**: Predict probabilities on the fully preprocessed test set (`X_test_processed`) using `model.predict_proba()[:, 1]` to get the likelihood of churn for each test customer."\n'
             '   "10. **Submission File Generation**: Create a pandas DataFrame for the submission. It should contain the `customerID` column from the original test data and a `Churn` (or the target name specified by the competition) column with the predicted probabilities. Save this DataFrame to `./submission/submission.csv` using `submission_df.to_csv(path, index=False)`."\n\n'
             "**2. CODE Section Requirements:**\n"
-            "   Follow the PLAN with a \"CODE:\" section, containing a single, complete Python script enclosed in ```python ... ```. "
-            "   Crucially, *before every distinct logical block of code that corresponds to a step in your PLAN*, you MUST include a comment starting with \"# Thought:\". This comment should briefly state: "
+            '   Follow the PLAN with a "CODE:" section, containing a single, complete Python script enclosed in ```python ... ```. '
+            '   Crucially, *before every distinct logical block of code that corresponds to a step in your PLAN*, you MUST include a comment starting with "# Thought:". This comment should briefly state: '
             "   a) Your immediate thought process or strategy for implementing that part. "
             "   b) The specific purpose of the upcoming code block. "
             "   c) Which PLAN step number(s) it directly addresses. \n"
@@ -236,21 +258,19 @@ AGENT_draft_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             "   ```python\n"
             "   # Thought: Implementing PLAN step 1. Need to load the training data CSV. Pandas is the standard tool.\n"
             "   import pandas as pd\n"
-            "   train_df = pd.read_csv(\"./input/train.csv\")\n\n"
+            '   train_df = pd.read_csv("./input/train.csv")\n\n'
             "   # Thought: Continuing PLAN step 1. Construct full image file paths.\n"
             "   import os\n"
-            "   IMAGE_DIR = \"./input/train/\"\n"
-            "   train_df[\"filepath\"] = train_df[\"id\"].apply(lambda x: os.path.join(IMAGE_DIR, x))\n"
+            '   IMAGE_DIR = "./input/train/"\n'
+            '   train_df["filepath"] = train_df["id"].apply(lambda x: os.path.join(IMAGE_DIR, x))\n'
             "   ```"
         ),
-        
         "Critical Adherence / Final Instructions": (
             "Strict adherence to the detailed PLAN structure (as per the examples provided) and the '# Thought:' commenting convention in the CODE is mandatory. "
             "The primary objective for this draft is a working, bug-free solution. Therefore, the proposed solution should be simple in its overall design and ideas, focusing on correctness and the avoidance of BUGS. Do NOT include EDA."
             "You might receive a 'Memory' section summarizing previous attempts. Consider this information AND AVOID REPEATING past mistakes or unsuccessful approaches. Also, it is recommended that you design a different solution from the previous attempts. "
-
-        )
-    }
+        ),
+    },
 }
 
 
@@ -265,10 +285,8 @@ AGENT_improve_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     ),
     "user_instructions": {
         "Input Provided": "You will receive: the 'Task Description', the 'Previous (working) solution's CODE', and a 'Memory' of past attempts (if any).",
-        
         "Output Format (Strict Adherence Required)": (
             "Your entire response MUST be structured in two main sections: 'PLAN:' followed by 'CODE:'. Use '---' as a separator. No text before 'PLAN:' or after the final ``` of the CODE block.\n\n"
-            
             "**1. PLAN Section Requirements:**\n"
             "   a. **Improvement Rationale (Brief Introduction - 2-3 sentences):** Briefly state the single improvement you are proposing and the core reason you believe it will enhance performance based on the previous solution and general ML principles.\n"
             "      *Example Rationale:* 'The previous solution used a simple CNN. To potentially capture more complex image features and improve AUC, I propose replacing it with a pre-trained ResNet18 model, fine-tuning its final layers.'\n\n"
@@ -283,22 +301,20 @@ AGENT_improve_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             "      3. **Adapt Final Layer**: The ResNet18 `fc` layer outputs 1000 classes. Replace `model.fc` with a new `nn.Linear(model.fc.in_features, 1)` followed by `nn.Sigmoid()` for binary classification. This adapts the ResNet to the specific task.\n"
             "      4. **Adjust Image Preprocessing**: ResNet models are typically trained on images normalized with ImageNet statistics and often larger input sizes (e.g., 224x224, though 32x32 can still work but resizing might be an option). Update the `transforms.Compose` to include `transforms.Resize((desired_size, desired_size))` (e.g., 32 or 64 for this task) and `transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])`. This ensures input data matches ResNet's expectations.\n"
             "      5. **Adjust Learning Rate (Potentially Lower):** Pre-trained models often benefit from a smaller learning rate for fine-tuning. Consider reducing the LR in `optim.Adam` (e.g., to 1e-4 or 5e-4) to prevent distorting pre-trained weights too quickly.'\n\n"
-
             "**2. CODE Section Requirements:**\n"
-            "   Follow the PLAN with a \"CODE:\" section, containing a single, *complete, and runnable* Python script enclosed in ```python ... ```. "
+            '   Follow the PLAN with a "CODE:" section, containing a single, *complete, and runnable* Python script enclosed in ```python ... ```. '
             "   This script should be the *entire* previous working script, with *only the modifications outlined in your Detailed Improvement Plan* to implement the single proposed enhancement.\n"
-            "   *Before each modified or newly added logical block of code*, you MUST include a comment starting with \"# Improvement Thought:\". This comment should briefly state:\n"
+            '   *Before each modified or newly added logical block of code*, you MUST include a comment starting with "# Improvement Thought:". This comment should briefly state:\n'
             "   a) The specific part of the improvement being implemented.\n"
             "   b) How the code change relates to the corresponding 'Detailed Improvement Plan' step.\n"
             "   c) A concise thought on the change (e.g., 'Replacing custom CNN with ResNet18 for better feature extraction.').\n"
             "   Ensure all original necessary imports are preserved and any new ones required for the improvement are added. Do not remove unrelated working code.\n"
         ),
-        
         "Critical Adherence / Final Instructions": (
             "Strict adherence to proposing a *single, atomic improvement* and detailing it in the PLAN is mandatory. The CODE section must contain the *entire runnable script* with minimal targeted changes for that one improvement. "
             "Clearly justify the improvement. Do NOT include EDA. Ensure all necessary imports are present."
-        )
-    }
+        ),
+    },
 }
 
 
@@ -312,10 +328,8 @@ AGENT_debug_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     ),
     "user_instructions": {
         "Input Breakdown": "You will receive: \n1. 'Task Description': The overall goal.\n2. 'Previous (Buggy) Implementation': The full Python script that failed.\n3. 'Execution Output (Traceback)': The error message and stack trace from the last run. This is your primary guide.\n4. 'Initial Bug Summary (from analysis tool)': A brief analysis of the bug. Use this to confirm or refine your own diagnosis based *directly* on the traceback.",
-        
         "Output Format (Strict Adherence Required)": (
             "Your entire response MUST be structured in two main sections: 'PLAN:' followed by 'CODE:'. Use '---' as a separator between the PLAN and CODE sections. No text before 'PLAN:' and no text after the final ``` of the CODE block.\n\n"
-            
             "**1. PLAN Section Requirements:**\n"
             "   a. **Bug Analysis Subsection (Mandatory First Part of PLAN):** Start with 'Bug Analysis:'.\n"
             "      - **Traceback First:** State the specific error type (e.g., `NameError`, `IndexError`) and the exact line number from the 'Execution Output (Traceback)'. Quote the problematic line of code if possible.\n"
@@ -326,16 +340,14 @@ AGENT_debug_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             "      'Bug Analysis:\n      - The traceback indicates a `NameError: name 'np' is not defined` on line 59 of `runfile.py`, within the `CactusDataset.__getitem__` method. The problematic line is `image = np.array(image)`.\n"
             "      - This error occurred because the `numpy` library, aliased as `np`, was used without being imported at the beginning of the script.\n"
             "      - The 'Initial Bug Summary' correctly identified a missing numpy import. My analysis confirms this is the direct cause of the script's failure.'\n\n"
-            
             "   b. **Fix Plan Subsection (Following Bug Analysis):** Start with 'Fix Plan:'.\n"
             "      - Provide a concise, bulleted list of the *minimal and targeted changes* required to resolve *only the root cause(s)* identified in your Bug Analysis.\n"
             "      - Each step must clearly state *what* code will be added or modified, *where* (e.g., which function, beginning of script), and *how* this directly fixes the identified error.\n"
             "      - Do NOT propose new features, unrelated refactoring, or performance optimizations in this debugging step. The goal is a correct, runnable script that fixes the immediate error.\n"
             "      *Example Fix Plan:*\n"
             "      'Fix Plan:\n      1. Add the import statement `import numpy as np` at the top of the script, among other imports. This makes the `np` alias available globally, resolving the `NameError`.\n      2. Ensure no other part of the script was relying on `np` being undefined (unlikely, but a mental check).'\n\n"
-
             "**2. CODE Section Requirements:**\n"
-            "   Follow the PLAN with a \"CODE:\" section. This section must contain a *single, complete, and runnable* Python script enclosed in ```python ... ```. "
+            '   Follow the PLAN with a "CODE:" section. This section must contain a *single, complete, and runnable* Python script enclosed in ```python ... ```. '
             "   This script should be the *entire* previous buggy script, with *only the necessary modifications* as outlined in your 'Fix Plan' to address the identified bug.\n"
             "   *Before each modified or newly added logical block of code that implements a step from your 'Fix Plan'*, you MUST include a comment starting with \"# Bugfix Thought:\". This comment should briefly state:\n"
             "   a) The specific bug being addressed from your Bug Analysis (e.g., 'Addressing NameError for np').\n"
@@ -354,20 +366,19 @@ AGENT_debug_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             "   # ... (rest of the function and script) ...\n"
             "   ```\n"
         ),
-        
         "Critical Adherence / Final Instructions": (
             "Strict adherence to the 'Bug Analysis' and 'Fix Plan' structure is mandatory. The CODE section must contain the *entire runnable script* with minimal targeted fixes. "
             "Focus *exclusively* on fixing the bug(s) directly identified from the traceback and confirmed with the Initial Bug Summary. "
             "Do NOT introduce new features, unrelated refactoring, or performance optimizations during this debug step. Ensure all original, necessary imports are preserved and any new ones required for the fix are added."
-        )
-    }
+        ),
+    },
 }
 
 
 AGENT_draft_SOLUTION_GUIDELINE_LIST: List[str] = [
     "This is an initial solution draft. Prioritize a simple, correct, and bug-free design. Avoid complex techniques like ensembling or extensive hyper-parameter optimization for this iteration.",
     "If a 'Memory' section is provided (summarizing previous attempts), consider its contents to avoid repeating past mistakes or unsuccessful approaches.",
-    "The PLAN should consist of 7-10 bullet points. Each point must be explicit, detailed, and actionable, clearly stating *how* the step will be accomplished.", # Aligns with 7-10
+    "The PLAN should consist of 7-10 bullet points. Each point must be explicit, detailed, and actionable, clearly stating *how* the step will be accomplished.",  # Aligns with 7-10
     "The evaluation metric to be used is typically found in the 'Overall Task Description'. Ensure your code calculates and prints a validation metric, preferably this one.",
     "Do not include steps for Exploratory Data Analysis (EDA) in your plan or code.",
     "Assume all necessary data files are already prepared and located in the `./input/` directory. No unzipping or complex data discovery is needed.",
@@ -381,7 +392,7 @@ AGENT_improve_SOLUTION_GUIDELINE_LIST: List[str] = [
     "The CODE section must implement *only* this single improvement, modifying the provided previous solution. It must be a complete, runnable script.",
     "Use '# Improvement Thought:' comments before each changed/new code block, linking it to your plan and explaining your reasoning for that specific code modification.",
     "Consider the 'Memory' section (if provided) to avoid repeating unsuccessful strategies or to build on previously identified good ideas.",
-    "Do not suggest Exploratory Data Analysis (EDA). Focus on a direct code/model/feature enhancement."
+    "Do not suggest Exploratory Data Analysis (EDA). Focus on a direct code/model/feature enhancement.",
 ]
 
 AGENT_debug_SOLUTION_GUIDELINE_LIST: List[str] = [
@@ -389,23 +400,26 @@ AGENT_debug_SOLUTION_GUIDELINE_LIST: List[str] = [
     "Don't suggest to do EDA.",
     "Your PLAN should start with a 'Bug Analysis:' section. In this section, meticulously analyze the 'Execution output' and the 'Previous (buggy) implementation' line by line (or logical block by block) to identify the root cause of the bug. State concrete observations, e.g., 'Line X: FileNotFoundError because path was incorrect. This indicates the file path in the code is incorrect.'",
     "Following the 'Bug Analysis:', provide a 'Fix Plan:' with highly detailed, actionable steps to resolve *each identified bug*. Each step should explain *what* will be changed and *why*. For example, 'Fix Plan: 1. Update file path for train.csv to ./input/train.csv to match the correct directory structure, as indicated by the FileNotFoundError.'",
-    "In your CODE, before each modified or new logical block, add a comment explaining the specific bug being addressed by that code, how the change fixes it, and your thought process. Example: # Bugfix: Handle division by zero. Previous code caused ZeroDivisionError on line Y. Added a check here to prevent it by replacing NaN with 0."
+    "In your CODE, before each modified or new logical block, add a comment explaining the specific bug being addressed by that code, how the change fixes it, and your thought process. Example: # Bugfix: Handle division by zero. Previous code caused ZeroDivisionError on line Y. Added a check here to prevent it by replacing NaN with 0.",
 ]
-
 
 
 # --- System Prompt Getters ---
 def get_agent_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(AGENT_SYSTEM_PROMPT_DICT)
 
+
 def get_agent_draft_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(AGENT_draft_SYSTEM_PROMPT_DICT)
+
 
 def get_agent_improve_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(AGENT_improve_SYSTEM_PROMPT_DICT)
 
+
 def get_agent_debug_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(AGENT_debug_SYSTEM_PROMPT_DICT)
+
 
 # --- User Message Assemblers for Agent ---
 def get_agent_draft_user_prompt(
@@ -414,7 +428,7 @@ def get_agent_draft_user_prompt(
     competition_name: str,
     obfuscate: bool,
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
     introduction = "You are a Kaggle grandmaster. Plan and develop a complete Python script to solve the described machine learning competition."
     if obfuscate:
@@ -423,17 +437,22 @@ def get_agent_draft_user_prompt(
     prompt_user_message: Dict[str, Any] = {
         "Introduction": introduction,
         "Overall Task Description": task_desc,
-        "Data Overview" :data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
+        "Data Overview": (
+            data_preview_content
+            if acfg_data_preview and data_preview_content
+            else "No detailed data overview provided; rely on file names in plan and task description."
+        ),
         "Memory": journal_summary,
         "Instructions": {
             "Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST,
             "Environment and Packages": get_competition_environment_text(competition_name),
             "Response format": AGENT_RESPONSE_FORMAT_TEXT,
-            "Solution sketch guideline": AGENT_draft_SOLUTION_GUIDELINE_LIST
-            },
+            "Solution sketch guideline": AGENT_draft_SOLUTION_GUIDELINE_LIST,
+        },
     }
 
     return prompt_user_message
+
 
 def get_agent_improve_user_prompt(
     task_desc: str,
@@ -452,7 +471,7 @@ def get_agent_improve_user_prompt(
         "Introduction": introduction,
         "Task description": task_desc,
         "Memory": journal_summary,
-        "Previous solution": { # Original had this as a top-level key, kept for consistency
+        "Previous solution": {  # Original had this as a top-level key, kept for consistency
             "Code": prompt_utils_wrap_code(parent_node_code),
         },
         "Instructions": {
@@ -460,19 +479,22 @@ def get_agent_improve_user_prompt(
             "Solution improvement sketch guideline": AGENT_improve_SOLUTION_GUIDELINE_LIST,
             "Solution improvement sketch guideline": AGENT_improve_SOLUTION_GUIDELINE_LIST,
             "Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST,
-            "Environment and Packages": get_competition_environment_text(competition_name) # Added for consistency
+            "Environment and Packages": get_competition_environment_text(
+                competition_name
+            ),  # Added for consistency
         },
     }
     return prompt_user_message
 
+
 def get_agent_debug_user_prompt(
     task_desc: str,
-    competition_name: str, # For Environment and Packages
+    competition_name: str,  # For Environment and Packages
     parent_node_code: str,
     parent_node_term_out: str,
-    parent_node_feedback: str, # <-- NEW: Summary from o3-mini or your feedback model
+    parent_node_feedback: str,  # <-- NEW: Summary from o3-mini or your feedback model
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
     introduction = (
         "You are a Kaggle grandmaster tasked with debugging a Python script. "
@@ -480,21 +502,28 @@ def get_agent_debug_user_prompt(
         "Analyze the provided buggy code, its execution traceback, and an initial bug summary. "
         "Then, formulate a precise PLAN (Bug Analysis, then Fix Plan) and provide the fully corrected Python CODE."
     )
-    
+
     prompt_user_message: Dict[str, Any] = {
         "Introduction": introduction,
         "Task Description": task_desc,
         "Previous (Buggy) Implementation": prompt_utils_wrap_code(parent_node_code),
-        "Execution Output (Traceback)": prompt_utils_wrap_code(parent_node_term_out, lang=""), # Explicitly label as traceback
-        "Initial Bug Summary (from analysis tool)": parent_node_feedback if parent_node_feedback else "No initial summary provided. Perform analysis based on traceback and code.",
+        "Execution Output (Traceback)": prompt_utils_wrap_code(
+            parent_node_term_out, lang=""
+        ),  # Explicitly label as traceback
+        "Initial Bug Summary (from analysis tool)": (
+            parent_node_feedback
+            if parent_node_feedback
+            else "No initial summary provided. Perform analysis based on traceback and code."
+        ),
         "Instructions": {
-            "General Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST, # These are still good general rules
-            "Environment and Packages": get_competition_environment_text(competition_name)
+            "General Implementation Guideline": AGENT_IMPLEMENTATION_GUIDELINE_LIST,  # These are still good general rules
+            "Environment and Packages": get_competition_environment_text(competition_name),
         },
     }
     if acfg_data_preview and data_preview_content:
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
+
 
 #################################################################################################################################################################
 ############################################################## --- Planner Agent --- #############################################################################
@@ -509,7 +538,6 @@ PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     ),
     "user_instructions": {
         "Input Understanding": "You will receive: a 'Full Kaggle Competition Description' (including evaluation, data files, and submission format), a 'Data Overview' (file structure and CSV column info), and potentially a 'Memory of Previous Attempts'.",
-        
         "Output Requirements (Strict Adherence Mandatory)": (
             "Your entire response MUST strictly follow this two-part structure, using the specified markdown headers:\n\n"
             "## Task Summary:\n"
@@ -573,8 +601,8 @@ PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             "     *HOW:* Create DataFrame: `submission = pd.DataFrame({'Id': test_ids, 'SalePrice': test_preds})`. Save: `submission.to_csv('./submission/submission.csv', index=False)`.\n"
             "     *WHY:* To produce the final output in the format required by the competition.\n"
         ),
-        "Critical Reminder": "Your role is exclusively planning and summarizing. The Coder agent relies ENTIRELY on the clarity, explicitness (especially the 'HOW' for each step, including function/library/variable specifics), and logical correctness of your 'Task Summary' and 'Plan'. DO NOT generate any Python code."
-    }
+        "Critical Reminder": "Your role is exclusively planning and summarizing. The Coder agent relies ENTIRELY on the clarity, explicitness (especially the 'HOW' for each step, including function/library/variable specifics), and logical correctness of your 'Task Summary' and 'Plan'. DO NOT generate any Python code.",
+    },
 }
 
 # --- Static Prompt Components (from PlannerAgent) ---
@@ -597,9 +625,7 @@ PLANNER_AGENT_CODE_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
     ),
     "user_instructions": {
         "Input Context": "You will receive: \n1. 'Task Summary': A brief overview of the competition.\n2. 'Plan to Implement': A detailed, step-by-step plan. This is your primary guide for coding.\n3. 'Memory (optional)': Summary of previous attempts on this task.\n4. 'Environment and Packages': Information about available tools.",
-        
         "Core Coding Task": "Translate the *entire* 'Plan to Implement' into a single, coherent Python script.",
-        
         "Mandatory Commenting Convention ('# Thought:' Comments)": (
             "Crucially, *before every distinct logical block of Python code that directly implements one or more steps from the 'Plan to Implement'*, you MUST include a comment starting with '# Thought:'. This comment must briefly state:\n"
             "   a) Your immediate thought process or strategy for implementing that specific part of the plan.\n"
@@ -614,22 +640,20 @@ PLANNER_AGENT_CODE_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
             "X_val_scaled = scaler.transform(X_val_numerical) # Assuming X_val_numerical exists\n"
             "```"
         ),
-
         "Output Requirement": (
             "Your entire response MUST consist of ONLY a single Python code block, enclosed in ```python ... ```. "
             "Do NOT include any text, explanations, or pleasantries before or after this code block. "
             "The script must be complete, including all necessary imports."
         ),
-
         "General Coding Guidelines for this Draft": [
             "Implement the plan as simply and directly as possible to ensure a correct, bug-free first draft.",
             "Ensure all necessary libraries mentioned in the plan or commonly used for the task (e.g., pandas, numpy, sklearn, torch, cv2, PIL) are imported at the beginning of the script.",
             "Load data from the `./input/` directory as specified or implied by the plan.",
             "Calculate and print a validation metric (e.g., as specified in the plan or task description) using a clear format like `print(f'Validation Metric: {metric_value}')`.",
             "CRITICAL: Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv` in the format required by the competition.",
-            "Focus on correctness. The script must run without errors."
-        ]
-    }
+            "Focus on correctness. The script must run without errors.",
+        ],
+    },
 }
 
 PLANNER_AGENT_CODE_RESPONSE_FORMAT_TEXT: str = (
@@ -667,35 +691,41 @@ PLANNER_AGENT_PLAN_generic_SYSTEM_PROMPT_DICT: Dict[str, Any] = {
 def get_planner_agent_plan_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(PLANNER_AGENT_PLAN_SYSTEM_PROMPT_DICT)
 
+
 def get_planner_agent_code_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(PLANNER_AGENT_CODE_SYSTEM_PROMPT_DICT)
 
+
 def get_planner_agent_plan_generic_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(PLANNER_AGENT_PLAN_generic_SYSTEM_PROMPT_DICT)
+
+
 # For PlannerAgent's _draft stage (plan_query part)
 def get_planner_agent_draft_plan_user_prompt(
     task_desc: str,
     journal_summary: str,
     competition_name: str,
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
 
     data_overview = " "
     if acfg_data_preview and data_preview_content:
         data_overview = data_preview_content
 
-    
     plan_introduction = f"Given the following task description for a machine learning competition named {competition_name}, develop a complete and detailed plan to solve it."
     prompt_user_message: Dict[str, Any] = {
         "Introduction": plan_introduction,
         "Overall Task Description": task_desc,
-        "Data Overview": data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
+        "Data Overview": (
+            data_preview_content
+            if acfg_data_preview and data_preview_content
+            else "No detailed data overview provided; rely on file names in plan and task description."
+        ),
         "Environment and Packages": get_competition_environment_text(competition_name),
         "Memory": journal_summary,
         "Instructions": {
             "Guidance on Summary": "The summary should be 5-7 sentences that describe the task in a nutshell, so that the team members can understand the task and the plan.",
-
             "Instructions for generating the plan": [
                 "Every step of the plan should be very detailed and explicit, point exactly how is the steps going to be solved. e.g. 'Use XGBoost to train a model with the following parameters: ...'",
                 "your aim in this plan is to create a first draft solution that is correct and bug free",
@@ -703,99 +733,134 @@ def get_planner_agent_draft_plan_user_prompt(
                 "Take the Memory section into consideration when proposing the design.",
                 "The data is already prepared and available in the `./input` directory. There is no need to suggest any unzip for any files.",
             ],
-        }
+        },
     }
 
-
     return prompt_user_message
+
 
 def get_planner_agent_draft_code_user_prompt(
-    task_summary_from_planner: str, # Summary generated by the planner model
-    plan_from_planner: str,         # Plan generated by the planner model
-    journal_summary: str,           # This is the "Memory"
+    task_summary_from_planner: str,  # Summary generated by the planner model
+    plan_from_planner: str,  # Plan generated by the planner model
+    journal_summary: str,  # This is the "Memory"
     competition_name: str,
-    acfg_data_preview: bool,        # From agent config
-    data_preview_content: str = None # Actual preview content
+    acfg_data_preview: bool,  # From agent config
+    data_preview_content: str = None,  # Actual preview content
 ) -> Dict[str, Any]:
-    
+
     introduction = (
         f"You are the Coder implementing a solution for the '{competition_name}' Kaggle competition. "
         "You have been provided with a Task Summary and a detailed Plan by your Technical Lead. "
         "Your task is to write the complete Python script based *strictly* on this plan."
     )
-    
+
     prompt_user_message: Dict[str, Any] = {
         "Introduction": introduction,
-        "Context Provided by Technical Lead": { # Grouping planner's output
-            "Task Summary": task_summary_from_planner if task_summary_from_planner else "No task summary was provided by the planner.",
-            "Plan to Implement": plan_from_planner if plan_from_planner else "CRITICAL ERROR: No plan was provided by the planner. Cannot generate code."
+        "Context Provided by Technical Lead": {  # Grouping planner's output
+            "Task Summary": (
+                task_summary_from_planner
+                if task_summary_from_planner
+                else "No task summary was provided by the planner."
+            ),
+            "Plan to Implement": (
+                plan_from_planner
+                if plan_from_planner
+                else "CRITICAL ERROR: No plan was provided by the planner. Cannot generate code."
+            ),
         },
-        "Data Overview": data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
+        "Data Overview": (
+            data_preview_content
+            if acfg_data_preview and data_preview_content
+            else "No detailed data overview provided; rely on file names in plan and task description."
+        ),
         "Environment and Packages": get_competition_environment_text(competition_name),
-        "Memory": journal_summary if journal_summary else "No previous attempts on record for this specific task.",
+        "Memory": (
+            journal_summary
+            if journal_summary
+            else "No previous attempts on record for this specific task."
+        ),
         "Key Instructions for Your Code": {
             "Primary Goal": "Generate a single, complete, runnable Python script that meticulously follows the 'Plan to Implement'.",
             "Commenting": "MANDATORY: Use '# Thought:' comments before each code block implementing a plan step, as detailed in your system instructions.",
             "Output Format": "Your response must be *only* the Python code block. No extra text.",
-            "Core Requirements": [ # These are from your AGENT_IMPLEMENTATION_GUIDELINE_LIST, slightly adapted
+            "Core Requirements": [  # These are from your AGENT_IMPLEMENTATION_GUIDELINE_LIST, slightly adapted
                 "Include all necessary imports at the beginning.",
                 "Load data from './input/' as specified in the plan.",
                 "Implement the solution proposed in the 'Plan to Implement'.",
                 "Calculate and print the evaluation metric on a validation set (e.g., `print(f'Validation Metric: {metric_value}')`).",
                 "CRITICAL: Generate test predictions and save them EXACTLY to `./submission/submission.csv` in the required format.",
-                "Prioritize correctness and ensure the script runs without errors for this first draft."
+                "Prioritize correctness and ensure the script runs without errors for this first draft.",
             ],
-        }
+        },
     }
     # The PLANNER_AGENT_CODE_RESPONSE_FORMAT_TEXT (```python ... ```) is now heavily reinforced by the system prompt.
     return prompt_user_message
 
+
 def get_planner_agent_draft_code_user_prompt2(
-    task_summary_from_planner: str, # Summary generated by the planner model
-    plan_from_planner: str,         # Plan generated by the planner model
-    journal_summary: str,           # This is the "Memory"
+    task_summary_from_planner: str,  # Summary generated by the planner model
+    plan_from_planner: str,  # Plan generated by the planner model
+    journal_summary: str,  # This is the "Memory"
     competition_name: str,
-    acfg_data_preview: bool,        # From agent config
-    data_preview_content: str = None # Actual preview content
+    acfg_data_preview: bool,  # From agent config
+    data_preview_content: str = None,  # Actual preview content
 ) -> Dict[str, Any]:
-    
+
     introduction = (
         f"You are the Coder implementing a solution for the '{competition_name}' Kaggle competition. "
         "You have been provided with a Task Summary and a detailed Plan by your Technical Lead. "
         "Your task is to write the complete Python script based *strictly* on this plan."
     )
-    
+
     prompt_user_message: Dict[str, Any] = {
         "Introduction": introduction,
-        "Context Provided by Technical Lead": { # Grouping planner's output
-            "Task Summary": task_summary_from_planner if task_summary_from_planner else "No task summary was provided by the planner.",
-            "Plan to Implement": plan_from_planner if plan_from_planner else "CRITICAL ERROR: No plan was provided by the planner. Cannot generate code."
+        "Context Provided by Technical Lead": {  # Grouping planner's output
+            "Task Summary": (
+                task_summary_from_planner
+                if task_summary_from_planner
+                else "No task summary was provided by the planner."
+            ),
+            "Plan to Implement": (
+                plan_from_planner
+                if plan_from_planner
+                else "CRITICAL ERROR: No plan was provided by the planner. Cannot generate code."
+            ),
         },
-        "Data Overview": data_preview_content if acfg_data_preview and data_preview_content else "No detailed data overview provided; rely on file names in plan and task description.",
+        "Data Overview": (
+            data_preview_content
+            if acfg_data_preview and data_preview_content
+            else "No detailed data overview provided; rely on file names in plan and task description."
+        ),
         "Environment and Packages": get_competition_environment_text(competition_name),
-        "Memory": journal_summary if journal_summary else "No previous attempts on record for this specific task.",
+        "Memory": (
+            journal_summary
+            if journal_summary
+            else "No previous attempts on record for this specific task."
+        ),
         "Key Instructions for Your Code": {
             "Primary Goal": "Generate a single, complete, runnable Python script that meticulously follows the 'Plan to Implement'.",
             "Commenting": "MANDATORY: Use '# Thought:' comments before each code block implementing a plan step, as detailed in your system instructions.",
             "Output Format": "Your response must be *only* the Python code block. No extra text.",
-            "Core Requirements": [ # These are from your AGENT_IMPLEMENTATION_GUIDELINE_LIST, slightly adapted
+            "Core Requirements": [  # These are from your AGENT_IMPLEMENTATION_GUIDELINE_LIST, slightly adapted
                 "Include all necessary imports at the beginning.",
                 "Load data from './input/' as specified in the plan.",
                 "Implement the solution proposed in the 'Plan to Implement'.",
                 "Calculate and print the evaluation metric on a validation set (e.g., `print(f'Validation Metric: {metric_value}')`).",
                 "CRITICAL: Generate test predictions and save them EXACTLY to `./submission/submission.csv` in the required format.",
-                "Prioritize correctness and ensure the script runs without errors for this first draft."
+                "Prioritize correctness and ensure the script runs without errors for this first draft.",
             ],
-        }
+        },
     }
     # The PLANNER_AGENT_CODE_RESPONSE_FORMAT_TEXT (```python ... ```) is now heavily reinforced by the system prompt.
+
+
 # For PlannerAgent's _improve stage (plan_query part)
 def get_planner_agent_improve_plan_user_prompt(
     task_desc: str,
     parent_node_code: str,
-    competition_name: str, # Added for environment if needed by planner
+    competition_name: str,  # Added for environment if needed by planner
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
     planner_introduction = (
         "You are a Kaggle grandmaster and a team leader. You are provided with a previously developed solution and "
@@ -814,11 +879,15 @@ def get_planner_agent_improve_plan_user_prompt(
                 "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
             ],
             # "Environment and Packages": get_competition_environment_text(competition_name) # If planner model benefits
-        }
+        },
     }
-    if acfg_data_preview and data_preview_content: # If planner needs data context for improvement ideas
+    if (
+        acfg_data_preview and data_preview_content
+    ):  # If planner needs data context for improvement ideas
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
+
+
 # For PlannerAgent's _improve stage (code_query part)
 def get_planner_agent_improve_code_user_prompt(
     task_summary_from_planner: str,
@@ -827,7 +896,7 @@ def get_planner_agent_improve_code_user_prompt(
     journal_summary: str,
     competition_name: str,
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
     code_introduction = (
         "You are an expert machine learning engineer and a team member. You are provided with a previous solution, "
@@ -852,12 +921,14 @@ def get_planner_agent_improve_code_user_prompt(
                 "Code should be between ```python fences.",
                 "Only write code; do not write any other text.",
             ],
-            "additional guidelines": AGENT_IMPLEMENTATION_GUIDELINE_LIST # Reusing agent's guidelines
-        }
+            "additional guidelines": AGENT_IMPLEMENTATION_GUIDELINE_LIST,  # Reusing agent's guidelines
+        },
     }
     if acfg_data_preview and data_preview_content:
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
+
+
 # For PlannerAgent's _debug stage (plan_query part)
 def get_planner_agent_debug_plan_user_prompt(
     task_desc: str,
@@ -865,7 +936,7 @@ def get_planner_agent_debug_plan_user_prompt(
     parent_node_term_out: str,
     # competition_name: str, # If planner needs environment for debug plan
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
     plan_introduction = (
         "You are a Kaggle grandmaster AND A TEAM LEADER. "
@@ -882,21 +953,23 @@ def get_planner_agent_debug_plan_user_prompt(
             "Response format": PLANNER_AGENT_DEBUG_RESPONSE_FORMAT_TEXT,
             # Guidelines are embedded in the response format and intro for planner debug plan
             # "Environment and Packages": get_competition_environment_text(competition_name) # If planner benefits
-        }
+        },
     }
     if acfg_data_preview and data_preview_content:
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
+
+
 # For PlannerAgent's _debug stage (code_query part)
 def get_planner_agent_debug_code_user_prompt(
     bug_summary_from_planner: str,
     fix_plan_from_planner: str,
     parent_node_code: str,
-    parent_node_term_out: str, # For coder's context
-    parent_node_feedback: str, # For coder's context
+    parent_node_term_out: str,  # For coder's context
+    parent_node_feedback: str,  # For coder's context
     competition_name: str,
     acfg_data_preview: bool,
-    data_preview_content: str = None
+    data_preview_content: str = None,
 ) -> Dict[str, Any]:
     code_introduction = (
         "You are a Kaggle grandmaster AND A TEAM MEMBER. Your previous solution had bugs. "
@@ -916,12 +989,13 @@ def get_planner_agent_debug_code_user_prompt(
                 "Precisely follow the plan for fixing the bugs and implement the code that implements the fix.",
                 "The final code should be a single code block, complete, and self-contained.",
             ],
-            "additional guidelines": AGENT_IMPLEMENTATION_GUIDELINE_LIST # Reusing agent's guidelines
-        }
+            "additional guidelines": AGENT_IMPLEMENTATION_GUIDELINE_LIST,  # Reusing agent's guidelines
+        },
     }
     if acfg_data_preview and data_preview_content:
         prompt_user_message["Data Overview"] = data_preview_content
     return prompt_user_message
+
 
 #################################################################################################################################################################
 ############################################################## --- prompt chaining --- #############################################################################
@@ -933,7 +1007,7 @@ _BASE_CODER_CHAIN_SYSTEM_MESSAGE1 = (
     "Ensure it integrates seamlessly with the existing code and precisely follows the Master Plan.\n"
     "You MUST include '# Thought:' comments before logical code blocks, explaining your reasoning and linking to the Master Plan steps you are implementing for this segment.\n"
     "because this is only a segment of the full solution, you should be aware of the libraries, variables, and functions that are already defined in the previous segments, and not use something that is not imported or defined in the previous segments."
-    "if you need to use a library that is not imported in the previous segments, you should import it in the current segment."\
+    "if you need to use a library that is not imported in the previous segments, you should import it in the current segment."
     " - Do NOT include any conversational text, explanations, or self-corrections outside the '# Thought:' comments and the ```python ... ``` code block. Your entire response for this segment is the code block itself."
 )
 
@@ -942,8 +1016,8 @@ _BASE_CODER_CHAIN_SYSTEM_MESSAGE = (
     "You are an expert Python Coder specializing in implementing specific segments of a larger machine learning solution for Kaggle competitions. "
     "Your **sole task** is to generate a Python code snippet for a specific segment of a larger program. your snippet must be correct, runnable, and integrate seamlessly with the existing code. without inducing errors\n"
     "You will receive context: 'Task Summary', 'Full Master Plan', 'Python Code Generated So Far', and 'Your Current Coding Segment' instructions.\n"
-     "because this is only a segment of the full solution, you should be aware of the libraries, variables, and functions that are already defined in the previous segments."
-     "focus on CORRECTNESS,"
+    "because this is only a segment of the full solution, you should be aware of the libraries, variables, and functions that are already defined in the previous segments."
+    "focus on CORRECTNESS,"
     "**CRITICAL OUTPUT REQUIREMENTS:**\n"
     "1. Your response MUST start *immediately* with ```python and end *immediately* with ```. NO TEXT BEFORE OR AFTER THE CODE BLOCK.\n"
     "2. Inside the code block, *before each distinct logical code unit* that implements a part of the plan for THIS SEGMENT, include a *concise* comment starting with '# Thought:'. This comment should explain: a) Your immediate coding strategy. b) The purpose of the upcoming code. c) The Master Plan step(s) it addresses for this segment.\n"
@@ -953,11 +1027,11 @@ _BASE_CODER_CHAIN_SYSTEM_MESSAGE = (
 )
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_SETUP: Dict[str, Any] = {
     "SYSTEM": _BASE_CODER_CHAIN_SYSTEM_MESSAGE,
-    "user_instructions": { # Meta-instructions for this system prompt's design
+    "user_instructions": {  # Meta-instructions for this system prompt's design
         "Current Segment Objective": "Initial script setup: all major anticipated library imports, global configurations (e.g., random seeds using a `set_seed` function), and defining the primary PyTorch `DEVICE`.",
-       "Context for This Segment": "Refer to the 'Full Master Plan' and 'Task Summary' to anticipate necessary libraries (e.g., `pandas`, `numpy`, `sklearn`, `torch`, `PIL`, `cv2`, `timm`, `transformers` based on task type).",
-        "Output Code Block Content": "A Python code block containing only imports, a `set_seed()` function definition and its call, and `DEVICE` assignment. No data loading or other functional code yet."
-    }
+        "Context for This Segment": "Refer to the 'Full Master Plan' and 'Task Summary' to anticipate necessary libraries (e.g., `pandas`, `numpy`, `sklearn`, `torch`, `PIL`, `cv2`, `timm`, `transformers` based on task type).",
+        "Output Code Block Content": "A Python code block containing only imports, a `set_seed()` function definition and its call, and `DEVICE` assignment. No data loading or other functional code yet.",
+    },
 }
 
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_DATA_LOADING: Dict[str, Any] = {
@@ -966,8 +1040,8 @@ CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_DATA_LOADING: Dict[str, Any] = {
         "Current Segment Focus": "Loading all primary data files (e.g., training data, test data, sample submission for IDs) into appropriate data structures (typically pandas DataFrames) and defining essential file/directory path constants.",
         "Context Awareness": "Use file names and paths *as specified in the 'Full Master Plan'*. The plan should detail which files to load (e.g., `train_features.csv`, `test_images/`, `submission_format.csv`). "
         "The data is in `./input/` . Utilize imports from 'Python Code Generated So Far'.",
-        "Output Requirement": "A Python code block for defining path constants (e.g., `INPUT_DIR`, `TRAIN_DATA_PATH`) using `os.path.join` or `pathlib.Path`, and loading data into variables like `train_df`, `test_df`. Define these variables clearly for subsequent stages."
-    }
+        "Output Requirement": "A Python code block for defining path constants (e.g., `INPUT_DIR`, `TRAIN_DATA_PATH`) using `os.path.join` or `pathlib.Path`, and loading data into variables like `train_df`, `test_df`. Define these variables clearly for subsequent stages.",
+    },
 }
 
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_PREPROCESSING: Dict[str, Any] = {
@@ -975,8 +1049,8 @@ CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_PREPROCESSING: Dict[str, Any] = {
     "user_instructions": {
         "Current Segment Focus": "All data preprocessing, feature engineering, data splitting, and preparation of data loaders or generators. This includes defining custom `Dataset` classes (e.g., for PyTorch) and data augmentation/transformation pipelines.",
         "Context Awareness": "Work with the data structures (e.g., `train_df`, `test_df`) created in the 'Python Code Generated So Far'. Follow the 'Full Master Plan' for specific preprocessing steps (missing value imputation, encoding, scaling), feature creation, how to split data (e.g., `train_test_split` from `sklearn.model_selection`), and how to set up `Dataset`s and `DataLoader`s if using PyTorch/TensorFlow.",
-        "Output Requirement": "A Python code block containing all preprocessing logic. This may include function definitions (like a `Dataset` class or transformation functions) and their application. Ensure final processed data variables (e.g., `train_loader`, `val_loader`, `X_test_processed`) are clearly defined."
-    }
+        "Output Requirement": "A Python code block containing all preprocessing logic. This may include function definitions (like a `Dataset` class or transformation functions) and their application. Ensure final processed data variables (e.g., `train_loader`, `val_loader`, `X_test_processed`) are clearly defined.",
+    },
 }
 
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_MODELING: Dict[str, Any] = {
@@ -984,8 +1058,8 @@ CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_MODELING: Dict[str, Any] = {
     "user_instructions": {
         "Current Segment Focus": "Defining and instantiating the machine learning model architecture.",
         "Context Awareness": "Follow the 'Full Master Plan' for the choice of model (e.g., CNN, ResNet , RandomForest, custom `nn.Module`). Utilize imports from 'Python Code Generated So Far'. The model should be compatible with the data prepared in previous segments.",
-        "Output Requirement": "A Python code block that defines the model class (if custom) and/or instantiates the model (e.g., `model = timm.create_model(...)` or `model = MyCustomCNN()`). Ensure the model is assigned to a variable (e.g., `model`) and moved to the `DEVICE` defined in the setup segment."
-    }
+        "Output Requirement": "A Python code block that defines the model class (if custom) and/or instantiates the model (e.g., `model = timm.create_model(...)` or `model = MyCustomCNN()`). Ensure the model is assigned to a variable (e.g., `model`) and moved to the `DEVICE` defined in the setup segment.",
+    },
 }
 
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_TRAINING: Dict[str, Any] = {
@@ -993,8 +1067,8 @@ CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_TRAINING: Dict[str, Any] = {
     "user_instructions": {
         "Current Segment Focus": "Setting up and executing the model training loop, including loss function, optimizer, and validation within/after epochs.",
         "Context Awareness": "Use the `model`, data loaders (`train_loader`, `val_loader`), and `DEVICE` from 'Python Code Generated So Far'. Follow the 'Full Master Plan' for loss function (e.g., `nn.CrossEntropyLoss`, `nn.BCEWithLogitsLoss`), optimizer (e.g., `torch.optim.Adam`), learning rate, number of epochs, and how validation should be performed.",
-        "Output Requirement": "A Python code block implementing the training loop. This includes defining the criterion and optimizer, iterating through epochs and batches, performing forward/backward passes, and optimizer steps. Calculate and print the specified validation metric (e.g., `print(f'Validation Metric (AUC): {val_auc:.4f}')`) during or after training. The trained `model` object should be updated in place. If the plan specifies saving the best model, implement that logic."
-    }
+        "Output Requirement": "A Python code block implementing the training loop. This includes defining the criterion and optimizer, iterating through epochs and batches, performing forward/backward passes, and optimizer steps. Calculate and print the specified validation metric (e.g., `print(f'Validation Metric (AUC): {val_auc:.4f}')`) during or after training. The trained `model` object should be updated in place. If the plan specifies saving the best model, implement that logic.",
+    },
 }
 
 CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_SUBMISSION: Dict[str, Any] = {
@@ -1004,10 +1078,8 @@ CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_SUBMISSION: Dict[str, Any] = {
         "Context Awareness": "Use the trained `model`, test data loader (`test_loader` or `X_test_processed`), and test IDs (e.g., from `test_df`) from 'Python Code Generated So Far'. Follow the 'Full Master Plan' and the competition's submission file format instructions for creating the output.",
         "Output Requirement": "A Python code block that loads the best model (if saved separately), sets it to evaluation mode, iterates through the test data, generates predictions, formats these predictions into a pandas DataFrame (typically with 'id' and target columns), "
         " **CRITICAL REQUIREMENT:** Generate predictions for the test data and save them EXACTLY to the path `./submission/submission.csv`. Ensure the file format matches the task description.",
-
-    }
+    },
 }
-
 
 
 def get_coder_chain_system_prompt(segment_name: str) -> Dict[str, Any]:
@@ -1026,27 +1098,44 @@ def get_coder_chain_system_prompt(segment_name: str) -> Dict[str, Any]:
     else:
         raise ValueError(f"Unknown coder chain segment name: {segment_name}")
 
+
 def _get_base_coder_chain_user_prompt_args(
     task_summary: str,
     master_plan_text: str,
     current_code_so_far: str,
     competition_name: str,
-    data_preview_content: Optional[str]
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
     return {
         "Guidance from Technical Lead": {
             "Task Summary": task_summary or "No task summary was provided by the planner.",
-            "Full Master Plan": master_plan_text or "CRITICAL ERROR: No master plan provided by planner."
+            "Full Master Plan": master_plan_text
+            or "CRITICAL ERROR: No master plan provided by planner.",
         },
-        "Python Code Generated So Far": prompt_utils_wrap_code(current_code_so_far if current_code_so_far.strip() else "# This is the first code segment to be generated."),
+        "Python Code Generated So Far": prompt_utils_wrap_code(
+            current_code_so_far
+            if current_code_so_far.strip()
+            else "# This is the first code segment to be generated."
+        ),
         "Environment and Packages": get_competition_environment_text(competition_name),
-        "Data Overview": data_preview_content if data_preview_content else "Refer to Master Plan and Task Summary for data details."
+        "Data Overview": (
+            data_preview_content
+            if data_preview_content
+            else "Refer to Master Plan and Task Summary for data details."
+        ),
     }
 
+
 def get_coder_chain_user_prompt_segment_setup(
-    task_summary: str, master_plan_text: str, current_code_so_far: str, competition_name: str, data_preview_content: Optional[str]
+    task_summary: str,
+    master_plan_text: str,
+    current_code_so_far: str,
+    competition_name: str,
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
-    args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, "", competition_name, data_preview_content)
+    args = _get_base_coder_chain_user_prompt_args(
+        task_summary, master_plan_text, "", competition_name, data_preview_content
+    )
     args["Your Current Coding Segment: Initial Setup & Imports"] = (
         "Based on the 'Task Summary' and 'Full Master Plan' (anticipating needs for the entire script), "
         "write the Python code block *only* for the initial setup. This MUST include:\n"
@@ -1054,30 +1143,46 @@ def get_coder_chain_user_prompt_segment_setup(
         "2. A function `def set_seed(seed_value: int): ...` that sets seeds for `random`, `numpy`, and `torch` for reproducibility, and a call to this function (e.g., `set_seed(42)`).\n"
         "3. Definition of the PyTorch `DEVICE` variable (e.g., `DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')`).\n"
         "Do NOT include any data loading or functional code beyond this setup. "
-        "Remember your output must ONLY be the Python code block" # Added reminder
+        "Remember your output must ONLY be the Python code block"  # Added reminder
         "Remember to include '# Thought:' comments explaining your choices for imports or setup, linking to general good practice or broad implications from the Master Plan."
     )
     return args
 
+
 def get_coder_chain_user_prompt_segment_data_loading(
-    task_summary: str, master_plan_text: str, current_code_so_far: str, competition_name: str, data_preview_content: Optional[str]
+    task_summary: str,
+    master_plan_text: str,
+    current_code_so_far: str,
+    competition_name: str,
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
-    args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content)
+    args = _get_base_coder_chain_user_prompt_args(
+        task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content
+    )
     args["Your Current Coding Segment: Data Loading & Path Definitions"] = (
         "Based on the 'Full Master Plan' (focus on steps related to data input and file locations) and using variables/imports from 'Python Code Generated So Far', "
         "write the Python code block *only* for:\n"
         "1. Defining global string constants for all necessary base directories (e.g., `INPUT_DIR = './input'`, `TRAIN_IMG_DIR = os.path.join(INPUT_DIR, 'train/')` if it's an image task and the plan implies it) and full paths to primary data files (e.g., `TRAIN_DATA_PATH = os.path.join(INPUT_DIR, 'train_data.csv')`). Use `os.path.join` or `pathlib.Path` for robust path construction. The exact file names (`train_data.csv`, etc.) MUST come from the Master Plan.\n"
         "2. Loading the primary data files (e.g., training data, test data or sample submission for test IDs) specified in the Master Plan into pandas DataFrames. Name these DataFrames clearly (e.g., `train_df`, `test_df`, `submission_df_ids`).\n"
-        "Remember your output must ONLY be the Python code block with " # Added reminder
+        "Remember your output must ONLY be the Python code block with "  # Added reminder
         "Remember to include '# Thought:' comments explaining your logic and linking to the relevant Master Plan steps you are addressing for this segment."
     )
     return args
 
+
 def get_coder_chain_user_prompt_segment_preprocessing(
-    task_summary: str, master_plan_text: str, current_code_so_far: str, competition_name: str, data_preview_content: Optional[str]
+    task_summary: str,
+    master_plan_text: str,
+    current_code_so_far: str,
+    competition_name: str,
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
-    args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content)
-    args["Your Current Coding Segment: Data Preprocessing, Feature Engineering, Splitting, Datasets/Loaders"] = (
+    args = _get_base_coder_chain_user_prompt_args(
+        task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content
+    )
+    args[
+        "Your Current Coding Segment: Data Preprocessing, Feature Engineering, Splitting, Datasets/Loaders"
+    ] = (
         "Based on the 'Full Master Plan' and using variables/DataFrames (e.g., `train_df`, `test_df`) defined in 'Python Code Generated So Far', "
         "write the Python code block *only* for all data preprocessing and preparation steps. This includes (as specified in the plan):\n"
         "1. Handling missing values (e.g., using `SimpleImputer` or `fillna`).\n"
@@ -1093,10 +1198,17 @@ def get_coder_chain_user_prompt_segment_preprocessing(
     )
     return args
 
+
 def get_coder_chain_user_prompt_segment_modeling(
-    task_summary: str, master_plan_text: str, current_code_so_far: str, competition_name: str, data_preview_content: Optional[str]
+    task_summary: str,
+    master_plan_text: str,
+    current_code_so_far: str,
+    competition_name: str,
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
-    args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content)
+    args = _get_base_coder_chain_user_prompt_args(
+        task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content
+    )
     args["Your Current Coding Segment: Model Architecture Definition & Instantiation"] = (
         "Based on the 'Full Master Plan' (focus on model choice and architecture details) and using imports from 'Python Code Generated So Far', "
         "write the Python code block *only* for defining and instantiating the machine learning model. This includes:\n"
@@ -1108,10 +1220,17 @@ def get_coder_chain_user_prompt_segment_modeling(
     )
     return args
 
+
 def get_coder_chain_user_prompt_segment_training(
-    task_summary: str, master_plan_text: str, current_code_so_far: str, competition_name: str, data_preview_content: Optional[str]
+    task_summary: str,
+    master_plan_text: str,
+    current_code_so_far: str,
+    competition_name: str,
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
-    args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content)
+    args = _get_base_coder_chain_user_prompt_args(
+        task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content
+    )
     args["Your Current Coding Segment: Training Setup & Loop"] = (
         "Based on the 'Full Master Plan' and using the `model`, data loaders (e.g., `train_loader`, `val_loader`), and `DEVICE` from 'Python Code Generated So Far', "
         "write the Python code block *only* for setting up and running the training process. This includes:\n"
@@ -1125,10 +1244,17 @@ def get_coder_chain_user_prompt_segment_training(
     )
     return args
 
+
 def get_coder_chain_user_prompt_segment_submission(
-    task_summary: str, master_plan_text: str, current_code_so_far: str, competition_name: str, data_preview_content: Optional[str]
+    task_summary: str,
+    master_plan_text: str,
+    current_code_so_far: str,
+    competition_name: str,
+    data_preview_content: Optional[str],
 ) -> Dict[str, Any]:
-    args = _get_base_coder_chain_user_prompt_args(task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content)
+    args = _get_base_coder_chain_user_prompt_args(
+        task_summary, master_plan_text, current_code_so_far, competition_name, data_preview_content
+    )
     args["Your Current Coding Segment: Test Prediction & Submission File Generation"] = (
         "Based on the 'Full Master Plan' and using the trained `model`, test data and test IDs ,'Python Code Generated So Far', "
         "write the Python code block *only* for generating predictions on the test set and creating the `submission.csv` file. This includes:\n"
@@ -1142,6 +1268,7 @@ def get_coder_chain_user_prompt_segment_submission(
     )
     return args
 
+
 CHAINED_CODER_USER_PROMPT_CONSTRUCTORS = {
     "Setup & Imports": get_coder_chain_user_prompt_segment_setup,
     "Data Loading": get_coder_chain_user_prompt_segment_data_loading,
@@ -1152,7 +1279,9 @@ CHAINED_CODER_USER_PROMPT_CONSTRUCTORS = {
 }
 
 CHAINED_CODER_SYSTEM_PROMPT_GETTERS = {
-    "Setup & Imports": lambda: copy.deepcopy(CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_SETUP), # Assuming segment1 is setup
+    "Setup & Imports": lambda: copy.deepcopy(
+        CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_SETUP
+    ),  # Assuming segment1 is setup
     "Data Loading": lambda: copy.deepcopy(CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_DATA_LOADING),
     "Data Preprocessing": lambda: copy.deepcopy(CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_PREPROCESSING),
     "Modeling": lambda: copy.deepcopy(CODER_CHAIN_SYSTEM_PROMPT_SEGMENT_MODELING),
@@ -1161,43 +1290,38 @@ CHAINED_CODER_SYSTEM_PROMPT_GETTERS = {
 }
 
 
-
-
 segments_order = [
-            "Setup & Imports",
-            "Data Loading",
-            "Data Preprocessing",
-            "Modeling",
-            "Training & Validation", 
-            "Prediction & Submission"
-        ]
-
-
+    "Setup & Imports",
+    "Data Loading",
+    "Data Preprocessing",
+    "Modeling",
+    "Training & Validation",
+    "Prediction & Submission",
+]
 
 
 SEGMENT_REFLECTION_SYSTEM_PROMPT: Dict[str, Any] = {
     "SYSTEM": (
         "You are an expert Python Code Reviewer and Refinement Specialist for Kaggle competition solutions. "
-        "you and the other coders are solving this competition: and the coding is segmented to 6 segments, these are :  "    
-           "Setup & Imports"
-           "Data Loading"
-           "Data Preprocessing"
-           "Modeling"
-           "Training & Validation"
-           "Prediction & Submission"  
-
+        "you and the other coders are solving this competition: and the coding is segmented to 6 segments, these are :  "
+        "Setup & Imports"
+        "Data Loading"
+        "Data Preprocessing"
+        "Modeling"
+        "Training & Validation"
+        "Prediction & Submission"
         "You will be given an overall 'Master Plan', a 'Task Summary', the 'Python Code Generated So Far' (by previous segments), and an 'Initial Code Snippet' for the current segment. "
         "Your task is to meticulously reflect and review the 'Initial Code Snippet' for the current segment to ensure it is correct, adheres to the 'Master Plan', integrates seamlessly with 'Python Code Generated So Far', and follows best practices. "
         "Then, provide a 'Reflection Summary' of your findings and the 'Revised Code Snippet' for the current segment. "
         "Your goal is to produce a robust, correct, and plan-adherent code snippet for *this segment only*."
     ),
-    "user_instructions": { # Meta-instructions for system prompt design
+    "user_instructions": {  # Meta-instructions for system prompt design
         "Review Focus Areas for the 'Initial Code Snippet'": [
             "1. **Correctness & Bugs:** Identify any syntax errors, runtime errors (e.g., NameError, TypeError, IndexError), or logical flaws within the snippet.",
             "2. **Plan Adherence:** Does the snippet accurately and completely implement the functionalities described for the current segment in the 'Master Plan'? Are there deviations or omissions?",
             "3. **Integration with Prior Code:** Does the snippet correctly use variables, functions, or classes defined in 'Python Code Generated So Far'? Does it correctly define new variables/functions needed by *subsequent* segments as implied by the Master Plan? Does it avoid unnecessary re-declarations or conflicting definitions? Does it include necessary new imports if not covered by prior code?",
             "4. **Best Practices & Clarity:** Is the code clean, readable? Are '# Thought:' comments present, clear, and correctly referencing Master Plan steps relevant to *this segment*?",
-            "5. **Self-Contained for Segment:** Does the snippet focus *only* on the current segment's responsibilities as per the Master Plan, without prematurely implementing parts of future segments?"
+            "5. **Self-Contained for Segment:** Does the snippet focus *only* on the current segment's responsibilities as per the Master Plan, without prematurely implementing parts of future segments?",
         ],
         "Output Requirements (Strict Adherence Mandatory)": (
             "Your response MUST be structured in two main sections, clearly demarcated:\n\n"
@@ -1210,9 +1334,10 @@ SEGMENT_REFLECTION_SYSTEM_PROMPT: Dict[str, Any] = {
             "[Your corrected and improved Python code for THIS SEGMENT ONLY. It should replace the initial snippet entirely.]\n"
             "```\n"
             "If the 'Initial Code Snippet' is already perfect and requires no changes, state this in the 'Reflection Summary' and reproduce the original snippet under 'Revised Code Snippet'."
-        )
-    }
+        ),
+    },
 }
+
 
 def get_segment_reflection_system_prompt() -> Dict[str, Any]:
     return copy.deepcopy(SEGMENT_REFLECTION_SYSTEM_PROMPT)
@@ -1220,12 +1345,12 @@ def get_segment_reflection_system_prompt() -> Dict[str, Any]:
 
 def get_segment_reflection_user_prompt(
     task_summary: str,
-    master_plan_text: str,          # Full plan
-    current_segment_name: str, 
-    code_generated_before_this_segment: str, # The code_accumulator *before* current snippet
-    initial_code_snippet_for_this_segment: str # The snippet just generated by Coder
+    master_plan_text: str,  # Full plan
+    current_segment_name: str,
+    code_generated_before_this_segment: str,  # The code_accumulator *before* current snippet
+    initial_code_snippet_for_this_segment: str,  # The snippet just generated by Coder
 ) -> Dict[str, Any]:
- 
+
     relevant_plan_steps = f"# Relevant Master Plan Excerpt for Segment: {current_segment_name}\n"
 
     prompt = {
@@ -1233,10 +1358,18 @@ def get_segment_reflection_user_prompt(
             "Overall Task Summary": task_summary,
             "Full Master Plan": master_plan_text,
             "Current Segment Being Reviewed": current_segment_name,
-            "Current Segment Original Objective": get_coder_chain_system_prompt(current_segment_name)['user_instructions'],
-            "Python Code Generated in PREVIOUS Segments": prompt_utils_wrap_code(code_generated_before_this_segment if code_generated_before_this_segment.strip() else "# No code generated in prior segments."),
+            "Current Segment Original Objective": get_coder_chain_system_prompt(
+                current_segment_name
+            )["user_instructions"],
+            "Python Code Generated in PREVIOUS Segments": prompt_utils_wrap_code(
+                code_generated_before_this_segment
+                if code_generated_before_this_segment.strip()
+                else "# No code generated in prior segments."
+            ),
         },
-        "Code Snippet to Review for THIS Segment": prompt_utils_wrap_code(initial_code_snippet_for_this_segment),
+        "Code Snippet to Review for THIS Segment": prompt_utils_wrap_code(
+            initial_code_snippet_for_this_segment
+        ),
         "Your Reflection Task for THIS Segment": (
             f"Carefully review the provided 'Code Snippet to Review for THIS Segment' ({current_segment_name}).\n"
             "1. Does it correctly implement the relevant part of the 'Full Master Plan' for this segment?\n"
@@ -1246,10 +1379,9 @@ def get_segment_reflection_user_prompt(
             "5. Are the '# Thought:' comments clear and accurate for this segment's actions?\n"
             "Provide your 'Reflection Summary' and then the 'Revised Code Snippet' for *this segment only*. "
             "If the initial snippet is perfect, say so and provide it again as the revised snippet."
-        )
+        ),
     }
     return prompt
-
 
 
 # -----------------------------------------------------------------------------
@@ -1280,7 +1412,7 @@ CHUNK_REFLECTION_SYSTEM_PROMPT: Dict[str, Any] = {
             "2. Each segment’s adherence to the Master Plan.",
             "3. Integration among the chunk’s segments and with preceding code.",
             "4. Cleanliness, readability, and appropriate '# Thought:' commentary.",
-            "5. Completeness (no missing imports, variables, or function definitions needed later)."
+            "5. Completeness (no missing imports, variables, or function definitions needed later).",
         ],
         "Output Requirements (Strict Adherence Mandatory)": (
             "Your response **MUST** be exactly in two parts, clearly demarcated:\n\n"
@@ -1292,9 +1424,10 @@ CHUNK_REFLECTION_SYSTEM_PROMPT: Dict[str, Any] = {
             "# Thought: [Your updated, chunk-level reasoning]\n"
             "[The full, corrected Python code covering all segments in this chunk]\n"
             "```"
-        )
-    }
+        ),
+    },
 }
+
 
 def get_chunked_reflection_system_prompt() -> Dict[str, Any]:
     return deepcopy(CHUNK_REFLECTION_SYSTEM_PROMPT)
@@ -1305,7 +1438,7 @@ def get_chunked_reflection_user_prompt(
     master_plan: str,
     segment_names: List[str],
     code_before_chunk: str,
-    initial_chunk_code: str
+    initial_chunk_code: str,
 ) -> Dict[str, Any]:
     """
     Builds the user prompt for chunk-level reflection.
@@ -1314,7 +1447,6 @@ def get_chunked_reflection_user_prompt(
     - code_before_chunk: everything generated so far, before this chunk.
     - initial_chunk_code: the concatenated code snippets for this chunk.
     """
-
 
     return {
         "Context for Chunk Review": {
@@ -1331,5 +1463,5 @@ def get_chunked_reflection_user_prompt(
             f"{', '.join(segment_names)} as a single unit.  \n"
             "Address the focus areas listed in the system prompt, then produce your "
             "**Reflection Summary** and **Revised Code Snippet** exactly in the format specified."
-        )
+        ),
     }

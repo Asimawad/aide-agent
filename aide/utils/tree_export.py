@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from igraph import Graph
+
 from ..journal import Journal
 
 

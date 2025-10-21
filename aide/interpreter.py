@@ -48,9 +48,7 @@ def exception_summary(e, working_dir, exec_file_name, format_tb_ipython):
     else:
         tb_lines = traceback.format_exception(e)
         # skip parts of stack trace in weflow code
-        tb_str = "".join(
-            [l for l in tb_lines if "aide/" not in l and "importlib" not in l]
-        )
+        tb_str = "".join([l for l in tb_lines if "aide/" not in l and "importlib" not in l])
         tb_str = "".join([l for l in tb_lines])
 
     # replace whole path to file with just filename (to remove agent workspace dir)
@@ -99,9 +97,7 @@ class Interpreter:
         """
         # this really needs to be a path, otherwise causes issues that don't raise exc
         self.working_dir = Path(working_dir).resolve()
-        assert (
-            self.working_dir.exists()
-        ), f"Working directory {self.working_dir} does not exist"
+        assert self.working_dir.exists(), f"Working directory {self.working_dir} does not exist"
         self.timeout = timeout
         self.format_tb_ipython = format_tb_ipython
         self.agent_file_name = agent_file_name
@@ -120,9 +116,7 @@ class Interpreter:
         # capture stdout and stderr
         sys.stdout = sys.stderr = RedirectQueue(result_outq)
 
-    def _run_session(
-        self, code_inq: Queue, result_outq: Queue, event_outq: Queue
-    ) -> None:
+    def _run_session(self, code_inq: Queue, result_outq: Queue, event_outq: Queue) -> None:
         self.child_proc_setup(result_outq)
 
         global_scope: dict = {}
@@ -289,14 +283,8 @@ class Interpreter:
                         low_proc_cpu = process_cpu < 5.0
                         sys_overloaded = system_cpu > 90.0 or system_mem > 90.0
 
-                        if (
-                            low_proc_cpu
-                            and sys_overloaded
-                            and running_time < self.timeout + 180
-                        ):
-                            logger.info(
-                                "Likely resource contention; extending timeout by 3 min."
-                            )
+                        if low_proc_cpu and sys_overloaded and running_time < self.timeout + 180:
+                            logger.info("Likely resource contention; extending timeout by 3 min.")
                             time.sleep(5)  # back-off, then re-check loop
                             continue  # skip the recycle for now
                     except Exception as e:
@@ -321,9 +309,7 @@ class Interpreter:
                     self.cleanup_session()
                     self.create_process()
                     child_in_overtime = False  # reset flag
-                    logger.info(
-                        "[timeout] Session recycled; returning TimeoutError"
-                    )  # LOG+
+                    logger.info("[timeout] Session recycled; returning TimeoutError")  # LOG+
 
                     return ExecutionResult(
                         term_out=[
@@ -360,9 +346,7 @@ class Interpreter:
                     # Add a timeout here too for safety
                     output.append(self.result_outq.get(timeout=10))
                 except queue.Empty:
-                    logger.warning(
-                        "Timed out waiting for EOF marker - proceeding anyway"
-                    )
+                    logger.warning("Timed out waiting for EOF marker - proceeding anyway")
                     break
 
             # Only remove EOF marker if we got one

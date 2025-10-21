@@ -1,17 +1,24 @@
 from dataclasses import dataclass
 
-
-from .agent import Agent, CodeChainAgent, PlannerAgent, SelfConsistencyAgent, BaselineAgent, SelfDebugAgent
-from .interpreter import Interpreter
-from .journal import Journal
 from omegaconf import OmegaConf
 from rich.status import Status
+
+from .agent import (
+    Agent,
+    BaselineAgent,
+    CodeChainAgent,
+    PlannerAgent,
+    SelfConsistencyAgent,
+    SelfDebugAgent,
+)
+from .interpreter import Interpreter
+from .journal import Journal
 from .utils.config import (
+    _load_cfg,
     load_task_desc,
     prep_agent_workspace,
-    save_run,
-    _load_cfg,
     prep_cfg,
+    save_run,
 )
 
 
@@ -45,24 +52,28 @@ class Experiment:
 
         self.journal = Journal()
 
-        if self.cfg.agent.ITS_Strategy == "codechain" or self.cfg.agent.ITS_Strategy == "codechain_v2" or self.cfg.agent.ITS_Strategy == "codechain_v3": 
+        if (
+            self.cfg.agent.ITS_Strategy == "codechain"
+            or self.cfg.agent.ITS_Strategy == "codechain_v2"
+            or self.cfg.agent.ITS_Strategy == "codechain_v3"
+        ):
             self.agent = CodeChainAgent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,
                 journal=self.journal,
             )
-        elif self.cfg.agent.ITS_Strategy == "self-consistency": 
+        elif self.cfg.agent.ITS_Strategy == "self-consistency":
             self.agent = SelfConsistencyAgent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,
                 journal=self.journal,
             )
-        elif self.cfg.agent.ITS_Strategy == "planner": #
-             self.agent = PlannerAgent(
+        elif self.cfg.agent.ITS_Strategy == "planner":  #
+            self.agent = PlannerAgent(
                 task_desc=self.task_desc,
                 cfg=self.cfg,
                 journal=self.journal,
-             )
+            )
         elif self.cfg.agent.ITS_Strategy == "self-debug":
             self.agent = SelfDebugAgent(
                 task_desc=self.task_desc,
@@ -70,10 +81,11 @@ class Experiment:
                 journal=self.journal,
             )
         elif self.cfg.agent.ITS_Strategy == "baseline":
-            self.agent = BaselineAgent(task_desc=self.task_desc,
-            cfg=self.cfg,
-            journal=self.journal,
-        )
+            self.agent = BaselineAgent(
+                task_desc=self.task_desc,
+                cfg=self.cfg,
+                journal=self.journal,
+            )
         else:
             self.agent = Agent(
                 task_desc=self.task_desc,
@@ -81,15 +93,13 @@ class Experiment:
                 journal=self.journal,
             )
         self.interpreter = Interpreter(
-            self.cfg.workspace_dir, **OmegaConf.to_container(self.cfg.exec)  
+            self.cfg.workspace_dir, **OmegaConf.to_container(self.cfg.exec)
         )
 
     def run(self, steps: int) -> Solution:
 
         for _i in range(steps):
-            self.agent.step(
-                exec_callback=self.interpreter.run, current_step_number=_i + 1
-            )
+            self.agent.step(exec_callback=self.interpreter.run, current_step_number=_i + 1)
             save_run(self.cfg, self.journal)
         self.interpreter.cleanup_session()
 
