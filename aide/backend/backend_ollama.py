@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+import traceback
 
 import openai
 from dotenv import load_dotenv
@@ -35,7 +36,6 @@ def _setup_ollama_client():
     _client = openai.OpenAI(base_url="http://localhost:11434/v1/", api_key="ollama", max_retries=0)
 
 
-import traceback
 
 
 def query(

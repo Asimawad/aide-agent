@@ -5,15 +5,9 @@ import shutil
 import time
 from pathlib import Path
 
+from omegaconf import OmegaConf
 from rich.console import Console
 from rich.logging import RichHandler
-
-from .utils import load_benchmarks
-
-console = Console()
-
-
-from omegaconf import OmegaConf
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -36,9 +30,11 @@ from .agent import (
 )
 from .interpreter import Interpreter
 from .journal import Journal, Node
+from .utils import load_benchmarks
 from .utils.config import load_cfg, load_task_desc, prep_agent_workspace, save_run
 from .utils.wandb_logger import WandbLogger
 
+console = Console()
 
 class VerboseFilter(logging.Filter):
     def filter(self, record):

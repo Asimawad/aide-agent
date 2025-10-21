@@ -2,6 +2,8 @@
 import logging  # Import logging
 from typing import Any, Callable, Optional  # Added Optional and Any
 
+from .config import load_cfg  # Assuming this is your config loader
+
 # Assuming query, wrap_code, extract_code are accessible or passed in.
 # Define necessary type hints for the functions being passed
 QueryFuncType = Callable[..., Any]  # Changed to Any to handle dict or str
@@ -9,14 +11,6 @@ WrapCodeFuncType = Callable[[str], str]
 ExtractCodeFuncType = Callable[
     [Any], Optional[str]
 ]  # Response might not be str, result can be None
-
-from .config import load_cfg  # Assuming this is your config loader
-
-# --- Configuration ---
-cfg = load_cfg()
-logger = logging.getLogger("aide")  # Use the same logger instance
-
-from .config import load_cfg  # Assuming this is your config loader
 
 # --- Configuration ---
 cfg = load_cfg()
@@ -44,9 +38,6 @@ def perform_two_step_reflection(
     """
     log_prefix_main = f"SELF_REFLECT_STEP{current_step}"
     logger.info(f"{log_prefix_main}: Starting two-step reflection.", extra={"verbose": True})
-    # logger.debug(f"{log_prefix_main}_INITIAL_CODE_START\n{code}\n{log_prefix_main}_INITIAL_CODE_END", extra={"verbose": True})
-    # logger.debug(f"{log_prefix_main}_INITIAL_ANALYSIS_START\n{analysis}\n{log_prefix_main}_INITIAL_ANALYSIS_END", extra={"verbose": True})
-    # logger.debug(f"{log_prefix_main}_INITIAL_TERM_OUT_START\n{term_out}\n{log_prefix_main}_INITIAL_TERM_OUT_END", extra={"verbose": True})
 
     # --- Stage 1: Critique and Edit Proposal ---
     log_prefix_critique = f"{log_prefix_main}_CRITIQUE"
@@ -132,7 +123,6 @@ def perform_two_step_reflection(
         return reflection_plan, code
 
     # --- Stage 2: Focused Code Edit ---
-    log_prefix_coder = f"{log_prefix_main}_CODER_EDIT"
     system_prompt2 = {
         "SYSTEM": "You are a Kaggle Grandmaster and a precise coder. You will receive a Kaggle competition code, a review on the correctness of this code, and Instructions on how to improve its correctness.",
         "Task": "Your task is to help your team win the competition by following the code review and implementing the suggested instructions.",

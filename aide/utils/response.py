@@ -9,13 +9,6 @@ def wrap_code(code: str, lang="python") -> str:
     return f"```{lang}\n{code}\n```"
 
 
-def is_valid_python_script(script):
-    """Check if a script is a valid Python script."""
-    try:
-        compile(script, "<string>", "exec")
-        return True
-    except SyntaxError:
-        return False
 
 
 def extract_jsons(text):
@@ -184,22 +177,6 @@ def extract_plan(text):
     return "\n\n".join(parsed_plan)
 
 
-def extract_plan(text):
-    """Extract plan from the text."""
-    parsed_plan = []
-    if "</think>" in text:
-        parts = re.split(r"</think>", text, maxsplit=1, flags=re.DOTALL)
-        # parts[0] is everything before </think>, parts[1] is everything after
-        text = parts[1].strip() if len(parts) > 1 else ""
-
-    # Extract everything after 'PLAN:' including multi-line content
-    matches = re.findall(r"## Plan:\s*(.*)", text, re.DOTALL)
-    for plan in matches:
-        parsed_plan.append(plan.strip())
-
-    # validate the parsed plan and format it
-    # Combine and return the plan as a single string
-    return "\n\n".join(parsed_plan)
 
 
 def extract_text_up_to_code(s):
@@ -209,12 +186,6 @@ def extract_text_up_to_code(s):
     return s[: s.find("```")].strip()
 
 
-def format_code(code) -> str:
-    """Format Python code using Black."""
-    try:
-        return black.format_str(code, mode=black.FileMode())
-    except black.parsing.InvalidInput:  # type: ignore
-        return code
 
 
 # New: extract summary before PLAN

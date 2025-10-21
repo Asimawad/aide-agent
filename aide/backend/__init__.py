@@ -3,7 +3,6 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
-
 from aide.utils.config import (
     load_cfg,
 )  # Assuming this path is correct relative to your project structure
@@ -239,9 +238,7 @@ def query(
         )
         return output_response
 
-    if type(raw_responses) == list and model_kwargs.get("num_responses", 1) == 1:
+    if isinstance(raw_responses, list) and model_kwargs.get("num_responses", 1) == 1:
         return raw_responses[0]
     else:
-        print(f"type(raw_responses): {type(raw_responses)}")
-        print(f"len(raw_responses): {len(raw_responses)}")
         return raw_responses

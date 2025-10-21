@@ -40,13 +40,6 @@ class WandbConfig:
     log_artifacts: bool = True
 
 
-@dataclass
-class SelfConsistencyConfig:
-    num_responses: int = 1  # Number of candidates to generate. Default to 1 (no SC).
-    selection_strategy: str = (
-        "interpreter_first_success"  # Options: "interpreter_first_success", "interpreter_best_metric"
-    )
-
 
 @dataclass
 class StageConfig:

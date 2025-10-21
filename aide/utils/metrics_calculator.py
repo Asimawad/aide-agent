@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 import pandas as pd
+import wandb
 from omegaconf import OmegaConf
 
 from . import copytree
@@ -19,8 +20,6 @@ from .config import load_cfg
 # --- Configuration ---
 cfg = load_cfg()
 try:
-    from radon.complexity import cc_visit
-
     RADON_AVAILABLE = True
     logger_radon = logging.getLogger("radon")
     logger_radon.setLevel(logging.CRITICAL)
@@ -29,20 +28,12 @@ except ImportError:
     logger_radon = None  # Define to avoid UnboundLocalError if radon is not available
 
 
-try:
-    import wandb
-
-    WANDB_AVAILABLE = True
-except ImportError:
-    WANDB_AVAILABLE = False
-    wandb = None  #
 
 
 try:
-    from ..journal import Journal, Node, filter_journal, get_path_to_node
+    from ..journal import Journal
     from . import serialize
     from .config import Config  # For type hinting config
-    from .metric import MetricValue, WorstMetricValue
 except ImportError:
     print(
         "Warning: Could not perform relative imports for metrics_calculator.py. Ensure script is run as a module or PYTHONPATH is set."
@@ -338,7 +329,8 @@ def generate_all_metrics(run_name: str, run_id_for_wandb: Optional[str] = None) 
     if jm is not None and sm is not None:
         try:
             report["cross_check_metrics"] = {"consistent": np.isclose(float(jm), float(sm))}
-        except:
+        except Exception as e:
+            logger.error(f"Error in cross-check: {e}", exc_info=True)
             report["cross_check_metrics"] = {"consistent": False}
 
     # 5) write out comprehensive report

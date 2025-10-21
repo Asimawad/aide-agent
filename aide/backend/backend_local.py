@@ -26,11 +26,11 @@ try:
 
     from aide.backend.utils import (
         opt_messages_to_list,
-    )  # Keep opt_messages_to_list if needed here
+    )
     from aide.interpreter import ExecutionResult, Interpreter
     from aide.utils import serialize  # For saving ExecutionResult
     from aide.utils.config import load_cfg
-    from aide.utils.response import extract_code, format_code, wrap_code
+    from aide.utils.response import extract_code, format_code
 
     cfg = load_cfg()
 
@@ -39,7 +39,7 @@ except ImportError as e:
     print(
         "Please ensure AIDE is installed correctly (e.g., `pip install -e .` from aide-ds root) or paths are set up."
     )
-    # sys.exit(1) # Don't exit if just using as a library potentially
+    sys.exit(1)
 
 from rich.console import Console
 from rich.syntax import Syntax
